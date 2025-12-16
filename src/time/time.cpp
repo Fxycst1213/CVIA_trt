@@ -2,8 +2,9 @@
 namespace timer
 {
 
-    Timer::Timer()
+    Timer::Timer(logger::Level level)
     {
+        m_LOG_LEVEL = level;
         _timeElasped = 0;
         _cStart = std::chrono::high_resolution_clock::now();
         _cStop = std::chrono::high_resolution_clock::now();
@@ -56,7 +57,14 @@ namespace timer
     {
         for (int i = 0; i < _timeMsgs.size(); i++)
         {
-            LOGV("%s", _timeMsgs[i].c_str());
+            if (m_LOG_LEVEL == logger::Level::VERB)
+            {
+                LOGV("%s", _timeMsgs[i].c_str());
+            }
+            else
+            {
+                LOG("%s", _timeMsgs[i].c_str());
+            }
         }
     }
 

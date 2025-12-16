@@ -1,5 +1,5 @@
 CMakeFiles/trt.dir/src/communication/RS485.cpp.o: \
- /home/cvia/yifei/tensortt_multi_thread-main/src/communication/RS485.cpp \
+ /home/fxy/tensortt_multi_thread-main/src/communication/RS485.cpp \
  /usr/include/stdc-predef.h /usr/include/c++/11/iostream \
  /usr/include/aarch64-linux-gnu/c++/11/bits/c++config.h \
  /usr/include/aarch64-linux-gnu/c++/11/bits/os_defines.h \
@@ -146,7 +146,7 @@ CMakeFiles/trt.dir/src/communication/RS485.cpp.o: \
  /usr/include/c++/11/bits/ostream.tcc /usr/include/c++/11/istream \
  /usr/include/c++/11/bits/istream.tcc /usr/include/c++/11/cstring \
  /usr/include/string.h /usr/include/strings.h \
- /home/cvia/yifei/tensortt_multi_thread-main/src/communication/RS485.h \
+ /home/fxy/tensortt_multi_thread-main/src/communication/RS485.h \
  /usr/include/unistd.h /usr/include/aarch64-linux-gnu/bits/posix_opt.h \
  /usr/include/aarch64-linux-gnu/bits/environments.h \
  /usr/include/aarch64-linux-gnu/bits/confname.h \

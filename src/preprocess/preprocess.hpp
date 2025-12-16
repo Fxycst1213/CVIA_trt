@@ -73,14 +73,13 @@ namespace preprocess
     void warpaffine_init(int srcH, int srcW, int tarH, int tarW);
 
     cv::Mat preprocess_resize_cpu(cv::Mat &src, const int &tarH, const int &tarW, float *mean, float *std, tactics tac);
-    cv::Mat preprocess_resize_cpu(cv::Mat &src, const int &tarH, const int &tarW, tactics tac);
-    void preprocess_resize_gpu(cv::Mat &h_src, float *d_tar, const int &tarH, const int &tarW, float *mean, float *std, tactics tac);
-    void preprocess_resize_gpu(cv::Mat &h_src, float *d_tar, const int &tarH, const int &tarW, tactics tac);
-    void resize_bilinear_gpu(float *d_tar, uint8_t *d_src, int tarW, int tarH, int srcH, int srcW, float *mean, float *std, tactics tac);
-    void resize_bilinear_gpu(float *d_tar, uint8_t *d_src, int tarW, int tarH, int srcH, int srcW, tactics tac);
-
+    void preprocess_resize_gpu(cv::Mat &h_src, float *d_tar, const int &tarH, const int &tarW, float *mean, float *std, tactics tac, cudaStream_t stream);
+    void preprocess_resize_gpu(cv::Mat &h_src, float *d_tar, const int &tarH, const int &tarW, tactics tac, cudaStream_t stream);
+    void resize_bilinear_gpu(float *d_tar, uint8_t *d_src, int tarW, int tarH, int srcH, int srcW, float *mean, float *std, tactics tac, cudaStream_t stream);
+    void resize_bilinear_gpu(float *d_tar, uint8_t *d_src, int tarW, int tarH, int srcH, int srcW, tactics tac, cudaStream_t stream);
+    void init_process(int h, int w);
+    void destroy_process();
     __host__ __device__ void affine_transformation(float *trans_matrix, int src_x, int src_y, float *tar_x, float *tar_y);
-
 }; // namespace preprocess
 
 #endif //__PREPROCESS_HPP__

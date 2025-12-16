@@ -12,12 +12,15 @@
 #include <chrono>
 #include <ratio>
 using namespace std;
-
+struct prj_params
+{
+    int H;
+    int W;
+};
 class prj_v8detector
 {
 public:
-    prj_v8detector(string onnxPath, logger::Level level, model::Params params);
-    void infer();
+    prj_v8detector(string onnxPath, logger::Level level, model::Params params, prj_params p_params);
     ~prj_v8detector();
     void run();
     void camera();
@@ -36,12 +39,6 @@ private:
     string _resolution = "HD1080";
     std::shared_ptr<timer::Timer> _timer;
     int _cameraID = 0;
-    std::function<void()> _func_infer;
     std::function<void()> _func_camera;
-    ZEDframe *_readyframe = nullptr;
     ZEDframe *_writeframe = nullptr;
-    ZEDframe *_inferframe = nullptr;
-    std::atomic<bool> has_image{false};
-    std::condition_variable _cv;
-    std::mutex _cv_m;
 };

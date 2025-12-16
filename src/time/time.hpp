@@ -20,7 +20,7 @@ namespace timer
         using ns = std::ratio<1, 1000000000>;
 
     public:
-        Timer();
+        Timer(logger::Level level = logger::Level::VERB);
         ~Timer();
 
     public:
@@ -44,6 +44,7 @@ namespace timer
         cudaEvent_t _gStop;
         float _timeElasped;
         std::vector<std::string> _timeMsgs;
+        logger::Level m_LOG_LEVEL = logger::Level::VERB;
     };
 
     template <typename span>

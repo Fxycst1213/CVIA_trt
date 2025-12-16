@@ -164,7 +164,7 @@ namespace model
             /*Preprocess -- 使用GPU进行warpAffine, 并将结果返回到m_inputMemory中*/
             preprocess::preprocess_resize_gpu(m_inputImage, m_inputMemory[1],
                                               m_params->img.h, m_params->img.w,
-                                              preprocess::tactics::GPU_WARP_AFFINE);
+                                              preprocess::tactics::GPU_WARP_AFFINE, m_stream);
 
             m_timer->stop_gpu("preprocess(GPU)");
             return true;

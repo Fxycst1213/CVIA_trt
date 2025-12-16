@@ -1,7 +1,7 @@
 CMakeFiles/trt.dir/src/ZEDX/ZEDX.cpp.o: \
- /home/cvia/yifei/tensortt_multi_thread-main/src/ZEDX/ZEDX.cpp \
+ /home/fxy/tensortt_multi_thread-main/src/ZEDX/ZEDX.cpp \
  /usr/include/stdc-predef.h \
- /home/cvia/yifei/tensortt_multi_thread-main/src/ZEDX/ZEDX.h \
+ /home/fxy/tensortt_multi_thread-main/src/ZEDX/ZEDX.h \
  /usr/local/zed/include/sl/Camera.hpp /usr/include/c++/11/algorithm \
  /usr/include/c++/11/utility \
  /usr/include/aarch64-linux-gnu/c++/11/bits/c++config.h \

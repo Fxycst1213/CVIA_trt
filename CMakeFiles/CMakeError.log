@@ -79,3 +79,22 @@ gmake: *** [Makefile:127: cmTC_f7ee6/fast] Error 2
 
 
 
+Determining if the function sgemm_ exists failed with the following output:
+Change Dir: /home/fxy/tensortt_multi_thread-main/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_2195a/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_2195a.dir/build.make CMakeFiles/cmTC_2195a.dir/build
+gmake[1]: Entering directory '/home/fxy/tensortt_multi_thread-main/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_2195a.dir/CheckFunctionExists.c.o
+/usr/bin/cc   -DCHECK_FUNCTION_EXISTS=sgemm_ -o CMakeFiles/cmTC_2195a.dir/CheckFunctionExists.c.o -c /usr/share/cmake-3.22/Modules/CheckFunctionExists.c
+Linking C executable cmTC_2195a
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_2195a.dir/link.txt --verbose=1
+/usr/bin/cc  -DCHECK_FUNCTION_EXISTS=sgemm_ CMakeFiles/cmTC_2195a.dir/CheckFunctionExists.c.o -o cmTC_2195a 
+/usr/bin/ld: CMakeFiles/cmTC_2195a.dir/CheckFunctionExists.c.o: in function `main':
+CheckFunctionExists.c:(.text+0x10): undefined reference to `sgemm_'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [CMakeFiles/cmTC_2195a.dir/build.make:99: cmTC_2195a] Error 1
+gmake[1]: Leaving directory '/home/fxy/tensortt_multi_thread-main/CMakeFiles/CMakeTmp'
+gmake: *** [Makefile:127: cmTC_2195a/fast] Error 2
+
+
+

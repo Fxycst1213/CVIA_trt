@@ -5,7 +5,9 @@
 #include "cudatools.hpp"
 namespace preprocess
 {
-
+    uint8_t *d_src = nullptr;
+    float *d_mean = nullptr;
+    float *d_std = nullptr;
     void affine_transformation_cpu(
         float trans_matrix[6],
         int src_x, int src_y,
@@ -60,70 +62,59 @@ namespace preprocess
         cv::Mat &h_src, float *d_tar,
         const int &tar_h, const int &tar_w,
         float *h_mean, float *h_std,
-        tactics tac)
+        tactics tac, cudaStream_t stream)
     {
-        float *d_mean = nullptr;
-        float *d_std = nullptr;
-        uint8_t *d_src = nullptr;
-
         int height = h_src.rows;
         int width = h_src.cols;
         int chan = 3;
 
         int src_size = height * width * chan * sizeof(uint8_t);
-        int norm_size = 3 * sizeof(float);
-
-        // 分配device上的src和mean, std的内存
-        CUDA_CHECK(cudaMalloc(&d_src, src_size));
-        CUDA_CHECK(cudaMalloc(&d_mean, norm_size));
-        CUDA_CHECK(cudaMalloc(&d_std, norm_size));
-
-        // 将数据拷贝到device上
-        CUDA_CHECK(cudaMemcpy(d_src, h_src.data, src_size, cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_mean, h_mean, norm_size, cudaMemcpyHostToDevice));
-        CUDA_CHECK(cudaMemcpy(d_std, h_std, norm_size, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpyAsync(d_src, h_src.data, src_size, cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(d_mean, h_mean, 3 * sizeof(float), cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(d_std, h_std, 3 * sizeof(float), cudaMemcpyHostToDevice, stream));
 
         // device上处理resize, BGR2RGB的核函数
-        resize_bilinear_gpu(d_tar, d_src, tar_w, tar_h, width, height, d_mean, d_std, tac);
-
-        // host和device进行同步处理
-        CUDA_CHECK(cudaDeviceSynchronize());
-        CUDA_CHECK(cudaFree(d_std));
-        CUDA_CHECK(cudaFree(d_mean));
-        CUDA_CHECK(cudaFree(d_src));
-
-        // 因为接下来会继续在gpu上进行处理，所以这里不用把结果返回到host
+        resize_bilinear_gpu(d_tar, d_src, tar_w, tar_h, width, height, d_mean, d_std, tac, stream);
     }
-
-    // 根据比例进行缩放 (GPU版本)
     void preprocess_resize_gpu(
         cv::Mat &h_src, float *d_tar,
         const int &tar_h, const int &tar_w,
-        tactics tac)
+        tactics tac, cudaStream_t stream)
     {
-        uint8_t *d_src = nullptr;
-
         int height = h_src.rows;
         int width = h_src.cols;
         int chan = 3;
 
         int src_size = height * width * chan * sizeof(uint8_t);
-        int norm_size = 3 * sizeof(float);
-
-        // 分配device上的src的内存
-        CUDA_CHECK(cudaMalloc(&d_src, src_size));
-
-        // 将数据拷贝到device上
-        CUDA_CHECK(cudaMemcpy(d_src, h_src.data, src_size, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpyAsync(d_src, h_src.data, src_size, cudaMemcpyHostToDevice, stream));
 
         // device上处理resize, BGR2RGB的核函数
-        resize_bilinear_gpu(d_tar, d_src, tar_w, tar_h, width, height, tac);
-
-        // host和device进行同步处理
-        CUDA_CHECK(cudaDeviceSynchronize());
-        CUDA_CHECK(cudaFree(d_src));
-
-        // 因为接下来会继续在gpu上进行处理，所以这里不用把结果返回到host
+        resize_bilinear_gpu(d_tar, d_src, tar_w, tar_h, width, height, tac, stream);
     }
 
+    void init_process(int h, int w)
+    {
+        int size = h * w * 3 * sizeof(uint8_t);
+        CUDA_CHECK(cudaMalloc(&d_src, size));
+        CUDA_CHECK(cudaMalloc(&d_mean, 3 * sizeof(float)));
+        CUDA_CHECK(cudaMalloc(&d_std, 3 * sizeof(float)));
+    }
+    void destroy_process()
+    {
+        if (d_src)
+        {
+            cudaFree(d_src);
+            d_src = nullptr;
+        }
+        if (d_mean)
+        {
+            cudaFree(d_mean);
+            d_mean = nullptr;
+        }
+        if (d_std)
+        {
+            cudaFree(d_std);
+            d_std = nullptr;
+        }
+    }
 } // namespace process

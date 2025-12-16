@@ -110,7 +110,7 @@ namespace model
             /*Preprocess -- 使用GPU进行双线性插值, 并将结果返回到m_inputMemory中*/
             preprocess::preprocess_resize_gpu(input_image, m_inputMemory[1],
                                               m_params->img.h, m_params->img.w,
-                                              mean, std, preprocess::tactics::GPU_BILINEAR);
+                                              mean, std, preprocess::tactics::GPU_BILINEAR, m_stream);
 
             m_timer->stop_gpu("preprocess(GPU)");
             return true;

@@ -50,6 +50,7 @@ namespace model
             m_imageIndex + 1, m_imageList.size(), m_inputH, m_inputW, m_imageList.at(m_imageIndex).c_str());
 
         cv::Mat input_image;
+        cudaStream_t stream;
         for (int i = 0; i < m_batchSize; i++)
         {
             input_image = cv::imread(m_imageList.at(m_imageIndex++));
@@ -57,7 +58,7 @@ namespace model
                 input_image,
                 m_deviceInput + i * m_inputSize,
                 m_inputH, m_inputW,
-                preprocess::tactics::GPU_BILINEAR_CENTER);
+                preprocess::tactics::GPU_BILINEAR_CENTER, stream);
         }
 
         bindings[0] = m_deviceInput;
@@ -74,7 +75,6 @@ namespace model
         input >> noskipws;
         if (m_readCache && input.good())
             copy(istream_iterator<char>(input), istream_iterator<char>(), back_inserter(m_calibrationCache));
-
         length = m_calibrationCache.size();
         if (length)
         {
