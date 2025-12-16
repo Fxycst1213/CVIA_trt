@@ -163,7 +163,7 @@ namespace model
             /*Preprocess -- 使用GPU进行warpAffine, 并将结果返回到m_inputMemory中*/
             preprocess::preprocess_resize_gpu(m_inputImage, m_inputMemory[1],
                                               m_params->img.h, m_params->img.w,
-                                              preprocess::tactics::GPU_WARP_AFFINE);
+                                              preprocess::tactics::GPU_WARP_AFFINE, m_stream);
 
             m_timer->stop_gpu("preprocess(GPU)");
             return true;
@@ -201,7 +201,6 @@ namespace model
             int output_size = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
             CUDA_CHECK(cudaMemcpyAsync(m_outputMemory[0], m_outputMemory[1], output_size, cudaMemcpyKind::cudaMemcpyDeviceToHost, m_stream));
             CUDA_CHECK(cudaStreamSynchronize(m_stream));
-
             /*Postprocess -- yolov8的postprocess需要做的事情*/
             /*
              * 1. 把bbox从输出tensor拿出来，并进行decode，把获取的bbox放入到m_bboxes中
@@ -311,16 +310,14 @@ namespace model
                 }
             }
             LOGD("the count of bbox after NMS is %d", final_bboxes.size());
-            m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
-            m_timer->show();
             m_bboxes = final_bboxes;
 
             /*Postprocess -- 2. 精修关键点*/
             /*
              */
             refine_point();
-            this->show();
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
+            m_timer->show();
             return true;
         }
 

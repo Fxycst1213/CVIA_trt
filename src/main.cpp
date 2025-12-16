@@ -16,16 +16,19 @@ int main(int argc, char const *argv[])
     params.dev = model::device::GPU;
     params.prec = model::precision::FP16;
     params.resolution = "HD1080";
-
+    auto p_params = prj_params();
+    p_params.H = 1080;
+    p_params.W = 1920;
     // // 根据worker中的task类型进行推理
-    // prj_v8detector prj(onnxPath, level, params);
-    // prj.run();
+    prj_v8detector prj(onnxPath, level, params, p_params);
+    prj.run();
 
-    auto worker = thread::create_worker(onnxPath, level, params);
-    cv::Mat Image = cv::imread("data/source/00590.png");
-    for (int i = 0; i < 2; i++)
-    {
-        worker->inference(Image);
-    }
+    // auto worker = thread::create_worker(onnxPath, level, params);
+    // preprocess::init_process(p_params.H, p_params.W);
+    // cv::Mat Image = cv::imread("data/source/00590.png");
+    // for (int i = 0; i < 100; i++)
+    // {
+    //     worker->inference(Image);
+    // }
     return 0;
 }

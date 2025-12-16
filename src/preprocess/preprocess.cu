@@ -502,7 +502,7 @@ namespace preprocess
         int tarW, int tarH,
         int srcW, int srcH,
         float *d_mean, float *d_std,
-        tactics tac)
+        tactics tac, cudaStream_t stream)
     {
         dim3 dimBlock(32, 32, 1);
         dim3 dimGrid(tarW / 32, tarH / 32, 1);
@@ -515,16 +515,16 @@ namespace preprocess
         switch (tac)
         {
         case tactics::GPU_NEAREST:
-            nearest_BGR2RGB_nhwc2nchw_norm_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scaled_w, scaled_h, d_mean, d_std);
+            nearest_BGR2RGB_nhwc2nchw_norm_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scaled_w, scaled_h, d_mean, d_std);
             break;
         case tactics::GPU_NEAREST_CENTER:
-            nearest_BGR2RGB_nhwc2nchw_norm_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scale, scale, d_mean, d_std);
+            nearest_BGR2RGB_nhwc2nchw_norm_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scale, scale, d_mean, d_std);
             break;
         case tactics::GPU_BILINEAR:
-            bilinear_BGR2RGB_nhwc2nchw_norm_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scaled_w, scaled_h, d_mean, d_std);
+            bilinear_BGR2RGB_nhwc2nchw_norm_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scaled_w, scaled_h, d_mean, d_std);
             break;
         case tactics::GPU_BILINEAR_CENTER:
-            bilinear_BGR2RGB_nhwc2nchw_shift_norm_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scale, scale, d_mean, d_std);
+            bilinear_BGR2RGB_nhwc2nchw_shift_norm_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scale, scale, d_mean, d_std);
             break;
         default:
             LOGE("ERROR: Wrong GPU resize tactics selected. Program terminated");
@@ -537,7 +537,7 @@ namespace preprocess
         // uint8_t *cpu_mat,
         int tarW, int tarH,
         int srcW, int srcH,
-        tactics tac)
+        tactics tac, cudaStream_t stream)
     {
         dim3 dimBlock(16, 16, 1);
         dim3 dimGrid(tarW / 16 + 1, tarH / 16 + 1, 1);
@@ -550,20 +550,20 @@ namespace preprocess
         switch (tac)
         {
         case tactics::GPU_NEAREST:
-            nearest_BGR2RGB_nhwc2nchw_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scaled_w, scaled_h);
+            nearest_BGR2RGB_nhwc2nchw_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scaled_w, scaled_h);
             break;
         case tactics::GPU_NEAREST_CENTER:
-            nearest_BGR2RGB_nhwc2nchw_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scale, scale);
+            nearest_BGR2RGB_nhwc2nchw_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scale, scale);
             break;
         case tactics::GPU_BILINEAR:
-            bilinear_BGR2RGB_nhwc2nchw_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scaled_w, scaled_h);
+            bilinear_BGR2RGB_nhwc2nchw_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scaled_w, scaled_h);
             break;
         case tactics::GPU_BILINEAR_CENTER:
-            bilinear_BGR2RGB_nhwc2nchw_shift_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scale, scale);
+            bilinear_BGR2RGB_nhwc2nchw_shift_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, tarW, tarH, srcW, srcH, scale, scale);
             break;
         case tactics::GPU_WARP_AFFINE:
             warpaffine_init(srcH, srcW, tarH, tarW);
-            warpaffine_BGR2RGB_kernel<<<dimGrid, dimBlock>>>(d_tar, d_src, trans, affine_matrix);
+            warpaffine_BGR2RGB_kernel<<<dimGrid, dimBlock, 0, stream>>>(d_tar, d_src, trans, affine_matrix);
             break;
         default:
             LOGE("ERROR: Wrong GPU resize tactics selected. Program terminated");
