@@ -1,7 +1,6 @@
 CMakeFiles/trt.dir/src/ZEDX/ZEDX.cpp.o: \
- /home/fxy/tensortt_multi_thread-main/src/ZEDX/ZEDX.cpp \
- /usr/include/stdc-predef.h \
- /home/fxy/tensortt_multi_thread-main/src/ZEDX/ZEDX.h \
+ /home/cvia/yifei/CVIA_trt/src/ZEDX/ZEDX.cpp /usr/include/stdc-predef.h \
+ /home/cvia/yifei/CVIA_trt/src/ZEDX/ZEDX.h \
  /usr/local/zed/include/sl/Camera.hpp /usr/include/c++/11/algorithm \
  /usr/include/c++/11/utility \
  /usr/include/aarch64-linux-gnu/c++/11/bits/c++config.h \
@@ -366,4 +365,15 @@ CMakeFiles/trt.dir/src/ZEDX/ZEDX.cpp.o: \
  /usr/include/opencv4/opencv2/stitching/detail/camera.hpp \
  /usr/include/opencv4/opencv2/video.hpp \
  /usr/include/opencv4/opencv2/video/tracking.hpp \
- /usr/include/opencv4/opencv2/video/background_segm.hpp
+ /usr/include/opencv4/opencv2/video/background_segm.hpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/logger/logger.hpp \
+ /usr/include/aarch64-linux-gnu/NvInfer.h \
+ /usr/include/aarch64-linux-gnu/NvInferLegacyDims.h \
+ /usr/include/aarch64-linux-gnu/NvInferRuntimeBase.h \
+ /usr/include/aarch64-linux-gnu/NvInferVersion.h \
+ /usr/include/aarch64-linux-gnu/NvInferRuntime.h \
+ /usr/include/aarch64-linux-gnu/NvInferImpl.h \
+ /usr/include/aarch64-linux-gnu/NvInferRuntimeCommon.h \
+ /usr/include/aarch64-linux-gnu/NvInferRuntimePlugin.h \
+ /home/cvia/yifei/CVIA_trt/src/time/time.hpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/CUDA_tools/cudatools.hpp

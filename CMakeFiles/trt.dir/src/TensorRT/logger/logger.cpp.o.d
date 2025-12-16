@@ -1,7 +1,7 @@
 CMakeFiles/trt.dir/src/TensorRT/logger/logger.cpp.o: \
- /home/fxy/tensortt_multi_thread-main/src/TensorRT/logger/logger.cpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/logger/logger.cpp \
  /usr/include/stdc-predef.h \
- /home/fxy/tensortt_multi_thread-main/src/TensorRT/logger/logger.hpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/logger/logger.hpp \
  /usr/include/aarch64-linux-gnu/NvInfer.h \
  /usr/include/aarch64-linux-gnu/NvInferLegacyDims.h \
  /usr/include/aarch64-linux-gnu/NvInferRuntimeBase.h \

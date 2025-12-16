@@ -1,4 +1,4 @@
-# Install script for directory: /home/fxy/tensortt_multi_thread-main
+# Install script for directory: /home/cvia/yifei/CVIA_trt
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -50,5 +50,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/home/fxy/tensortt_multi_thread-main/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/cvia/yifei/CVIA_trt/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

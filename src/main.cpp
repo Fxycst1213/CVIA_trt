@@ -15,10 +15,11 @@ int main(int argc, char const *argv[])
     params.task = model::task_type::POSE;
     params.dev = model::device::GPU;
     params.prec = model::precision::FP16;
-    params.resolution = "HD1080";
     auto p_params = prj_params();
-    p_params.H = 1080;
-    p_params.W = 1920;
+    p_params.H = 720;
+    p_params.W = 1280;
+    p_params.resolution = "SVGA";
+    p_params.cameraID = 0;
     // // 根据worker中的task类型进行推理
     prj_v8detector prj(onnxPath, level, params, p_params);
     prj.run();

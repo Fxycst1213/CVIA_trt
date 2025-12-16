@@ -1,4 +1,4 @@
-CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o : /home/fxy/tensortt_multi_thread-main/src/yolov_pose/yolo_pose_decode.cu \
+CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o : /home/cvia/yifei/CVIA_trt/src/yolov_pose/yolo_pose_decode.cu \
     /usr/include/stdc-predef.h \
     /usr/local/cuda-12.6/include/cuda_runtime.h \
     /usr/local/cuda-12.6/include/crt/host_config.h \
