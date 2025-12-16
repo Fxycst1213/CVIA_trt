@@ -1,0 +1,81 @@
+Checking whether the CUDA compiler is NVIDIA using "" did not match "nvcc: NVIDIA \(R\) Cuda compiler driver":
+Checking whether the CUDA compiler is Clang using "" did not match "(clang version)":
+Compiling the CUDA compiler identification source file "CMakeCUDACompilerId.cu" failed.
+Compiler: /usr/local/cuda-11.4/bin/nvcc 
+Build flags: 
+Id flags:  -v
+
+The output was:
+No such file or directory
+
+
+Compiling the CUDA compiler identification source file "CMakeCUDACompilerId.cu" failed.
+Compiler: /usr/local/cuda-11.4/bin/nvcc 
+Build flags: 
+Id flags:  -v
+
+The output was:
+No such file or directory
+
+
+Checking whether the CUDA compiler is NVIDIA using "" did not match "nvcc: NVIDIA \(R\) Cuda compiler driver":
+Checking whether the CUDA compiler is Clang using "" did not match "(clang version)":
+Checking whether the CUDA compiler is NVIDIA using "" did not match "nvcc: NVIDIA \(R\) Cuda compiler driver":
+Checking whether the CUDA compiler is Clang using "" did not match "(clang version)":
+Determining if the function sgemm_ exists failed with the following output:
+Change Dir: /home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_acb5d/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_acb5d.dir/build.make CMakeFiles/cmTC_acb5d.dir/build
+gmake[1]: Entering directory '/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_acb5d.dir/CheckFunctionExists.c.o
+/usr/bin/cc   -DCHECK_FUNCTION_EXISTS=sgemm_ -o CMakeFiles/cmTC_acb5d.dir/CheckFunctionExists.c.o -c /usr/share/cmake-3.22/Modules/CheckFunctionExists.c
+Linking C executable cmTC_acb5d
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_acb5d.dir/link.txt --verbose=1
+/usr/bin/cc  -DCHECK_FUNCTION_EXISTS=sgemm_ CMakeFiles/cmTC_acb5d.dir/CheckFunctionExists.c.o -o cmTC_acb5d 
+/usr/bin/ld: CMakeFiles/cmTC_acb5d.dir/CheckFunctionExists.c.o: in function `main':
+CheckFunctionExists.c:(.text+0x10): undefined reference to `sgemm_'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [CMakeFiles/cmTC_acb5d.dir/build.make:99: cmTC_acb5d] Error 1
+gmake[1]: Leaving directory '/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp'
+gmake: *** [Makefile:127: cmTC_acb5d/fast] Error 2
+
+
+
+Determining if the function sgemm_ exists failed with the following output:
+Change Dir: /home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_5294a/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_5294a.dir/build.make CMakeFiles/cmTC_5294a.dir/build
+gmake[1]: Entering directory '/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_5294a.dir/CheckFunctionExists.c.o
+/usr/bin/cc   -DCHECK_FUNCTION_EXISTS=sgemm_ -o CMakeFiles/cmTC_5294a.dir/CheckFunctionExists.c.o -c /usr/share/cmake-3.22/Modules/CheckFunctionExists.c
+Linking C executable cmTC_5294a
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_5294a.dir/link.txt --verbose=1
+/usr/bin/cc  -DCHECK_FUNCTION_EXISTS=sgemm_ CMakeFiles/cmTC_5294a.dir/CheckFunctionExists.c.o -o cmTC_5294a 
+/usr/bin/ld: CMakeFiles/cmTC_5294a.dir/CheckFunctionExists.c.o: in function `main':
+CheckFunctionExists.c:(.text+0x10): undefined reference to `sgemm_'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [CMakeFiles/cmTC_5294a.dir/build.make:99: cmTC_5294a] Error 1
+gmake[1]: Leaving directory '/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp'
+gmake: *** [Makefile:127: cmTC_5294a/fast] Error 2
+
+
+
+Determining if the function sgemm_ exists failed with the following output:
+Change Dir: /home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_f7ee6/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_f7ee6.dir/build.make CMakeFiles/cmTC_f7ee6.dir/build
+gmake[1]: Entering directory '/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_f7ee6.dir/CheckFunctionExists.c.o
+/usr/bin/cc   -DCHECK_FUNCTION_EXISTS=sgemm_ -o CMakeFiles/cmTC_f7ee6.dir/CheckFunctionExists.c.o -c /usr/share/cmake-3.22/Modules/CheckFunctionExists.c
+Linking C executable cmTC_f7ee6
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_f7ee6.dir/link.txt --verbose=1
+/usr/bin/cc  -DCHECK_FUNCTION_EXISTS=sgemm_ CMakeFiles/cmTC_f7ee6.dir/CheckFunctionExists.c.o -o cmTC_f7ee6 
+/usr/bin/ld: CMakeFiles/cmTC_f7ee6.dir/CheckFunctionExists.c.o: in function `main':
+CheckFunctionExists.c:(.text+0x10): undefined reference to `sgemm_'
+collect2: error: ld returned 1 exit status
+gmake[1]: *** [CMakeFiles/cmTC_f7ee6.dir/build.make:99: cmTC_f7ee6] Error 1
+gmake[1]: Leaving directory '/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/CMakeTmp'
+gmake: *** [Makefile:127: cmTC_f7ee6/fast] Error 2
+
+
+

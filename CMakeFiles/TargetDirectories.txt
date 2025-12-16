@@ -1,0 +1,3 @@
+/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/trt.dir
+/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/edit_cache.dir
+/home/cvia/yifei/tensortt_multi_thread-main/CMakeFiles/rebuild_cache.dir
