@@ -34,7 +34,6 @@ namespace model
             bool flg_remove;
             int label;
             vector<keypoint> keypoints;
-
             bbox() = default;
             bbox(float x0, float y0, float x1, float y1, float conf, int label) : x0(x0), y0(y0), x1(x1), y1(y1),
                                                                                   confidence(conf), flg_remove(false),
@@ -72,9 +71,10 @@ namespace model
             virtual bool postprocess_gpu() override;
             void show();
             void refine_point();
+            std::vector<float> m_result;
+            std::vector<bbox> m_bboxes;
 
         private:
-            std::vector<bbox> m_bboxes;
             int m_inputSize;
             int m_imgArea;
             int m_outputSize;

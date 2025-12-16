@@ -1953,7 +1953,18 @@ CMakeFiles/trt.dir/src/ZEDX/ZEDX.cpp.o: src/ZEDX/ZEDX.cpp \
   /usr/include/opencv4/opencv2/stitching/detail/camera.hpp \
   /usr/include/opencv4/opencv2/video.hpp \
   /usr/include/opencv4/opencv2/video/tracking.hpp \
-  /usr/include/opencv4/opencv2/video/background_segm.hpp
+  /usr/include/opencv4/opencv2/video/background_segm.hpp \
+  src/TensorRT/logger/logger.hpp \
+  /usr/include/aarch64-linux-gnu/NvInfer.h \
+  /usr/include/aarch64-linux-gnu/NvInferLegacyDims.h \
+  /usr/include/aarch64-linux-gnu/NvInferRuntimeBase.h \
+  /usr/include/aarch64-linux-gnu/NvInferVersion.h \
+  /usr/include/aarch64-linux-gnu/NvInferRuntime.h \
+  /usr/include/aarch64-linux-gnu/NvInferImpl.h \
+  /usr/include/aarch64-linux-gnu/NvInferRuntimeCommon.h \
+  /usr/include/aarch64-linux-gnu/NvInferRuntimePlugin.h \
+  src/time/time.hpp \
+  src/TensorRT/CUDA_tools/cudatools.hpp
 
 CMakeFiles/trt.dir/src/communication/RS485.cpp.o: src/communication/RS485.cpp \
   /usr/include/stdc-predef.h \

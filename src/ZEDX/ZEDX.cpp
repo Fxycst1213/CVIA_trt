@@ -12,28 +12,25 @@ using namespace sl;
     3. int frame: fps
     4. bool enable_fill_mode: enable depth fill mode or not
 */
-int ZEDX::init(int ID, std::string resolution, int frame, bool enable_fill_mode)
+void ZEDX::init(int ID, std::string resolution, int frame, bool enable_fill_mode)
 {
     if (resolution == "HD1080")
         _init_parameters.camera_resolution = RESOLUTION::HD1080;
     else
-        _init_parameters.camera_resolution = RESOLUTION::SVGA;
+        _init_parameters.camera_resolution = RESOLUTION::HD720;
     _init_parameters.camera_fps = frame;
     _init_parameters.depth_mode = sl::DEPTH_MODE::NONE;
-    // _init_parameters.grab_compute_capping_fps = 30;
     _init_parameters.input.setFromCameraID(ID);
     _runtime_parameters.enable_fill_mode = true;
-
+    _timer = make_shared<timer::Timer>(logger::Level::VERB);
     auto returned_state = _zedx.open(_init_parameters);
     if (returned_state != ERROR_CODE::SUCCESS)
     {
         std::cout << "Error:" << returned_state << "." << std::endl;
-        return -1;
+        LOGE("ZED INIT ERROR");
     }
 
     setIntrinsic();
-
-    return 0;
 }
 
 /*
@@ -55,20 +52,26 @@ cv::Mat ZEDX::getK() const
 /*
     @brief: get the image data. meanwhile turn rgb data into cv::Mat format
 */
-int ZEDX::grab_frame(ZEDframe *frame)
+void ZEDX::grab_frame(ZEDframe *frame)
 {
     sl::Mat img;
-
+    _timer->init();
+    _timer->start_cpu();
     if (_zedx.grab(_runtime_parameters) == ERROR_CODE::SUCCESS)
     {
+        _timer->stop_cpu<timer::Timer::ms>("ZED Grabframe");
+        _timer->start_cpu();
         _zedx.retrieveImage(img, VIEW::LEFT);
         frame->timestamp = img.timestamp.getMilliseconds();
         cv::Mat tmp = ZEDX::slMat2cvMat(img);
         cv::cvtColor(tmp, *(frame->rgb_ptr), cv::COLOR_BGRA2BGR);
-        return 0;
+        _timer->stop_cpu<timer::Timer::ms>("COLOR CONVERT");
+        _timer->show();
     }
     else
-        return -1;
+    {
+        LOGE("ZED Grabframe ERROR");
+    }
 }
 
 cv::Mat ZEDX::slMat2cvMat(sl::Mat &input)

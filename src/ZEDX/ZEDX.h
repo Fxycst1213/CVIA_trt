@@ -5,10 +5,11 @@
 #include <sl/Camera.hpp>
 #include <string>
 #include <opencv2/opencv.hpp>
-
+#include "logger.hpp"
+#include "time.hpp"
 #ifndef ZEDX_H
 #define ZEDX_H
-
+using namespace std;
 using namespace sl;
 
 typedef struct ZEDframe ZEDframe;
@@ -23,8 +24,8 @@ struct ZEDframe
 class ZEDX
 {
 public:
-    int init(int ID, std::string resolution, int frame = 60, bool enable_fill_mode = false);
-    int grab_frame(ZEDframe *frame);
+    void init(int ID, std::string resolution, int frame = 60, bool enable_fill_mode = false);
+    void grab_frame(ZEDframe *frame);
     static ZEDX *GetInstance();
     cv::Mat getK() const;
     cv::Mat slMat2cvMat(sl::Mat &input);
@@ -73,6 +74,7 @@ private:
     InitParameters _init_parameters;
     RuntimeParameters _runtime_parameters;
     cv::Mat _K;
+    std::shared_ptr<timer::Timer> _timer;
 };
 
 #endif // ZEDX_H

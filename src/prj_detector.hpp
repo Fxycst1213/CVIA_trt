@@ -12,10 +12,18 @@
 #include <chrono>
 #include <ratio>
 using namespace std;
+struct Resultframe
+{
+    cv::Mat *rgb_ptr;
+    vector<model::pose::bbox> bboxes;
+    vector<float> result;
+};
 struct prj_params
 {
     int H;
     int W;
+    string resolution = "HD1080";
+    int cameraID = 0;
 };
 class prj_v8detector
 {
@@ -33,12 +41,10 @@ public:
     }
 
 private:
-    locker _lockInfer;
     shared_ptr<thread::Worker> _worker;
     ZEDX *_zed = nullptr;
-    string _resolution = "HD1080";
     std::shared_ptr<timer::Timer> _timer;
-    int _cameraID = 0;
     std::function<void()> _func_camera;
     ZEDframe *_writeframe = nullptr;
+    queue<Resultframe> _resultframe_queue;
 };

@@ -1,5 +1,5 @@
 CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o: \
- /home/fxy/tensortt_multi_thread-main/src/yolov8_detector/detector.cpp \
+ /home/cvia/yifei/CVIA_trt/src/yolov8_detector/detector.cpp \
  /usr/include/stdc-predef.h /usr/include/aarch64-linux-gnu/NvInfer.h \
  /usr/include/aarch64-linux-gnu/NvInferLegacyDims.h \
  /usr/include/aarch64-linux-gnu/NvInferRuntimeBase.h \
@@ -163,7 +163,7 @@ CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o: \
  /usr/include/c++/11/bits/stl_heap.h \
  /usr/include/c++/11/bits/stl_tempbuf.h \
  /usr/include/c++/11/bits/uniform_int_dist.h \
- /home/fxy/tensortt_multi_thread-main/src/TensorRT/utils/utils.hpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/utils/utils.hpp \
  /usr/local/cuda-12.6/include/cuda_runtime.h \
  /usr/local/cuda-12.6/include/crt/host_config.h \
  /usr/local/cuda-12.6/include/library_types.h \
@@ -368,10 +368,10 @@ CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o: \
  /usr/include/opencv4/opencv2/video.hpp \
  /usr/include/opencv4/opencv2/video/tracking.hpp \
  /usr/include/opencv4/opencv2/video/background_segm.hpp \
- /home/fxy/tensortt_multi_thread-main/src/yolov8_detector/detector.hpp \
- /home/fxy/tensortt_multi_thread-main/src/TensorRT/logger/logger.hpp \
- /home/fxy/tensortt_multi_thread-main/src/TensorRT/model/model.hpp \
- /home/fxy/tensortt_multi_thread-main/src/time/time.hpp \
- /home/fxy/tensortt_multi_thread-main/src/TensorRT/CUDA_tools/cudatools.hpp \
- /home/fxy/tensortt_multi_thread-main/src/preprocess/preprocess.hpp \
- /home/fxy/tensortt_multi_thread-main/src/TensorRT/utils/coco_labels.hpp
+ /home/cvia/yifei/CVIA_trt/src/yolov8_detector/detector.hpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/logger/logger.hpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/model/model.hpp \
+ /home/cvia/yifei/CVIA_trt/src/time/time.hpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/CUDA_tools/cudatools.hpp \
+ /home/cvia/yifei/CVIA_trt/src/preprocess/preprocess.hpp \
+ /home/cvia/yifei/CVIA_trt/src/TensorRT/utils/coco_labels.hpp

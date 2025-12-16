@@ -7,13 +7,9 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _zed = ZEDX::GetInstance();
     _timer = make_shared<timer::Timer>(logger::Level::INFO);
     _timer->init();
-    if (_zed->init(_cameraID, _resolution) == -1)
-    {
-        std::cout << "camera init failed!" << endl;
-        exit(EXIT_FAILURE);
-    }
+    _zed->init(p_params.cameraID, p_params.resolution);
     _writeframe = new ZEDframe;
-    _writeframe->rgb_ptr = new cv::Mat(1080, 1920, CV_8UC3);
+    _writeframe->rgb_ptr = new cv::Mat(p_params.H, p_params.W, CV_8UC3);
     _func_camera = std::bind(&prj_v8detector::camera, this);
 }
 
@@ -21,16 +17,17 @@ void prj_v8detector::camera()
 {
     while (1)
     {
-        if (_zed->grab_frame(_writeframe) == -1)
-        {
-            printf("get image failed\n");
-            continue;
-        }
         _timer->init();
         _timer->start_cpu();
+        _zed->grab_frame(_writeframe);
         _worker->inference(*(_writeframe->rgb_ptr));
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
+        _resultframe_queue.push(
+            Resultframe{
+                _writeframe->rgb_ptr,
+                _worker->m_pose->m_bboxes,
+                _worker->m_pose->m_result});
     }
 }
 
