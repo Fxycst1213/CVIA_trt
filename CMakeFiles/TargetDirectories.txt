@@ -1,3 +1,0 @@
-/home/cvia/yifei/CVIA_trt/CMakeFiles/trt.dir
-/home/cvia/yifei/CVIA_trt/CMakeFiles/edit_cache.dir
-/home/cvia/yifei/CVIA_trt/CMakeFiles/rebuild_cache.dir
