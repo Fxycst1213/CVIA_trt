@@ -333,15 +333,16 @@ namespace model
             }
             LOGD("the count of bbox after NMS is %d", final_bboxes.size());
             m_bboxes = final_bboxes;
-            run_pnp();
             // this->show("unrefine.png");
             /*Postprocess -- 2. 精修关键点*/
+            run_pnp_multi_stage();
             if (!m_bboxes.empty())
             {
                 refine_keypoints(m_bboxes[0].keypoints);
             }
+            run_pnp_multi_stage();
+
             // this->show("refine.png");
-            run_pnp();
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
             return true;
@@ -474,9 +475,8 @@ namespace model
             }
         }
 
-        void Pose::run_pnp()
+        void Pose::run_pnp_multi_stage()
         {
-            cv::Mat R1, T1;
             is_current_frame_good = false; // 重置标记位
             if (m_bboxes.size() >= 1)
             {
@@ -532,7 +532,6 @@ namespace model
                             }
                             else
                             {
-                                // 简化版跳变处理
                                 int MAX_STALE_FRAMES = 2;
                                 if (_stale_frame_count >= MAX_STALE_FRAMES)
                                 {
@@ -583,8 +582,7 @@ namespace model
             if (is_current_frame_good)
             {
                 _stale_frame_count = 0;
-                final_R = R1.clone();
-                final_T = T1.clone();
+                _candidate_count = 0;
             }
             else
             {
@@ -592,8 +590,8 @@ namespace model
                 {
                     _stale_frame_count++;
 
-                    _R1_prev.copyTo(final_R);
-                    _T1_prev.copyTo(final_T);
+                    _R1_prev.copyTo(R1);
+                    _T1_prev.copyTo(T1);
                 }
                 else
                 {
@@ -601,13 +599,42 @@ namespace model
                 }
             }
 
-            if (!final_T.empty())
+            if (!T1.empty())
             {
-                m_result[0] = final_T.at<double>(0, 0);
-                m_result[1] = final_T.at<double>(1, 0);
-                m_result[2] = final_T.at<double>(2, 0);
+                m_result[0] = T1.at<double>(0, 0);
+                m_result[1] = T1.at<double>(1, 0);
+                m_result[2] = T1.at<double>(2, 0);
                 LOG("\tPose result x: %.4f , y: %.4f , z: %.4f", m_result[0], m_result[1], m_result[2]);
             }
+        }
+
+        void Pose::run_pnp_single_stage()
+        {
+            cv::Mat R1, T1;
+            auto &target = m_bboxes[0];
+            cv::Mat p3d_Mat = cv::Mat::zeros(7, 3, CV_64FC1);
+            cv::Mat p2d_Mat = cv::Mat::zeros(7, 2, CV_64FC1);
+            std::vector<int> inliers;
+            int valid_count = 0;
+            for (int i = 0; i < 7; i++)
+            {
+                if (target.keypoints[i].conf > 0.9)
+                {
+                    p2d_Mat.at<double>(valid_count, 0) = target.keypoints[i].x;
+                    p2d_Mat.at<double>(valid_count, 1) = target.keypoints[i].y;
+                    _p3d.row(i).copyTo(p3d_Mat.row(valid_count));
+                    valid_count++;
+                }
+            }
+
+            p3d_Mat.resize(valid_count);
+            p2d_Mat.resize(valid_count);
+            bool success = cv::solvePnPRansac(p3d_Mat, p2d_Mat, _K, _diff, R1, T1,
+                                              false, 100, 2.0, 0.99, inliers, cv::SOLVEPNP_SQPNP);
+            m_result[0] = T1.at<double>(0, 0);
+            m_result[1] = T1.at<double>(1, 0);
+            m_result[2] = T1.at<double>(2, 0);
+            LOG("\tPose result x: %.4f , y: %.4f , z: %.4f", m_result[0], m_result[1], m_result[2]);
         }
     };
 };
