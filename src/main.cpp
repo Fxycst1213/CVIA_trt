@@ -16,10 +16,15 @@ int main(int argc, char const *argv[])
     params.dev = model::device::GPU;
     params.prec = model::precision::FP16;
     auto p_params = prj_params();
-    p_params.H = 720;
-    p_params.W = 1280;
-    p_params.resolution = "SVGA";
+
+    p_params.H = 1080;
+    p_params.W = 1920;
+    p_params.resolution = "HD1080";
     p_params.cameraID = 0;
+    p_params.ip = "10.1.1.195";
+    p_params.port = "1234";
+    p_params.socket_mode = 0;
+
     // // 根据worker中的task类型进行推理
     prj_v8detector prj(onnxPath, level, params, p_params);
     prj.run();
@@ -27,7 +32,7 @@ int main(int argc, char const *argv[])
     // auto worker = thread::create_worker(onnxPath, level, params);
     // preprocess::init_process(p_params.H, p_params.W);
     // cv::Mat Image = cv::imread("data/source/00590.png");
-    // for (int i = 0; i < 100; i++)
+    // for (int i = 0; i < 2; i++)
     // {
     //     worker->inference(Image);
     // }

@@ -120,7 +120,7 @@ void ZEDX::setIntrinsic()
 //     @brief: zed init setting (修改版：离线模式)
 //     不再打开真实相机，而是加载文件夹内的图片列表
 // */
-// int ZEDX::init(int ID, std::string resolution, int frame, bool enable_fill_mode)
+// void ZEDX::init(int ID, std::string resolution, int frame, bool enable_fill_mode)
 // {
 //     std::cout << "[Offline Mode] Initializing Image Loader..." << std::endl;
 
@@ -131,14 +131,11 @@ void ZEDX::setIntrinsic()
 //     if (g_image_files.empty())
 //     {
 //         std::cerr << "[Error] No .png images found in: " << IMAGE_FOLDER << std::endl;
-//         return -1;
 //     }
 
 //     // 统计数量
 //     std::cout << "[Success] Total images found: " << g_image_files.size() << std::endl;
 //     g_current_img_index = 0;
-
-//     return 0;
 // }
 
 // /*
@@ -153,7 +150,7 @@ void ZEDX::setIntrinsic()
 // /*
 //     @brief: get the image data (修改版：从本地读取)
 // */
-// int ZEDX::grab_frame(ZEDframe *frame)
+// void ZEDX::grab_frame(ZEDframe *frame)
 // {
 //     // 1. 模拟 40ms 的帧间隔 (25 FPS)
 //     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -174,7 +171,6 @@ void ZEDX::setIntrinsic()
 //         // 为了防止你的主程序 while(1) 疯狂刷屏 "get image failed"，
 //         // 这里让线程稍微睡久一点，减轻CPU负担，或者你可以选择在这里直接 exit(0) 退出程序
 //         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-//         return -1; // 返回错误码，告诉主程序没有取到数据
 //     }
 
 //     // 3. 读取图片
@@ -187,7 +183,6 @@ void ZEDX::setIntrinsic()
 //         std::cerr << "[Error] Failed to read image: " << current_file << std::endl;
 //         // 跳过这一帧或重试，这里选择跳过
 //         g_current_img_index++;
-//         return -1;
 //     }
 
 //     // 4. 将读取的数据拷贝到 frame->rgb_ptr
@@ -214,8 +209,6 @@ void ZEDX::setIntrinsic()
 
 //     // 6. 索引递增
 //     g_current_img_index++;
-
-//     return 0; // 返回 0 代表 grab 成功
 // }
 
 // ZEDX::~ZEDX()

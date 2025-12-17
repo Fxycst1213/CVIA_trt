@@ -47,7 +47,7 @@ namespace model
         {
 
         public:
-            Pose(std::string onnx_path, logger::Level level, Params params) : Model(onnx_path, level, params) {};
+            Pose(std::string onnx_path, logger::Level level, Params params);
             ~Pose()
             {
                 if (m_cudaGraphExec)
@@ -69,15 +69,30 @@ namespace model
             virtual bool preprocess_gpu(cv::Mat &img) override;
             virtual bool postprocess_cpu() override;
             virtual bool postprocess_gpu() override;
+            void run_pnp();
             void show();
-            void refine_point();
-            std::vector<float> m_result;
+            void refine_keypoints(std::vector<keypoint> &kpt);
+            std::vector<double> m_result;
+
             std::vector<bbox> m_bboxes;
+            bool is_current_frame_good = false;
+            cv::Mat final_R, final_T;
 
         private:
             int m_inputSize;
             int m_imgArea;
             int m_outputSize;
+            cv::Mat _K;
+            cv::Mat _diff;
+            cv::Mat _p3d;
+
+            cv::Mat _R1_prev;
+            cv::Mat _T1_prev;
+
+            int _stale_frame_count = 0;
+            double _candidate_z = 0.0;
+            int _candidate_count = 0;
+            int _candidate_limit = 2; // 连续多少帧稳定才更新，默认2
         };
 
         std::shared_ptr<Pose> make_pose(

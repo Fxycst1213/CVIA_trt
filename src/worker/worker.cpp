@@ -26,7 +26,7 @@ namespace thread
         }
         else if (params.task == model::task_type::POSE)
         {
-            m_pose = model::pose::make_pose(onnxPath, level, params);
+            m_pose = model::pose::make_pose(onnxPath, level, params); // m_pose 的生命周期由智能指针自动管理
             m_pose->init_model();
         }
     }

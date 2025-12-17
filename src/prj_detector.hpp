@@ -1,3 +1,6 @@
+#ifndef PRJ_DETECTOR_HPP
+#define PRJ_DETECTOR_HPP
+
 #include "model.hpp"
 #include "logger.hpp"
 #include "worker.hpp"
@@ -11,12 +14,13 @@
 #include <mutex>
 #include <chrono>
 #include <ratio>
+#include "communication/client.h"
 using namespace std;
 struct Resultframe
 {
     cv::Mat *rgb_ptr;
     vector<model::pose::bbox> bboxes;
-    vector<float> result;
+    vector<double> result;
 };
 struct prj_params
 {
@@ -24,6 +28,9 @@ struct prj_params
     int W;
     string resolution = "HD1080";
     int cameraID = 0;
+    string ip;
+    string port;
+    int socket_mode;
 };
 class prj_v8detector
 {
@@ -48,3 +55,5 @@ private:
     ZEDframe *_writeframe = nullptr;
     queue<Resultframe> _resultframe_queue;
 };
+
+#endif // PRJ_DETECTOR_HPP

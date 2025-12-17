@@ -193,9 +193,29 @@ namespace model
             cv::imwrite("keypoints_result.jpg", m_inputImage);
         }
 
+        Pose::Pose(std::string onnx_path, logger::Level level, Params params)
+            : Model(onnx_path, level, params)
+        {
+
+            m_result.resize(3, 0.0);
+
+            _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
+                  0.0, 1067.37400981335, 525.523361276358,
+                  0.0, 0.0, 1.0);
+
+            _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
+
+            _p3d = (cv::Mat_<double>(7, 3) << -255.41, -5.3, -5.9,
+                    -97.45, -4.11, -6.34,
+                    -141.12, 366.99, 54.88,
+                    -113.87, 212.02, 49.2,
+                    -107.09, -221.28, 38.62,
+                    -128.86, -374.6, 40.37,
+                    93.18, 2.06, -2.96);
+        }
+
         bool Pose::postprocess_cpu()
         {
-            m_timer->start_cpu();
 
             /*Postprocess -- 将device上的数据移动到host上*/
             int output_size = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
@@ -313,10 +333,13 @@ namespace model
             m_bboxes = final_bboxes;
 
             /*Postprocess -- 2. 精修关键点*/
-            /*
-             */
-            refine_point();
-            m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
+            m_timer->start_cpu();
+            if (!m_bboxes.empty())
+            {
+                refine_keypoints(m_bboxes[0].keypoints);
+            }
+            run_pnp();
+            m_timer->stop_cpu<timer::Timer::ms>("refine_point(CPU)");
             m_timer->show();
             return true;
         }
@@ -331,15 +354,272 @@ namespace model
         {
             return make_shared<Pose>(onnx_path, level, params);
         }
-        void Pose::refine_point()
-        {
-            if (m_bboxes.size() == 0)
-            {
-                return;
-            }
-            bbox box = m_bboxes[0];
 
-            return;
+        void Pose::refine_keypoints(std::vector<keypoint> &keypoints)
+        {
+            // 遍历每一个关键点
+            for (auto &kpt : keypoints)
+            {
+                if (kpt.conf < 0.9f)
+                {
+                    kpt.x = 0.0f;
+                    kpt.y = 0.0f;
+                    kpt.conf = 0.0f;
+                    continue;
+                }
+
+                int cx = static_cast<int>(kpt.x);
+                int cy = static_cast<int>(kpt.y);
+
+                int search_side = 20;
+                int half_side = search_side / 2;
+
+                int x1 = std::max(0, cx - half_side);
+                int y1 = std::max(0, cy - half_side);
+                int x2 = std::min(m_inputImage.cols, x1 + search_side);
+                int y2 = std::min(m_inputImage.rows, y1 + search_side);
+
+                if (x2 - x1 < 5 || y2 - y1 < 5)
+                {
+                    continue;
+                }
+
+                cv::Rect roi_rect(x1, y1, x2 - x1, y2 - y1);
+                cv::Mat roi = m_inputImage(roi_rect);
+
+                // 颜色对比提取 (蓝色通道)
+                std::vector<cv::Mat> channels;
+                cv::split(roi, channels);
+                cv::Mat target_img = channels[0]; // B通道
+
+                cv::Mat mask;
+                cv::threshold(target_img, mask, 170, 255, cv::THRESH_BINARY);
+
+                std::vector<std::vector<cv::Point>> contours;
+                cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+                if (contours.empty())
+                {
+                    continue; // 直接跳过，kpt 保持原值不变
+                }
+
+                // 计算相对坐标中心
+                cv::Point2f center_ref((float)(cx - x1), (float)(cy - y1));
+
+                int best_idx = -1;
+                double max_area = 0;
+                const double DIST_LIMIT = 5.0;
+
+                for (size_t i = 0; i < contours.size(); ++i)
+                {
+                    double area = cv::contourArea(contours[i]);
+
+                    if (area < 3.0 || area > 200.0)
+                        continue;
+
+                    cv::Moments M = cv::moments(contours[i]);
+                    if (M.m00 <= 0)
+                        continue;
+
+                    float gx = static_cast<float>(M.m10 / M.m00);
+                    float gy = static_cast<float>(M.m01 / M.m00);
+
+                    double dx = gx - center_ref.x;
+                    double dy = gy - center_ref.y;
+                    double dist = std::sqrt(dx * dx + dy * dy);
+
+                    // 距离过滤
+                    if (dist > DIST_LIMIT)
+                        continue;
+
+                    // 择优
+                    if (area > max_area)
+                    {
+                        max_area = area;
+                        best_idx = i;
+                    }
+                }
+
+                if (best_idx == -1)
+                {
+                    kpt.x = 0.0f;
+                    kpt.y = 0.0f;
+                    kpt.conf = 0.0f; // 认为检测到的点无效（可能是背景噪点），置零
+                    continue;
+                }
+
+                // 计算最终坐标
+                cv::Moments M = cv::moments(contours[best_idx]);
+                float final_gx = static_cast<float>(M.m10 / M.m00);
+                float final_gy = static_cast<float>(M.m01 / M.m00);
+
+                // 还原到全图坐标
+                float final_x = x1 + final_gx + 0.5f;
+                float final_y = y1 + final_gy + 0.5f;
+
+                double final_dist = std::sqrt(std::pow(final_x - kpt.x, 2) + std::pow(final_y - kpt.y, 2));
+
+                if (final_dist > DIST_LIMIT)
+                {
+                    kpt.x = 0.0f;
+                    kpt.y = 0.0f;
+                    kpt.conf = 0.0f; // 最终计算结果偏离太大，置零
+                    continue;
+                }
+
+                kpt.x = final_x;
+                kpt.y = final_y;
+            }
         }
-    }; // namespace pose
-}; // namespace model
+
+        void Pose::run_pnp()
+        {
+            cv::Mat R1, T1;
+            is_current_frame_good = false; // 重置标记位
+            if (m_bboxes.size() >= 1)
+            {
+                auto &target = m_bboxes[0];
+                cv::Mat p3d_Mat = cv::Mat::zeros(7, 3, CV_64FC1);
+                cv::Mat p2d_Mat = cv::Mat::zeros(7, 2, CV_64FC1);
+                int valid_count = 0;
+                for (int i = 0; i < 7; i++)
+                {
+                    if (target.keypoints[i].conf > 0.9)
+                    {
+                        p2d_Mat.at<double>(valid_count, 0) = target.keypoints[i].x;
+                        p2d_Mat.at<double>(valid_count, 1) = target.keypoints[i].y;
+                        _p3d.row(i).copyTo(p3d_Mat.row(valid_count));
+                        valid_count++;
+                    }
+                }
+                p3d_Mat.resize(valid_count);
+                p2d_Mat.resize(valid_count);
+
+                if (p3d_Mat.rows >= 4)
+                {
+                    std::vector<int> inliers;
+                    bool use_guess = !_R1_prev.empty() && !_T1_prev.empty();
+                    if (use_guess)
+                    {
+                        _R1_prev.copyTo(R1);
+                        _T1_prev.copyTo(T1);
+                    }
+
+                    bool success = cv::solvePnPRansac(p3d_Mat, p2d_Mat, _K, _diff, R1, T1,
+                                                      false, 100, 2.0, 0.99, inliers, cv::SOLVEPNP_SQPNP);
+
+                    // 4. 验证解算质量
+                    if (success && inliers.size() > 5)
+                    {
+                        // ================= 【深度跳变保护逻辑 - 你的核心代码】 =================
+                        double current_z = T1.at<double>(2, 0);
+                        bool is_depth_safe = false;
+
+                        if (_T1_prev.empty())
+                        {
+                            is_depth_safe = true;
+                        }
+                        else
+                        {
+                            double prev_z = _T1_prev.at<double>(2, 0);
+                            double z_diff = std::abs(current_z - prev_z);
+
+                            if (z_diff <= 9.0)
+                            {
+                                is_depth_safe = true;
+                                _candidate_count = 0;
+                            }
+                            else
+                            {
+                                // 简化版跳变处理
+                                int MAX_STALE_FRAMES = 2;
+                                if (_stale_frame_count >= MAX_STALE_FRAMES)
+                                {
+                                    if (_candidate_count == 0)
+                                    {
+                                        _candidate_z = current_z;
+                                        _candidate_count = 1;
+                                        is_depth_safe = false;
+                                    }
+                                    else
+                                    {
+                                        if (std::abs(current_z - _candidate_z) <= 9.0)
+                                        {
+                                            _candidate_count++;
+                                            _candidate_z = current_z;
+                                            if (_candidate_count >= 2)
+                                            {
+                                                is_depth_safe = true;
+                                                _candidate_count = 0;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            _candidate_z = current_z;
+                                            _candidate_count = 1;
+                                            is_depth_safe = false;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    is_depth_safe = false;
+                                    _candidate_count = 0;
+                                }
+                            }
+                        }
+
+                        if (is_depth_safe)
+                        {
+                            is_current_frame_good = true;
+                            R1.copyTo(_R1_prev);
+                            T1.copyTo(_T1_prev); // 更新历史观测值
+                        }
+                    }
+                }
+            }
+
+            // ================= 阶段 2: 决定最终输出 (兜底逻辑) =================
+
+            if (is_current_frame_good)
+            {
+                // 当前帧好，R1 和 T1 已经是新的了
+                _stale_frame_count = 0;
+
+                // 更新最终输出变量
+                final_R = R1.clone();
+                final_T = T1.clone();
+            }
+            else
+            {
+                // 尝试使用历史数据兜底
+                if (!_R1_prev.empty() && !_T1_prev.empty())
+                {
+                    // std::cout << "[警告] 使用上一帧历史数据维持输出" << std::endl;
+                    _stale_frame_count++;
+
+                    _R1_prev.copyTo(final_R);
+                    _T1_prev.copyTo(final_T);
+                }
+                else
+                {
+                    // std::cout << "[错误] 无数据输出" << std::endl;
+                    return;
+                }
+            }
+
+            if (!final_T.empty())
+            {
+                m_result[0] = final_T.at<double>(0, 0);
+                m_result[1] = final_T.at<double>(1, 0);
+                m_result[2] = final_T.at<double>(2, 0);
+
+                for (int j = 0; j < 3; j++)
+                {
+                    std::cout << "位姿" << (is_current_frame_good ? "(新)" : "(旧)") << "： " << m_result[j] << "\t";
+                }
+                std::cout << std::endl;
+            }
+        }
+    };
+};
