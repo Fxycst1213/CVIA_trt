@@ -22,6 +22,39 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _is_running = true;
 }
 
+// void prj_v8detector::camera()
+// {
+//     while (1)
+//     {
+//         Resultframe _resultframe;
+//         _timer->init();
+//         _timer->start_cpu();
+//         _zed->grab_frame(_writeframe);
+//         // *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
+//         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
+//         // _resultframe.rgb = *(_writeframe->rgb_ptr);
+//         _resultframe.rgb = _writeframe->rgb_ptr->clone();
+//         _resultframe.timestamp = _writeframe->timestamp;
+//         _timer->start_cpu();
+//         _worker->inference(_resultframe);
+//         _timer->stop_cpu<timer::Timer::ms>("inference");
+//         _resultframe.bboxes = _worker->m_pose->m_bboxes;
+//         _resultframe.pose_result = _worker->m_pose->m_result;
+//         _timer->start_cpu();
+//         _rs485.sendDoubleArray(_resultframe.pose_result.data());
+//         _timer->stop_cpu<timer::Timer::ms>("RS485");
+
+//         _timer->start_cpu();
+//         {
+//             std::lock_guard<std::mutex> lock(_queue_mtx);
+//             _resultframe_queue.push(_resultframe);
+//             _queue_cv.notify_one();
+//         }
+//         _timer->stop_cpu<timer::Timer::ms>("Load TCP");
+//         _timer->show();
+//     }
+// }
+
 void prj_v8detector::camera()
 {
     while (1)
@@ -29,24 +62,49 @@ void prj_v8detector::camera()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        _zed->grab_frame(_writeframe);
-        // *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
-        _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
-        _resultframe.rgb = *(_writeframe->rgb_ptr);
-        _resultframe.timestamp = _writeframe->timestamp;
-        _timer->start_cpu();
-        _worker->inference(_resultframe);
-        _timer->stop_cpu<timer::Timer::ms>("inference");
 
+        // 1. 获取 ZED 图像
+        _zed->grab_frame(_writeframe);
+        // ++cam_index;
+        
+        _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
+
+        // 【关键修复1】：使用 clone() 进行深拷贝
+        // 这样 _resultframe 拥有一块独立的内存，不会被下一帧 grab_frame 覆盖
+        _resultframe.rgb = _writeframe->rgb_ptr->clone(); 
+        _resultframe.timestamp = _writeframe->timestamp;
+
+        _timer->start_cpu();
+        
+        // 2. 推理 (使用独立内存的图片)
+        _worker->inference(_resultframe);
+        
+        _timer->stop_cpu<timer::Timer::ms>("inference");
+        
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
+
+        // 3. 串口发送 (保持不变)
         _timer->start_cpu();
         _rs485.sendDoubleArray(_resultframe.pose_result.data());
         _timer->stop_cpu<timer::Timer::ms>("RS485");
 
+        // 4. TCP 队列处理
         _timer->start_cpu();
         {
             std::lock_guard<std::mutex> lock(_queue_mtx);
+            
+            // 【关键修复2】：实现“漏桶”策略，防止队列堆积
+            // 如果队列里堆积超过 2 帧，说明 TCP 发不过来了，直接把最老的帧扔掉
+            // 保持队列始终很短，确保发送的是较新的数据
+            while (_resultframe_queue.size() > 2) 
+            {
+                // 注意：如果 Resultframe 很大，pop 可能会析构释放内存，这很好
+                _resultframe_queue.pop(); 
+                // 可选：打印个日志提示丢帧了
+                // LOGW("TCP queue full, dropping old frame!");
+            }
+            
             _resultframe_queue.push(_resultframe);
             _queue_cv.notify_one();
         }
@@ -58,10 +116,10 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images7/*.png";
+    cv::String folder = "/home/cvia/yifei/images0112/*.png";
     cv::glob(folder, filenames, false);
-    std::sort(filenames.begin(), filenames.end());
-    // std::sort(filenames.rbegin(), filenames.rend());
+    // std::sort(filenames.begin(), filenames.end());
+    std::sort(filenames.rbegin(), filenames.rend());
     int current_idx = 0;
     while (1)
     {
@@ -70,7 +128,7 @@ void prj_v8detector::camera_foldimages()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        usleep(500000);
+        // usleep(500000);
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         current_idx++;
@@ -87,14 +145,15 @@ void prj_v8detector::camera_foldimages()
 
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
-        for (int i =0;i<6;i++){
-            std::cout<< _resultframe.pose_result[i]<<"\t";
-        }
-        std::cout<<std::endl;
         _timer->start_cpu();
         //
-        std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
-        _rs485.sendDoubleArray(partial_result.data());
+        // std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
+        // _rs485.sendDoubleArray(partial_result.data());
+        if (_resultframe.pose_result.size() >= 3) {
+            _rs485.sendDoubleArray(_resultframe.pose_result.data());
+        } else {
+            std::cerr << "错误：数据不足，无法发送串口数据" << std::endl;
+        }
         //
         // _rs485.sendDoubleArray(_resultframe.pose_result.data());
         _timer->stop_cpu<timer::Timer::ms>("RS485");
@@ -138,17 +197,17 @@ void prj_v8detector::tcp_loop()
 void prj_v8detector::run()
 {
     _is_running = true;
-    // auto t1 = std::thread(_func_camera);
-    auto t2 = std::thread(_func_camera_foldimages);
+    auto t1 = std::thread(_func_camera);
+    // auto t2 = std::thread(_func_camera_foldimages);
     auto t3 = std::thread(_func_pack_and_send);
-    // if (t1.joinable())
-    // {
-    //     t1.join();
-    // }
-    if (t2.joinable())
+    if (t1.joinable())
     {
-        t2.join();
+        t1.join();
     }
+    // if (t2.joinable())
+    // {
+    //     t2.join();
+    // }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
     if (t3.joinable())

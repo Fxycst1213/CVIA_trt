@@ -267,7 +267,10 @@ bool RS485::sendDoubleArray(const double arr[3])
         LOGE("串口未初始化");
         return false;
     }
-
+    // for(int i = 0; i < 3; i++)
+    // {
+    //     std:: cout << arr[i] << std::endl;
+    // }
     // 打包数据帧
     unsigned char frame_buffer[32]; // 帧头2 + 类型1 + 长度1 + 数据24 + CRC1 + 帧尾2 = 31字节
     int frame_size = 0;
@@ -281,11 +284,11 @@ bool RS485::sendDoubleArray(const double arr[3])
     // std::cout<<"等待fd改变"<<std::endl;
     if (bytes_written == frame_size)
     {
-        if (_debug)
-        {
+        //if (_debug)
+        //{
             LOG("成功发送双精度数据%d字节", bytes_written);
             LOG("发送的数据: [%f, %f, %f]", arr[0], arr[1], arr[2]);
-        }
+        //}
         return true;
     }
     else

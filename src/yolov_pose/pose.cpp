@@ -199,14 +199,13 @@ namespace model
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0933, 0.0668, 0.0003459, -0.0002221, 0.0225);
 
-            _p3d = (cv::Mat_<double>(7, 3) << -206.6246, 4.9622, 16.4583,
-                                -84.987, 4.5814, 7.3884,
-                                -89.4077, 276.2537, 47.472,
-                                -82.036, 166.9897, 46.9556,
-                                -77.928, -154.0283, 35.5093,
-                                -93.1905, -273.8243, 27.4523,
-                                51.005, 0.1395, 3.9154
-                                );
+            _p3d = (cv::Mat_<double>(7, 3) << -183.7073,	11.25681,	16.7002,
+                                        -63.425,	5.11481,	6.7676,
+                                        -56.275,	276.95511,	41.9942,
+                                        -52.444,	166.85011,	43.4943,
+                                        -62.388,	-153.32389,	37.1131,
+                                        -83.24,	-272.24389,	31.8423,
+                                        72.554,	-6.07653,	3.5579);
 
             m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(800);//容器大小
             //开始输出周期
@@ -397,8 +396,8 @@ namespace model
                     cv::Mat target_img = channels[0]; // B通道
 
                     cv::Mat mask;
-                    // cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best
-                    cv::threshold(target_img, mask, 200, 255, cv::THRESH_BINARY); // 140 best
+                    // cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best 一飞院
+                    cv::threshold(target_img, mask, 200, 255, cv::THRESH_BINARY); // 140 best 凯丽
 
                     std::vector<std::vector<cv::Point>> contours;
                     cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -413,17 +412,17 @@ namespace model
 
                     int best_idx = -1;
                     double max_area = 0;
-                    // const double DIST_LIMIT = 4;
-                    const double DIST_LIMIT = 10;
+                    // const double DIST_LIMIT = 4;//一飞院
+                    const double DIST_LIMIT = 12;//凯丽
 
                     for (size_t i = 0; i < contours.size(); ++i)
                     {
                         double area = cv::contourArea(contours[i]);
-
+                        //一飞院
                         // if (area < 2 || area > 66.0)
                         //     continue;
-
-                        if (area < 10 || area > 130.0)
+                        //凯丽
+                        if (area < 10 || area > 160.0)
                             continue;
                         
                         cv::Moments M = cv::moments(contours[i]);
@@ -631,9 +630,9 @@ namespace model
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
 
-                // m_result[3] = T1.at<double>(0, 0);
-                // m_result[4] = T1.at<double>(1, 0);
-                // m_result[5] = T1.at<double>(2, 0);
+                m_result[3] = T1.at<double>(0, 0);
+                m_result[4] = T1.at<double>(1, 0);
+                m_result[5] = T1.at<double>(2, 0);
             }
         }
 

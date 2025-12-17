@@ -33,6 +33,7 @@ namespace thread
 
     void Worker::inference(const Resultframe &resultframe)
     {
+        
         if (m_params.task == model::task_type::CLASSIFICATION)
         {
             // m_classifier->load_image(imagePath);
