@@ -69,14 +69,15 @@ namespace model
             virtual bool preprocess_gpu(cv::Mat &img) override;
             virtual bool postprocess_cpu() override;
             virtual bool postprocess_gpu() override;
-            void run_pnp();
+            void run_pnp_multi_stage();
+            void run_pnp_single_stage();
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);
             std::vector<double> m_result;
 
             std::vector<bbox> m_bboxes;
             bool is_current_frame_good = false;
-            cv::Mat final_R, final_T;
+            // cv::Mat final_R, final_T;
 
         private:
             int m_inputSize;
@@ -86,6 +87,7 @@ namespace model
             cv::Mat _diff;
             cv::Mat _p3d;
 
+            cv::Mat R1, T1;
             cv::Mat _R1_prev;
             cv::Mat _T1_prev;
 
