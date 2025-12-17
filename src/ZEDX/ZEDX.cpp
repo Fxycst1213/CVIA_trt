@@ -55,18 +55,15 @@ cv::Mat ZEDX::getK() const
 void ZEDX::grab_frame(ZEDframe *frame)
 {
     sl::Mat img;
-    _timer->init();
-    _timer->start_cpu();
+    // _timer->init();
+    // _timer->start_cpu();
     if (_zedx.grab(_runtime_parameters) == ERROR_CODE::SUCCESS)
     {
-        _timer->stop_cpu<timer::Timer::ms>("ZED Grabframe");
-        _timer->start_cpu();
         _zedx.retrieveImage(img, VIEW::LEFT);
         frame->timestamp = img.timestamp.getMilliseconds();
         cv::Mat tmp = ZEDX::slMat2cvMat(img);
         cv::cvtColor(tmp, *(frame->rgb_ptr), cv::COLOR_BGRA2BGR);
-        _timer->stop_cpu<timer::Timer::ms>("COLOR CONVERT");
-        _timer->show();
+        // _timer->show();
     }
     else
     {

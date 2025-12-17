@@ -14,8 +14,7 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _writeframe = new ZEDframe;
     _writeframe->rgb_ptr = new cv::Mat(p_params.H, p_params.W, CV_8UC3);
     _func_camera = std::bind(&prj_v8detector::camera, this);
-
-    _client.init(_ip, _port) == -1;
+    // _client.init(p_params.ip, p_params.port);
 }
 
 void prj_v8detector::camera()
@@ -24,7 +23,10 @@ void prj_v8detector::camera()
     {
         _timer->init();
         _timer->start_cpu();
-        _zed->grab_frame(_writeframe);
+        // _zed->grab_frame(_writeframe);
+        *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
+        _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
+        _timer->start_cpu();
         _worker->inference(*(_writeframe->rgb_ptr));
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();

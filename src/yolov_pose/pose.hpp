@@ -70,7 +70,7 @@ namespace model
             virtual bool postprocess_cpu() override;
             virtual bool postprocess_gpu() override;
             void run_pnp();
-            void show();
+            void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);
             std::vector<double> m_result;
 

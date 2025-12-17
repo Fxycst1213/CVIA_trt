@@ -29,7 +29,7 @@ struct prj_params
     string resolution = "HD1080";
     int cameraID = 0;
     string ip;
-    string port;
+    int port;
     int socket_mode;
 };
 class prj_v8detector

@@ -169,8 +169,9 @@ namespace model
             return true;
         }
 
-        void Pose::show()
+        void Pose::show(string path)
         {
+            cv::Mat vis = m_inputImage.clone();
             float kpt_conf_threshold = 0.5f;
             for (const auto &box : m_bboxes)
             {
@@ -178,7 +179,7 @@ namespace model
                 int y0 = static_cast<int>(box.y0);
                 int x1 = static_cast<int>(box.x1);
                 int y1 = static_cast<int>(box.y1);
-                cv::rectangle(m_inputImage, cv::Point(x0, y0), cv::Point(x1, y1), cv::Scalar(0, 0, 255), 2); // 线宽2
+                cv::rectangle(vis, cv::Point(x0, y0), cv::Point(x1, y1), cv::Scalar(0, 0, 255), 2); // 线宽2
                 for (int k = 0; k < box.keypoints.size(); ++k)
                 {
                     const auto &kpt = box.keypoints[k];
@@ -187,10 +188,10 @@ namespace model
 
                     int x = static_cast<int>(kpt.x);
                     int y = static_cast<int>(kpt.y);
-                    cv::circle(m_inputImage, cv::Point(x, y), 1, cv::Scalar(255, 0, 0), -1);
+                    cv::circle(vis, cv::Point(x, y), 1, cv::Scalar(255, 0, 0), -1);
                 }
             }
-            cv::imwrite("keypoints_result.jpg", m_inputImage);
+            cv::imwrite(path, vis);
         }
 
         Pose::Pose(std::string onnx_path, logger::Level level, Params params)
@@ -217,6 +218,7 @@ namespace model
         bool Pose::postprocess_cpu()
         {
 
+            m_timer->start_cpu();
             /*Postprocess -- 将device上的数据移动到host上*/
             int output_size = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
             CUDA_CHECK(cudaMemcpyAsync(m_outputMemory[0], m_outputMemory[1], output_size, cudaMemcpyKind::cudaMemcpyDeviceToHost, m_stream));
@@ -331,15 +333,16 @@ namespace model
             }
             LOGD("the count of bbox after NMS is %d", final_bboxes.size());
             m_bboxes = final_bboxes;
-
+            run_pnp();
+            // this->show("unrefine.png");
             /*Postprocess -- 2. 精修关键点*/
-            m_timer->start_cpu();
             if (!m_bboxes.empty())
             {
                 refine_keypoints(m_bboxes[0].keypoints);
             }
+            // this->show("refine.png");
             run_pnp();
-            m_timer->stop_cpu<timer::Timer::ms>("refine_point(CPU)");
+            m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
             return true;
         }
@@ -367,7 +370,6 @@ namespace model
                     kpt.conf = 0.0f;
                     continue;
                 }
-
                 int cx = static_cast<int>(kpt.x);
                 int cy = static_cast<int>(kpt.y);
 
@@ -511,7 +513,6 @@ namespace model
                     // 4. 验证解算质量
                     if (success && inliers.size() > 5)
                     {
-                        // ================= 【深度跳变保护逻辑 - 你的核心代码】 =================
                         double current_z = T1.at<double>(2, 0);
                         bool is_depth_safe = false;
 
@@ -579,20 +580,14 @@ namespace model
                 }
             }
 
-            // ================= 阶段 2: 决定最终输出 (兜底逻辑) =================
-
             if (is_current_frame_good)
             {
-                // 当前帧好，R1 和 T1 已经是新的了
                 _stale_frame_count = 0;
-
-                // 更新最终输出变量
                 final_R = R1.clone();
                 final_T = T1.clone();
             }
             else
             {
-                // 尝试使用历史数据兜底
                 if (!_R1_prev.empty() && !_T1_prev.empty())
                 {
                     _stale_frame_count++;
@@ -611,7 +606,7 @@ namespace model
                 m_result[0] = final_T.at<double>(0, 0);
                 m_result[1] = final_T.at<double>(1, 0);
                 m_result[2] = final_T.at<double>(2, 0);
-                LOG("Pose result x[%d]: %.2f , y[%d]: %.2f , z[%d]: %.2f", m_result[0], m_result[1], m_result[2]);
+                LOG("\tPose result x: %.4f , y: %.4f , z: %.4f", m_result[0], m_result[1], m_result[2]);
             }
         }
     };
