@@ -14,6 +14,8 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _writeframe = new ZEDframe;
     _writeframe->rgb_ptr = new cv::Mat(p_params.H, p_params.W, CV_8UC3);
     _func_camera = std::bind(&prj_v8detector::camera, this);
+
+    _client.init(_ip, _port) == -1;
 }
 
 void prj_v8detector::camera()

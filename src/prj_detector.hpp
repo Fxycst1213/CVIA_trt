@@ -54,6 +54,7 @@ private:
     std::function<void()> _func_camera;
     ZEDframe *_writeframe = nullptr;
     queue<Resultframe> _resultframe_queue;
+    client _client;
 };
 
 #endif // PRJ_DETECTOR_HPP

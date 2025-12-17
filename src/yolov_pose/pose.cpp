@@ -595,7 +595,6 @@ namespace model
                 // 尝试使用历史数据兜底
                 if (!_R1_prev.empty() && !_T1_prev.empty())
                 {
-                    // std::cout << "[警告] 使用上一帧历史数据维持输出" << std::endl;
                     _stale_frame_count++;
 
                     _R1_prev.copyTo(final_R);
@@ -603,7 +602,6 @@ namespace model
                 }
                 else
                 {
-                    // std::cout << "[错误] 无数据输出" << std::endl;
                     return;
                 }
             }
@@ -613,12 +611,7 @@ namespace model
                 m_result[0] = final_T.at<double>(0, 0);
                 m_result[1] = final_T.at<double>(1, 0);
                 m_result[2] = final_T.at<double>(2, 0);
-
-                for (int j = 0; j < 3; j++)
-                {
-                    std::cout << "位姿" << (is_current_frame_good ? "(新)" : "(旧)") << "： " << m_result[j] << "\t";
-                }
-                std::cout << std::endl;
+                LOG("Pose result x[%d]: %.2f , y[%d]: %.2f , z[%d]: %.2f", m_result[0], m_result[1], m_result[2]);
             }
         }
     };
