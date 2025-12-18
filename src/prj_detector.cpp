@@ -15,6 +15,8 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _writeframe->rgb_ptr = new cv::Mat(p_params.H, p_params.W, CV_8UC3);
     _func_camera = std::bind(&prj_v8detector::camera, this);
     // _client.init(p_params.ip, p_params.port);
+
+    _rs485.init("/dev/ttyUSB0",115200);
 }
 
 void prj_v8detector::camera()
@@ -30,6 +32,7 @@ void prj_v8detector::camera()
         _worker->inference(*(_writeframe->rgb_ptr));
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
+        _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
         _resultframe_queue.push(
             Resultframe{
                 _writeframe->rgb_ptr,

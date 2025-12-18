@@ -15,6 +15,7 @@
 #include <chrono>
 #include <ratio>
 #include "communication/client.h"
+#include "communication/RS485.h"
 using namespace std;
 struct Resultframe
 {
@@ -55,6 +56,7 @@ private:
     ZEDframe *_writeframe = nullptr;
     queue<Resultframe> _resultframe_queue;
     client _client;
+    RS485 _rs485;
 };
 
 #endif // PRJ_DETECTOR_HPP

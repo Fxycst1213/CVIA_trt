@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <string>
+#include "logger.hpp"
 
 class RS485
 {

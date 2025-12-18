@@ -335,12 +335,11 @@ namespace model
             m_bboxes = final_bboxes;
             // this->show("unrefine.png");
             /*Postprocess -- 2. 精修关键点*/
-            run_pnp_multi_stage();
             if (!m_bboxes.empty())
             {
                 refine_keypoints(m_bboxes[0].keypoints);
             }
-            run_pnp_multi_stage();
+            run_pnp_single_stage();
 
             // this->show("refine.png");
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
