@@ -37,13 +37,13 @@ RS485::~RS485()
     2.int baud_rate : 波特率，默认9600
     @return: 成功返回0，失败返回-1
 */
-int RS485::init(const string &port, int baud_rate)
+int RS485::init(const prj_params &p_params)
 {
     // 打开串口设备
-    _fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
+    _fd = open(p_params.rs485_port.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
     if (_fd < 0)
     {
-        cerr << "无法打开串口设备: " << port << endl;
+        cerr << "无法打开串口设备: " << p_params.rs485_port << endl;
         return -1;
     }
     // 恢复串口为阻塞状态
@@ -52,8 +52,8 @@ int RS485::init(const string &port, int baud_rate)
     struct termios options;
     tcgetattr(_fd, &options);
     // 设置波特率
-    cfsetispeed(&options, baud_rate);
-    cfsetospeed(&options, baud_rate);
+    cfsetispeed(&options, p_params.rs485_baudrate);
+    cfsetospeed(&options, p_params.rs485_baudrate);
     // 设置数据位: 8位
     options.c_cflag &= ~CSIZE;
     options.c_cflag |= CS8;
@@ -78,13 +78,13 @@ int RS485::init(const string &port, int baud_rate)
     // 应用配置
     if (tcsetattr(_fd, TCSANOW, &options) != 0)
     {
-        cerr << "串口配置失败" << endl;
+        LOGE("设置串口属性失败");
         close(_fd);
         _fd = -1;
         return -1;
     }
 
-    cout << "RS485串口初始化成功: " << port << " 波特率: " << baud_rate << endl;
+    LOG("RS485串口初始化成功: %s 波特率: %d", p_params.rs485_port.c_str(), p_params.rs485_baudrate);
     return 0;
 }
 
@@ -153,12 +153,12 @@ void RS485::packFloatDataFrame(const float arr[3], unsigned char *buffer, int *f
     // 调试输出
     if (_debug)
     {
-        cout << "单精度数据帧(" << *frame_size << "字节): ";
+        LOG("单精度数据帧(%d字节): ", *frame_size);
         for (int i = 0; i < *frame_size; i++)
         {
-            printf("%02X ", buffer[i]);
+            LOG("%02X ", buffer[i]);
         }
-        cout << endl;
+        LOG("\n");
     }
 }
 
@@ -204,12 +204,12 @@ void RS485::packDoubleDataFrame(const double arr[3], unsigned char *buffer, int 
     // 调试输出
     if (_debug)
     {
-        cout << "双精度数据帧(" << *frame_size << "字节): ";
+        LOG("双精度数据帧(%d字节): ", *frame_size);
         for (int i = 0; i < *frame_size; i++)
         {
-            printf("%02X ", buffer[i]);
+            LOG("%02X ", buffer[i]);
         }
-        cout << endl;
+        LOG("\n");
     }
 }
 
@@ -223,7 +223,7 @@ bool RS485::sendFloatArray(const float arr[3])
 {
     if (_fd < 0)
     {
-        cerr << "串口未初始化" << endl;
+        LOGE("串口未初始化");
         return false;
     }
 
@@ -242,14 +242,14 @@ bool RS485::sendFloatArray(const float arr[3])
     {
         if (_debug)
         {
-            cout << "成功发送单精度数据" << bytes_written << "字节" << endl;
-            cout << "发送的数据: [" << arr[0] << ", " << arr[1] << ", " << arr[2] << "]" << endl;
+            LOG("成功发送单精度数据%d字节", bytes_written);
+            LOG("发送的数据: [%f, %f, %f]", arr[0], arr[1], arr[2]);
         }
         return true;
     }
     else
     {
-        cerr << "发送失败，预期" << frame_size << "字节，实际发送" << bytes_written << "字节" << endl;
+        LOGE("发送失败，预期%d字节，实际发送%d字节", frame_size, bytes_written);
         return false;
     }
 }
@@ -264,7 +264,7 @@ bool RS485::sendDoubleArray(const double arr[3])
 {
     if (_fd < 0)
     {
-        cerr << "串口未初始化" << endl;
+        LOGE("串口未初始化");
         return false;
     }
 
@@ -283,14 +283,14 @@ bool RS485::sendDoubleArray(const double arr[3])
     {
         if (_debug)
         {
-            cout << "成功发送双精度数据" << bytes_written << "字节" << endl;
-            cout << "发送的数据: [" << arr[0] << ", " << arr[1] << ", " << arr[2] << "]" << endl;
+            LOG("成功发送双精度数据%d字节", bytes_written);
+            LOG("发送的数据: [%f, %f, %f]", arr[0], arr[1], arr[2]);
         }
         return true;
     }
     else
     {
-        cerr << "发送失败，预期" << frame_size << "字节，实际发送" << bytes_written << "字节" << endl;
+        LOGE("发送失败，预期%d字节，实际发送%d字节", frame_size, bytes_written);
         return false;
     }
 }
@@ -314,6 +314,6 @@ void RS485::closePort()
     {
         close(_fd);
         _fd = -1;
-        cout << "RS485串口已关闭" << endl;
+        LOG("RS485串口已关闭");
     }
 }

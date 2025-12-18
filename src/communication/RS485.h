@@ -6,12 +6,14 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <string>
+#include "../params/params.hpp"
+#include "../logger/logger.hpp"
 
 class RS485
 {
 public:
     // 初始化RS485串口
-    int init(const std::string &port, int baud_rate = B115200);
+    int init(const prj_params &p_params);
     // 发送双精度浮点数数组
     bool sendDoubleArray(const double arr[3]);
     // 发送单精度浮点数数组（保持向后兼容）

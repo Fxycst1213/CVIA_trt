@@ -16,6 +16,7 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _func_camera = std::bind(&prj_v8detector::camera, this);
     _func_camera_foldimages = std::bind(&prj_v8detector::camera_foldimages, this);
     _client.init(p_params);
+    _rs485.init(p_params);
 }
 
 void prj_v8detector::camera()
@@ -31,6 +32,7 @@ void prj_v8detector::camera()
         _worker->inference(*(_writeframe->rgb_ptr));
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
+        _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
         _client.pack_and_send(
             *(_writeframe->rgb_ptr),
             _worker->m_pose->m_bboxes,
@@ -72,7 +74,7 @@ void prj_v8detector::camera_foldimages()
         _worker->inference(*(_writeframe->rgb_ptr));
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
-
+        _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
         _client.pack_and_send(
             *(_writeframe->rgb_ptr),
             _worker->m_pose->m_bboxes,
