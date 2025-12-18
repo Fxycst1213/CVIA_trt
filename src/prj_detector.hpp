@@ -15,6 +15,7 @@
 #include <chrono>
 #include <ratio>
 #include "communication/client.h"
+#include "communication/RS485.h"
 #include <chrono>
 using namespace std;
 
@@ -23,6 +24,7 @@ struct Resultframe
     cv::Mat *rgb_ptr;
     vector<model::pose::bbox> bboxes;
     vector<double> result;
+    uint64_t timestamp;
 };
 
 class prj_v8detector
@@ -50,6 +52,7 @@ private:
     ZEDframe *_writeframe = nullptr;
     queue<Resultframe> _resultframe_queue;
     client _client;
+    RS485 _rs485;
 };
 
 #endif // PRJ_DETECTOR_HPP
