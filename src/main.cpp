@@ -18,7 +18,7 @@ int main(int argc, char const *argv[])
     params.prec = model::precision::FP16;
     auto p_params = prj_params();
 
-    auto t_params = tcp_params();
+    p_params.t_params = tcp_params();
 
     p_params.H = 1080;
     p_params.W = 1920;
@@ -29,7 +29,7 @@ int main(int argc, char const *argv[])
     p_params.socket_mode = 0;
 
     // // 根据worker中的task类型进行推理
-    prj_v8detector prj(onnxPath, level, params, p_params, t_params);
+    prj_v8detector prj(onnxPath, level, params, p_params);
     prj.run();
 
     // auto worker = thread::create_worker(onnxPath, level, params);

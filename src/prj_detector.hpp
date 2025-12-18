@@ -28,10 +28,11 @@ struct Resultframe
 class prj_v8detector
 {
 public:
-    prj_v8detector(string onnxPath, logger::Level level, model::Params params, prj_params p_params, tcp_params t_params);
+    prj_v8detector(string onnxPath, logger::Level level, model::Params params, prj_params p_params);
     ~prj_v8detector();
     void run();
     void camera();
+    void camera_foldimages();
     template <typename T>
     void swapPtr(T **a, T **b)
     {
@@ -45,6 +46,7 @@ private:
     ZEDX *_zed = nullptr;
     std::shared_ptr<timer::Timer> _timer;
     std::function<void()> _func_camera;
+    std::function<void()> _func_camera_foldimages;
     ZEDframe *_writeframe = nullptr;
     queue<Resultframe> _resultframe_queue;
     client _client;

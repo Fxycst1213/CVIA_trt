@@ -3,18 +3,6 @@
 
 #include <string> // 1. 必须包含这个
 
-struct prj_params
-{
-    // 2. 给 int 类型赋默认值，防止随机数
-    int H = 0;
-    int W = 0;
-    std::string resolution = "HD1080"; // 3. 去掉 using namespace std，改为 std::string
-    int cameraID = 0;
-    std::string ip; // 默认为空字符串
-    int port = 0;   // 赋默认值
-    int socket_mode = 0;
-};
-
 struct tcp_params
 {
     // 4. 将常量改为 static constexpr
@@ -29,6 +17,19 @@ struct tcp_params
     int IMG_SIZE = 1920 * 1080 * 3;
     int DATA_SIZE = 0;
     int SOCKETSEND_SIZE = 0;
+};
+
+struct prj_params
+{
+    // 2. 给 int 类型赋默认值，防止随机数
+    int H = 0;
+    int W = 0;
+    std::string resolution = "HD1080"; // 3. 去掉 using namespace std，改为 std::string
+    int cameraID = 0;
+    std::string ip; // 默认为空字符串
+    int port = 0;   // 赋默认值
+    int socket_mode = 0;
+    tcp_params t_params;
 };
 
 #endif // PARAMS_HPP

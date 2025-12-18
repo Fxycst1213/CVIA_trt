@@ -4,15 +4,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-void client::init(const prj_params &p_params, const tcp_params &t_params)
+void client::init(const prj_params &p_params)
 {
     // 1. 保存参数到成员变量，方便 pack_and_send 使用
     _socket_mode = p_params.socket_mode;
-    _img_size_bytes = t_params.IMG_SIZE;
-    _kpt_size_bytes = t_params.KEYPOINTS_BUFSIZE;
-    _pose_size_bytes = t_params.POSE_BUFSIZE;
+    _img_size_bytes = p_params.t_params.IMG_SIZE;
+    _kpt_size_bytes = p_params.t_params.KEYPOINTS_BUFSIZE;
+    _pose_size_bytes = p_params.t_params.POSE_BUFSIZE;
     _resolution = p_params.resolution;
-    _keyPoint_box = t_params.KeyPoint_box;
+    _keyPoint_box = p_params.t_params.KeyPoint_box;
 
     // 2. 清理旧内存
     if (_buffer)
@@ -20,16 +20,20 @@ void client::init(const prj_params &p_params, const tcp_params &t_params)
         delete[] _buffer;
         _buffer = nullptr;
     }
-
+    char header[3];
+    header[0] = 'I';
     // 3. 分配内存并计算总大小
     if (_socket_mode == 0)
     {
+        header[1] = 'H';
+        header[2] = 'V';
         _total_send_size = _img_size_bytes + _kpt_size_bytes + _pose_size_bytes;
         _buffer = new char[_total_send_size];
         memset(_buffer, 0, _total_send_size);
     }
     else if (_socket_mode == 1)
     {
+        header[2] = 'D';
         _total_send_size = _pose_size_bytes;
         _buffer = new char[_total_send_size];
         memset(_buffer, 0, _total_send_size);
@@ -38,7 +42,6 @@ void client::init(const prj_params &p_params, const tcp_params &t_params)
     {
         LOGE("socket_mode error");
     }
-
     // 4. 连接服务器 (保持原样)
     memset(&_remoteAddress, 0, sizeof(_remoteAddress));
     _remoteAddress.sin_family = AF_INET;
@@ -53,60 +56,7 @@ void client::init(const prj_params &p_params, const tcp_params &t_params)
     {
         LOGE("connect error");
     }
-}
-
-bool client::send_handshake()
-{
-    if (_fd == -1)
-    {
-        std::cout << "[Client Error] Cannot handshake, socket not connected." << std::endl;
-        return false;
-    }
-
-    // 使用栈内存，无需 new/delete，速度快且安全
-    char header[3];
-
-    // 1. 固定头
-    header[0] = 'I';
-
-    // 2. 设置分辨率位
-    if (_resolution == "HD1080")
-    {
-        header[1] = 'H';
-    }
-    else
-    {
-        std::cout << "[Client Error] Handshake failed: wrong resolution to TCP!" << std::endl;
-        return false; // 类库中最好不要直接 exit，而是返回 false 让上层处理
-    }
-
-    // 3. 设置模式位
-    if (_socket_mode == 0)
-    {
-        header[2] = 'V'; // Video + Data
-    }
-    else if (_socket_mode == 1)
-    {
-        header[2] = 'D'; // Data Only
-    }
-    else
-    {
-        std::cout << "[Client Error] Handshake failed: wrong socket_mode!" << std::endl;
-        return false;
-    }
-
-    // 4. 发送 (注意：栈数组大小直接写 3)
-    if (SendAll(header, 3))
-    {
-        std::cout << "[Client Info] Server choose mode success! (Code: "
-                  << header[0] << header[1] << header[2] << ")" << std::endl;
-        return true;
-    }
-    else
-    {
-        std::cout << "[Client Error] Failed to tell server which mode!" << std::endl;
-        return false;
-    }
+    SendAll(header, 3);
 }
 
 // --- 新增函数的实现 ---
