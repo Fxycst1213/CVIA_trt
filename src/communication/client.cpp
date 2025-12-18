@@ -1,43 +1,135 @@
-
-
-#include <iostream>
 #include "client.h"
+#include <cstring>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
-/*
-    @brief: socket init
-    @param:
-    1.const string& ip : server ip address
-    2.const int& port : which port of the server to use
-*/
-int client::init(const string &ip, const int &port)
+void client::init(const prj_params &p_params)
 {
-    memset(&_remoteAddress, 0, sizeof(_remoteAddress));
-    _remoteAddress.sin_family = AF_INET;                    // 设置为IP通信
-    _remoteAddress.sin_addr.s_addr = inet_addr(ip.c_str()); // 服务器IP地址
-    _remoteAddress.sin_port = htons(port);                  // 服务器端口号
+    // 1. 保存参数到成员变量，方便 pack_and_send 使用
+    _socket_mode = p_params.socket_mode;
+    _img_size_bytes = p_params.t_params.IMG_SIZE;
+    _kpt_size_bytes = p_params.t_params.KEYPOINTS_BUFSIZE;
+    _pose_size_bytes = p_params.t_params.POSE_BUFSIZE;
+    _resolution = p_params.resolution;
+    _keyPoint_box = p_params.t_params.KeyPoint_box;
 
-    // 创建socket通信文件描述符，设置协议
+    // 2. 清理旧内存
+    if (_buffer)
+    {
+        delete[] _buffer;
+        _buffer = nullptr;
+    }
+    char header[3];
+    header[0] = 'I';
+    // 3. 分配内存并计算总大小
+    if (_socket_mode == 0)
+    {
+        header[1] = 'H';
+        header[2] = 'V';
+        _total_send_size = _img_size_bytes + _kpt_size_bytes + _pose_size_bytes;
+        _buffer = new char[_total_send_size];
+        memset(_buffer, 0, _total_send_size);
+    }
+    else if (_socket_mode == 1)
+    {
+        header[2] = 'D';
+        _total_send_size = _pose_size_bytes;
+        _buffer = new char[_total_send_size];
+        memset(_buffer, 0, _total_send_size);
+    }
+    else
+    {
+        LOGE("socket_mode error");
+    }
+    // 4. 连接服务器 (保持原样)
+    memset(&_remoteAddress, 0, sizeof(_remoteAddress));
+    _remoteAddress.sin_family = AF_INET;
+    _remoteAddress.sin_addr.s_addr = inet_addr(p_params.ip.c_str());
+    _remoteAddress.sin_port = htons(p_params.port);
+
     if ((_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
     {
-        std::cout << "socket error" << std::endl;
-        return -1;
+        LOGE("create socket error");
     }
-
-    // 尝试进行tcp连接至服务器
     if (connect(_fd, (struct sockaddr *)&_remoteAddress, sizeof(struct sockaddr)) < 0)
     {
-        std::cout << "connect error" << std::endl;
-        return -1;
+        LOGE("connect error");
     }
-    return 0;
+    SendAll(header, 3);
 }
 
-/*
-    @brief: send data(block mode)
-    @param:
-    1.char *buffer : ptr to the first address of the data that to be sent
-    2.int size : how many bytes you want to send
-*/
+// --- 新增函数的实现 ---
+bool client::pack_and_send(const cv::Mat &img,
+                           const std::vector<model::pose::bbox> &bboxes,
+                           const std::vector<double> &pose_result,
+                           uint64_t timestamp)
+{
+    if (!_buffer || _fd == -1)
+        return false;
+
+    // 根据模式进行打包
+    if (_socket_mode == 0)
+    {
+        if (!img.empty() && img.isContinuous())
+        {
+            memcpy(_buffer, img.data, _img_size_bytes);
+        }
+        char *ptr_kpt = _buffer + _img_size_bytes;
+        memset(ptr_kpt, 0, _kpt_size_bytes);
+        if (!bboxes.empty())
+        {
+            float *tmp = new float[_keyPoint_box];
+            int size = (bboxes[0].keypoints).size();
+            for (int j = 0; j < size; j++)
+            {
+                auto &keypoint = bboxes[0].keypoints[j];
+                tmp[3 * j] = keypoint.x;
+                tmp[3 * j + 1] = keypoint.y;
+                tmp[3 * j + 2] = keypoint.conf;
+            }
+
+            tmp[_keyPoint_box - 5] = bboxes[0].x0;
+            tmp[_keyPoint_box - 4] = bboxes[0].y0;
+            tmp[_keyPoint_box - 3] = bboxes[0].x1;
+            tmp[_keyPoint_box - 2] = bboxes[0].y1;
+            tmp[_keyPoint_box - 1] = bboxes[0].confidence;
+            // copy data
+            memcpy(ptr_kpt, tmp, _kpt_size_bytes);
+            delete[] tmp;
+        }
+
+        char *ptr_pose = ptr_kpt + _kpt_size_bytes;
+        memset(ptr_pose, 0, _pose_size_bytes);
+
+        if (!pose_result.empty())
+        {
+            size_t data_len = pose_result.size() * sizeof(double);
+            if (data_len <= _pose_size_bytes)
+            {
+                memcpy(ptr_pose, pose_result.data(), data_len);
+            }
+        }
+        memcpy(ptr_pose + _pose_size_bytes - 8, &timestamp, sizeof(uint64_t));
+    }
+    else if (_socket_mode == 1)
+    {
+        memset(_buffer, 0, _total_send_size); // 清零
+        if (!pose_result.empty())
+        {
+            size_t data_len = pose_result.size() * sizeof(double);
+            if (data_len <= _total_send_size)
+            {
+                memcpy(_buffer, pose_result.data(), data_len);
+            }
+        }
+        memcpy(_buffer + _total_send_size - 8, &timestamp, sizeof(uint64_t));
+    }
+
+    // 统一发送
+    return SendAll(_buffer, _total_send_size);
+}
+
 bool client::SendAll(char *buffer, int size)
 {
     while (size > 0)
@@ -53,5 +145,15 @@ bool client::SendAll(char *buffer, int size)
 
 client::~client()
 {
-    close(_fd);
+    if (_buffer)
+    {
+        delete[] _buffer;
+        _buffer = nullptr;
+    }
+
+    if (_fd != -1)
+    {
+        close(_fd);
+        _fd = -1;
+    }
 }

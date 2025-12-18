@@ -198,7 +198,7 @@ namespace model
             : Model(onnx_path, level, params)
         {
 
-            m_result.resize(3, 0.0);
+            m_result.resize(6, 0.0);
 
             _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
                   0.0, 1067.37400981335, 525.523361276358,
@@ -335,7 +335,6 @@ namespace model
             m_bboxes = final_bboxes;
             // this->show("unrefine.png");
             /*Postprocess -- 2. 精修关键点*/
-            run_pnp_multi_stage();
             if (!m_bboxes.empty())
             {
                 refine_keypoints(m_bboxes[0].keypoints);
@@ -604,6 +603,9 @@ namespace model
                 m_result[0] = T1.at<double>(0, 0);
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
+                m_result[3] = T1.at<double>(0, 0);
+                m_result[4] = T1.at<double>(1, 0);
+                m_result[5] = T1.at<double>(2, 0);
                 LOG("\tPose result x: %.4f , y: %.4f , z: %.4f", m_result[0], m_result[1], m_result[2]);
             }
         }

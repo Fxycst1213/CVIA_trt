@@ -3,6 +3,7 @@
 #include "worker/worker.hpp"
 #include "utils.hpp"
 #include "prj_detector.hpp"
+#include "params/params.hpp"
 using namespace std;
 
 int main(int argc, char const *argv[])
@@ -17,11 +18,13 @@ int main(int argc, char const *argv[])
     params.prec = model::precision::FP16;
     auto p_params = prj_params();
 
+    p_params.t_params = tcp_params();
+
     p_params.H = 1080;
     p_params.W = 1920;
     p_params.resolution = "HD1080";
     p_params.cameraID = 0;
-    p_params.ip = "10.1.1.195";
+    p_params.ip = "192.168.31.165";
     p_params.port = 1234;
     p_params.socket_mode = 0;
 
