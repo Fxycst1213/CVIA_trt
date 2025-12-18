@@ -15,27 +15,20 @@
 #include <chrono>
 #include <ratio>
 #include "communication/client.h"
+#include <chrono>
 using namespace std;
+
 struct Resultframe
 {
     cv::Mat *rgb_ptr;
     vector<model::pose::bbox> bboxes;
     vector<double> result;
 };
-struct prj_params
-{
-    int H;
-    int W;
-    string resolution = "HD1080";
-    int cameraID = 0;
-    string ip;
-    int port;
-    int socket_mode;
-};
+
 class prj_v8detector
 {
 public:
-    prj_v8detector(string onnxPath, logger::Level level, model::Params params, prj_params p_params);
+    prj_v8detector(string onnxPath, logger::Level level, model::Params params, prj_params p_params, tcp_params t_params);
     ~prj_v8detector();
     void run();
     void camera();
