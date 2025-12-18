@@ -16,23 +16,17 @@
 #include <ratio>
 #include "communication/client.h"
 #include "communication/RS485.h"
+#include <chrono>
 using namespace std;
+
 struct Resultframe
 {
     cv::Mat *rgb_ptr;
     vector<model::pose::bbox> bboxes;
     vector<double> result;
+    uint64_t timestamp;
 };
-struct prj_params
-{
-    int H;
-    int W;
-    string resolution = "HD1080";
-    int cameraID = 0;
-    string ip;
-    int port;
-    int socket_mode;
-};
+
 class prj_v8detector
 {
 public:
@@ -40,6 +34,7 @@ public:
     ~prj_v8detector();
     void run();
     void camera();
+    void camera_foldimages();
     template <typename T>
     void swapPtr(T **a, T **b)
     {
@@ -53,6 +48,7 @@ private:
     ZEDX *_zed = nullptr;
     std::shared_ptr<timer::Timer> _timer;
     std::function<void()> _func_camera;
+    std::function<void()> _func_camera_foldimages;
     ZEDframe *_writeframe = nullptr;
     queue<Resultframe> _resultframe_queue;
     client _client;

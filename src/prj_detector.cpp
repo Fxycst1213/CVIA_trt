@@ -14,9 +14,9 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _writeframe = new ZEDframe;
     _writeframe->rgb_ptr = new cv::Mat(p_params.H, p_params.W, CV_8UC3);
     _func_camera = std::bind(&prj_v8detector::camera, this);
-    // _client.init(p_params.ip, p_params.port);
-
-    _rs485.init("/dev/ttyUSB0",115200);
+    _func_camera_foldimages = std::bind(&prj_v8detector::camera_foldimages, this);
+    _client.init(p_params);
+    _rs485.init(p_params);
 }
 
 void prj_v8detector::camera()
@@ -33,18 +33,70 @@ void prj_v8detector::camera()
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
         _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
+<<<<<<< HEAD
         _resultframe_queue.push(
             Resultframe{
                 _writeframe->rgb_ptr,
                 _worker->m_pose->m_bboxes,
                 _worker->m_pose->m_result});
+=======
+        _client.pack_and_send(
+            *(_writeframe->rgb_ptr),
+            _worker->m_pose->m_bboxes,
+            _worker->m_pose->m_result,
+            _writeframe->timestamp);
+        // _resultframe_queue.push(
+        //     Resultframe{
+        //         _writeframe->rgb_ptr,
+        //         _worker->m_pose->m_bboxes,
+        //         _worker->m_pose->m_result});
+    }
+}
+
+void prj_v8detector::camera_foldimages()
+{
+    std::vector<cv::String> filenames;
+    cv::String folder = "/home/cvia/yifei/images3/*.png";
+
+    cv::glob(folder, filenames, false);
+    std::sort(filenames.begin(), filenames.end());
+    int current_idx = 0;
+
+    while (1)
+    {
+        _timer->init();
+        _timer->start_cpu();
+
+        cv::Mat img = cv::imread(filenames[current_idx]);
+        *(_writeframe->rgb_ptr) = img;
+        auto now = std::chrono::system_clock::now();
+        _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        current_idx++;
+        if (current_idx >= filenames.size())
+        {
+            break;
+        }
+        _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
+        _timer->start_cpu();
+        _worker->inference(*(_writeframe->rgb_ptr));
+        _timer->stop_cpu<timer::Timer::ms>("inference");
+        _timer->show();
+        _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
+        _client.pack_and_send(
+            *(_writeframe->rgb_ptr),
+            _worker->m_pose->m_bboxes,
+            _worker->m_pose->m_result,
+            _writeframe->timestamp);
+>>>>>>> a604f104c8c0a7b13df22c495f80b04f8aab74a0
     }
 }
 
 void prj_v8detector::run()
 {
-    auto t1 = std::thread(_func_camera);
-    t1.join();
+    // auto t1 = std::thread(_func_camera);
+    auto t2 = std::thread(_func_camera_foldimages);
+    // t1.join();
+    t2.join();
 }
 
 prj_v8detector::~prj_v8detector()

@@ -43,6 +43,7 @@ include_directories(
     ${PROJECT_SOURCE_DIR}/src/ZEDX
     ${PROJECT_SOURCE_DIR}/src/communication
     ${PROJECT_SOURCE_DIR}/src/filter
+    ${PROJECT_SOURCE_DIR}/src/params
     ${ZED_INCLUDE_DIRS}
 )
 
