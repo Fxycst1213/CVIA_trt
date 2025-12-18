@@ -16,7 +16,7 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _func_camera = std::bind(&prj_v8detector::camera, this);
     _func_camera_foldimages = std::bind(&prj_v8detector::camera_foldimages, this);
     _client.init(p_params);
-    _rs485.init("/dev/ttyUSB0", B115200);
+    _rs485.init(p_params);
 }
 
 void prj_v8detector::camera()
