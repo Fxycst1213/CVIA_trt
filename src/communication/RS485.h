@@ -6,12 +6,8 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <string>
-<<<<<<< HEAD
-#include "logger.hpp"
-=======
 #include "../params/params.hpp"
 #include "../logger/logger.hpp"
->>>>>>> a604f104c8c0a7b13df22c495f80b04f8aab74a0
 
 class RS485
 {

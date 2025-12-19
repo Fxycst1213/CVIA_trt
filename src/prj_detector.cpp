@@ -33,13 +33,6 @@ void prj_v8detector::camera()
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
         _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
-<<<<<<< HEAD
-        _resultframe_queue.push(
-            Resultframe{
-                _writeframe->rgb_ptr,
-                _worker->m_pose->m_bboxes,
-                _worker->m_pose->m_result});
-=======
         _client.pack_and_send(
             *(_writeframe->rgb_ptr),
             _worker->m_pose->m_bboxes,
@@ -87,7 +80,6 @@ void prj_v8detector::camera_foldimages()
             _worker->m_pose->m_bboxes,
             _worker->m_pose->m_result,
             _writeframe->timestamp);
->>>>>>> a604f104c8c0a7b13df22c495f80b04f8aab74a0
     }
 }
 
