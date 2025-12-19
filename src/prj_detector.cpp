@@ -29,7 +29,7 @@ void prj_v8detector::camera()
         *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
         _timer->start_cpu();
-        _worker->inference(*(_writeframe->rgb_ptr));
+        _worker->inference(*(_writeframe->rgb_ptr), _writeframe->timestamp);
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
         _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
@@ -71,7 +71,7 @@ void prj_v8detector::camera_foldimages()
         }
         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
         _timer->start_cpu();
-        _worker->inference(*(_writeframe->rgb_ptr));
+        _worker->inference(*(_writeframe->rgb_ptr), _writeframe->timestamp);
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
         _rs485.sendDoubleArray(_worker->m_pose->m_result.data());

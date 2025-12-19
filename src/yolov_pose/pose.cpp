@@ -10,6 +10,7 @@
 #include "pose.hpp"
 #include "preprocess.hpp"
 #include "cudatools.hpp"
+
 using namespace std;
 using namespace nvinfer1;
 
@@ -215,7 +216,7 @@ namespace model
                     93.18, 2.06, -2.96);
         }
 
-        bool Pose::postprocess_cpu()
+        bool Pose::postprocess_cpu(uint64_t &timestamp)
         {
 
             m_timer->start_cpu();
@@ -339,7 +340,7 @@ namespace model
             {
                 refine_keypoints(m_bboxes[0].keypoints);
             }
-            run_pnp_multi_stage();
+            run_pnp_multi_stage(timestamp);
 
             // this->show("refine.png");
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
@@ -347,9 +348,9 @@ namespace model
             return true;
         }
 
-        bool Pose::postprocess_gpu()
+        bool Pose::postprocess_gpu(uint64_t &timestamp)
         {
-            return postprocess_cpu();
+            return postprocess_cpu(timestamp);
         }
 
         shared_ptr<Pose> make_pose(
@@ -474,8 +475,18 @@ namespace model
             }
         }
 
-        void Pose::run_pnp_multi_stage()
+        void Pose::run_pnp_multi_stage(uint64_t &timestamp)
         {
+            double dt = 0.0;
+            if (_last_timestamp != 0)
+            {
+                dt = static_cast<double>(timestamp - _last_timestamp) / 1000.0;
+            }
+            _last_timestamp = timestamp;
+
+            if (dt > 1.0 || dt < 0.0)
+                dt = 0.033;
+
             is_current_frame_good = false; // 重置标记位
             if (m_bboxes.size() >= 1)
             {
@@ -600,13 +611,37 @@ namespace model
 
             if (!T1.empty())
             {
+                // 1. 获取当前观测值 (PnP Raw)
                 m_result[0] = T1.at<double>(0, 0);
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
-                m_result[3] = T1.at<double>(0, 0);
-                m_result[4] = T1.at<double>(1, 0);
-                m_result[5] = T1.at<double>(2, 0);
-                LOG("\tPose result x: %.4f , y: %.4f , z: %.4f", m_result[0], m_result[1], m_result[2]);
+
+                cv::Point3f predicted_pos = m_kf.predict(dt);
+                cv::Point3f kf_result;
+
+                if (is_current_frame_good)
+                {
+                    kf_result = m_kf.update(m_result[0], m_result[1], m_result[2]);
+                }
+                else
+                {
+                    if (m_kf.isInitialized())
+                    {
+                        kf_result = m_kf.update(predicted_pos.x, predicted_pos.y, predicted_pos.z);
+                    }
+                    else
+                    {
+                        kf_result = m_kf.update(m_result[0], m_result[1], m_result[2]);
+                    }
+                }
+
+                // 将卡尔曼滤波后的结果 (修正后的最优值) 填入 m_result
+                m_result[3] = kf_result.x;
+                m_result[4] = kf_result.y;
+                m_result[5] = kf_result.z;
+
+                LOG("\tlook what: x:%.4f,y: %.4f , z: %.4f, IMF-P Target x: %.4f , y: %.4f , z: %.4f ",
+                    m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
             }
         }
 
