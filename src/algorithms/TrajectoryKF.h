@@ -29,8 +29,12 @@ public:
      * @return 修正后的最优估计位置 x, y, z
      */
     cv::Point3f update(float x, float y, float z);
+    cv::Point3f Auto_update(float x, float y, float z);
 
-    bool isInitialized() const { return initialized; }
+    bool isInitialized() const
+    {
+        return initialized;
+    }
 
 private:
     cv::KalmanFilter KF;
@@ -39,6 +43,7 @@ private:
 
     // 调试用：打印矩阵
     void printState();
+    float base_Q_pos = 1e-5;
 };
 
 #endif // TRAJECTORY_KF_H

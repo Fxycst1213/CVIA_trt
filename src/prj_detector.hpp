@@ -17,15 +17,11 @@
 #include "communication/client.h"
 #include "communication/RS485.h"
 #include <chrono>
-using namespace std;
+#include "params/params.hpp"
+#include "params/pose_params.hpp"
+#include <opencv2/opencv.hpp>
 
-struct Resultframe
-{
-    cv::Mat *rgb_ptr;
-    vector<model::pose::bbox> bboxes;
-    vector<double> result;
-    uint64_t timestamp;
-};
+using namespace std;
 
 class prj_v8detector
 {

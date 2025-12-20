@@ -249,6 +249,30 @@ src/ZEDX/ZEDX.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/ZEDX/ZEDX.cpp.s
 .PHONY : src/ZEDX/ZEDX.cpp.s
 
+src/algorithms/FrameLookbackEstimator.o: src/algorithms/FrameLookbackEstimator.cpp.o
+.PHONY : src/algorithms/FrameLookbackEstimator.o
+
+# target to build an object file
+src/algorithms/FrameLookbackEstimator.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/FrameLookbackEstimator.cpp.o
+.PHONY : src/algorithms/FrameLookbackEstimator.cpp.o
+
+src/algorithms/FrameLookbackEstimator.i: src/algorithms/FrameLookbackEstimator.cpp.i
+.PHONY : src/algorithms/FrameLookbackEstimator.i
+
+# target to preprocess a source file
+src/algorithms/FrameLookbackEstimator.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/FrameLookbackEstimator.cpp.i
+.PHONY : src/algorithms/FrameLookbackEstimator.cpp.i
+
+src/algorithms/FrameLookbackEstimator.s: src/algorithms/FrameLookbackEstimator.cpp.s
+.PHONY : src/algorithms/FrameLookbackEstimator.s
+
+# target to generate assembly for a file
+src/algorithms/FrameLookbackEstimator.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/FrameLookbackEstimator.cpp.s
+.PHONY : src/algorithms/FrameLookbackEstimator.cpp.s
+
 src/algorithms/PeriodEstimator.o: src/algorithms/PeriodEstimator.cpp.o
 .PHONY : src/algorithms/PeriodEstimator.o
 
@@ -609,6 +633,9 @@ help:
 	@echo "... src/ZEDX/ZEDX.o"
 	@echo "... src/ZEDX/ZEDX.i"
 	@echo "... src/ZEDX/ZEDX.s"
+	@echo "... src/algorithms/FrameLookbackEstimator.o"
+	@echo "... src/algorithms/FrameLookbackEstimator.i"
+	@echo "... src/algorithms/FrameLookbackEstimator.s"
 	@echo "... src/algorithms/PeriodEstimator.o"
 	@echo "... src/algorithms/PeriodEstimator.i"
 	@echo "... src/algorithms/PeriodEstimator.s"

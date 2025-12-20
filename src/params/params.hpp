@@ -1,7 +1,18 @@
 #ifndef PARAMS_HPP
 #define PARAMS_HPP
 
-#include <string> // 1. 必须包含这个
+#include <vector>
+#include <string>
+#include <opencv2/opencv.hpp>
+#include "pose_params.hpp"
+
+struct Resultframe
+{
+    cv::Mat rgb;
+    std::vector<model::pose::bbox> bboxes;
+    std::vector<double> pose_result;
+    uint64_t timestamp;
+};
 
 struct tcp_params
 {

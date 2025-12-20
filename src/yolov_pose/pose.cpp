@@ -80,7 +80,7 @@ namespace model
             m_bboxes.clear();
         }
 
-        bool Pose::preprocess_cpu(cv::Mat &img)
+        bool Pose::preprocess_cpu(const cv::Mat &img)
         {
             /*Preprocess -- yolo的预处理并没有mean和std，所以可以直接skip掉mean和std的计算 */
 
@@ -145,7 +145,7 @@ namespace model
             return true;
         }
 
-        bool Pose::preprocess_gpu(cv::Mat &img)
+        bool Pose::preprocess_gpu(const cv::Mat &img)
         {
             /*Preprocess -- yolo的预处理并没有mean和std，所以可以直接skip掉mean和std的计算 */
 
@@ -202,7 +202,7 @@ namespace model
             m_result.resize(6, 0.0);
 
             _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
-                  0.0, 1067.37400981335, 525.523361276358,
+                  0.0, 1067.37400981335, 525.023361276358,
                   0.0, 0.0, 1.0);
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
@@ -214,9 +214,18 @@ namespace model
                     -107.09, -221.28, 38.62,
                     -128.86, -374.6, 40.37,
                     93.18, 2.06, -2.96);
+            // 指定容器大小
+            m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(1000);
+            // 【关键】设置 X, Y, Z 三轴的周期 (单位：帧)
+            // 满 了以后开始计算
+            double x_period = 760;
+            double y_period = 760;
+            double z_period = 760;
+            m_lookback_estimator->setPeriods(x_period, y_period, z_period);
+            m_lookback_estimator->setLookbackOffsets(750.5, 751.5, 749.5);
         }
 
-        bool Pose::postprocess_cpu(uint64_t &timestamp)
+        bool Pose::postprocess_cpu(const uint64_t &timestamp)
         {
 
             m_timer->start_cpu();
@@ -336,19 +345,20 @@ namespace model
             m_bboxes = final_bboxes;
             // this->show("unrefine.png");
             /*Postprocess -- 2. 精修关键点*/
+            m_frame_counter++;
             if (!m_bboxes.empty())
             {
                 refine_keypoints(m_bboxes[0].keypoints);
             }
-            run_pnp_multi_stage(timestamp);
-
+            run_pnp_multi_stage();
+            run_filter_and_estimation(timestamp, m_frame_counter);
             // this->show("refine.png");
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
             return true;
         }
 
-        bool Pose::postprocess_gpu(uint64_t &timestamp)
+        bool Pose::postprocess_gpu(const uint64_t &timestamp)
         {
             return postprocess_cpu(timestamp);
         }
@@ -475,18 +485,8 @@ namespace model
             }
         }
 
-        void Pose::run_pnp_multi_stage(uint64_t &timestamp)
+        void Pose::run_pnp_multi_stage()
         {
-            double dt = 0.0;
-            if (_last_timestamp != 0)
-            {
-                dt = static_cast<double>(timestamp - _last_timestamp) / 1000.0;
-            }
-            _last_timestamp = timestamp;
-
-            if (dt > 1.0 || dt < 0.0)
-                dt = 0.033;
-
             is_current_frame_good = false; // 重置标记位
             if (m_bboxes.size() >= 1)
             {
@@ -521,7 +521,7 @@ namespace model
                                                       false, 100, 2.0, 0.99, inliers, cv::SOLVEPNP_SQPNP);
 
                     // 4. 验证解算质量
-                    if (success && inliers.size() > 5)
+                    if (success && inliers.size() >= 5)
                     {
                         double current_z = T1.at<double>(2, 0);
                         bool is_depth_safe = false;
@@ -616,9 +616,27 @@ namespace model
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
 
-                cv::Point3f predicted_pos = m_kf.predict(dt);
-                cv::Point3f kf_result;
+                LOG("\tlook what: x:%.4f,y: %.4f , z: %.4f, ",
+                    m_result[0], m_result[1], m_result[2]);
+            }
+        }
 
+        void Pose::run_filter_and_estimation(const uint64_t &timestamp, uint64_t frame_id)
+        {
+            double dt = 0.0;
+            if (_last_timestamp != 0)
+            {
+                dt = static_cast<double>(timestamp - _last_timestamp) / 1000.0;
+            }
+            _last_timestamp = timestamp;
+
+            if (dt > 1.0 || dt < 0.0)
+                dt = 0.033;
+
+            cv::Point3f predicted_pos = m_kf.predict(dt);
+            cv::Point3f kf_result;
+            if (!_T1_prev.empty())
+            {
                 if (is_current_frame_good)
                 {
                     kf_result = m_kf.update(m_result[0], m_result[1], m_result[2]);
@@ -627,6 +645,8 @@ namespace model
                 {
                     if (m_kf.isInitialized())
                     {
+                        // 使用预测值作为测量值更新，或者只 predict 不 update
+                        // 原代码逻辑是：如果初始化了用 predict 更新，否则用历史值(这里逻辑略奇怪，照搬原逻辑)
                         kf_result = m_kf.update(predicted_pos.x, predicted_pos.y, predicted_pos.z);
                     }
                     else
@@ -635,26 +655,33 @@ namespace model
                     }
                 }
 
-                // 将卡尔曼滤波后的结果 (修正后的最优值) 填入 m_result
+                // 4. 保存滤波后的结果
                 m_result[3] = kf_result.x;
                 m_result[4] = kf_result.y;
                 m_result[5] = kf_result.z;
 
-                m_estimator.update(timestamp,m_result[3],m_result[4],m_result[5]);
+                m_lookback_estimator->update(frame_id, m_result[3], m_result[4], m_result[5]);
 
-                double predicted_periods[3] = {0, 0, 0};
-                bool is_ready_predicted_periods = m_estimator.getEstimatedPeriods(predicted_periods);
+                // 步骤 B: 获取回溯预测值
+                double predicted_vals[3] = {0.0, 0.0, 0.0};
+                bool is_ready = m_lookback_estimator->getPrediction(predicted_vals);
 
-                if(is_ready_predicted_periods)
+                if (is_ready)
                 {
-                    //存入周期
-                    m_result[0] = predicted_periods[0];
-                    m_result[1] = predicted_periods[1];
-                    m_result[2] = predicted_periods[2];
+                    m_result[0] = predicted_vals[0];
+                    m_result[1] = predicted_vals[1];
+                    m_result[2] = predicted_vals[2];
                 }
+                else
+                {
+                    m_result[0] = 0;
+                    m_result[1] = 0;
+                    m_result[2] = 0;
+                }
+                // 【新增集成代码 End】 -------------------------------------
 
-                LOG("\tlook what: x:%.4f,y: %.4f , z: %.4f, IMF-P Target x: %.4f , y: %.4f , z: %.4f ",
-                    m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
+                LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
+                    frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
             }
         }
 

@@ -31,23 +31,23 @@ namespace thread
         }
     }
 
-    void Worker::inference(cv::Mat &img, uint64_t &timestamp)
+    void Worker::inference(const Resultframe &resultframe)
     {
         if (m_params.task == model::task_type::CLASSIFICATION)
         {
             // m_classifier->load_image(imagePath);
-            m_classifier->inference(img, timestamp);
+            m_classifier->inference(resultframe);
         }
 
         else if (m_params.task == model::task_type::DETECTION)
         {
             // m_detector->load_image(imagePath);
-            m_detector->inference(img, timestamp);
+            m_detector->inference(resultframe);
         }
         else if (m_params.task == model::task_type::POSE)
         {
             // m_detector->load_image(imagePath);
-            m_pose->inference(img, timestamp);
+            m_pose->inference(resultframe);
         }
     }
 
