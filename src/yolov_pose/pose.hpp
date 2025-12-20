@@ -69,9 +69,9 @@ namespace model
             virtual void reset_task() override;
             virtual bool preprocess_cpu(cv::Mat &img) override;
             virtual bool preprocess_gpu(cv::Mat &img) override;
-            virtual bool postprocess_cpu(uint64_t &timestamp) override;
-            virtual bool postprocess_gpu(uint64_t &timestamp) override;
-            void run_pnp_multi_stage(uint64_t &timestamp);
+            virtual bool postprocess_cpu(const uint64_t &timestamp) override;
+            virtual bool postprocess_gpu(const uint64_t &timestamp) override;
+            void run_pnp_multi_stage(const uint64_t &timestamp);
             void run_pnp_single_stage();
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);

@@ -170,7 +170,7 @@ namespace model
             return true;
         }
 
-        bool Detector::postprocess_cpu(uint64_t &timestamp)
+        bool Detector::postprocess_cpu(const uint64_t &timestamp)
         {
             m_timer->start_cpu();
 
@@ -332,7 +332,7 @@ namespace model
             return true;
         }
 
-        bool Detector::postprocess_gpu(uint64_t &timestamp)
+        bool Detector::postprocess_gpu(const uint64_t &timestamp)
         {
             return postprocess_cpu(timestamp);
         }

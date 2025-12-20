@@ -216,7 +216,7 @@ namespace model
                     93.18, 2.06, -2.96);
         }
 
-        bool Pose::postprocess_cpu(uint64_t &timestamp)
+        bool Pose::postprocess_cpu(const uint64_t &timestamp)
         {
 
             m_timer->start_cpu();
@@ -348,7 +348,7 @@ namespace model
             return true;
         }
 
-        bool Pose::postprocess_gpu(uint64_t &timestamp)
+        bool Pose::postprocess_gpu(const uint64_t &timestamp)
         {
             return postprocess_cpu(timestamp);
         }
@@ -475,7 +475,7 @@ namespace model
             }
         }
 
-        void Pose::run_pnp_multi_stage(uint64_t &timestamp)
+        void Pose::run_pnp_multi_stage(const uint64_t &timestamp)
         {
             double dt = 0.0;
             if (_last_timestamp != 0)

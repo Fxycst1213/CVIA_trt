@@ -116,7 +116,7 @@ namespace model
             return true;
         }
 
-        bool Classifier::postprocess_cpu(uint64_t &timestamp)
+        bool Classifier::postprocess_cpu(const uint64_t &timestamp)
         {
             /*Postprocess -- 测速*/
             m_timer->start_cpu();
@@ -142,7 +142,7 @@ namespace model
             return true;
         }
 
-        bool Classifier::postprocess_gpu(uint64_t &timestamp)
+        bool Classifier::postprocess_gpu(const uint64_t &timestamp)
         {
             /*
                 由于classification task的postprocess比较简单，所以CPU/GPU的处理这里用一样的

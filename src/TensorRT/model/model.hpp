@@ -77,7 +77,7 @@ namespace model
         virtual ~Model() {};
         void load_image(std::string image_path);
         void init_model();            // 初始化模型，包括build推理引擎, 分配内存，创建context, 设置bindings
-        void inference(cv::Mat &img, uint64_t &timestamp); // 推理部分，preprocess-enqueue-postprocess
+        void inference(cv::Mat &img, const uint64_t &timestamp); // 推理部分，preprocess-enqueue-postprocess
         std::string getPrec(precision prec);
 
     public:
@@ -99,8 +99,8 @@ namespace model
         // 不同的task的前处理/后处理是不一样的，所以具体的实现放在子类
         virtual bool preprocess_cpu(cv::Mat &img) = 0;
         virtual bool preprocess_gpu(cv::Mat &img) = 0;
-        virtual bool postprocess_cpu(uint64_t &timestamp) = 0;
-        virtual bool postprocess_gpu(uint64_t &timestamp) = 0;
+        virtual bool postprocess_cpu(const uint64_t &timestamp) = 0;
+        virtual bool postprocess_gpu(const uint64_t &timestamp) = 0;
 
     public:
         std::string m_imagePath;

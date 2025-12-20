@@ -170,7 +170,7 @@ namespace model
         fclose(f);
     }
 
-    void Model::inference(cv::Mat &img, uint64_t &timestamp)
+    void Model::inference(cv::Mat &img, const uint64_t &timestamp)
     {
         m_timer->init();
         reset_task();

@@ -31,7 +31,7 @@ namespace thread
         }
     }
 
-    void Worker::inference(cv::Mat &img, uint64_t &timestamp)
+    void Worker::inference(cv::Mat &img, const uint64_t &timestamp)
     {
         if (m_params.task == model::task_type::CLASSIFICATION)
         {
