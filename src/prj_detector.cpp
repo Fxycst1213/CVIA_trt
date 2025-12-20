@@ -23,26 +23,24 @@ void prj_v8detector::camera()
 {
     while (1)
     {
+        Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
         // _zed->grab_frame(_writeframe);
         *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
+        _resultframe.rgb = *(_writeframe->rgb_ptr);
+        _resultframe.timestamp = _writeframe->timestamp;
         _timer->start_cpu();
-        _worker->inference(*(_writeframe->rgb_ptr), _writeframe->timestamp);
+        _worker->inference(_resultframe);
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
-        _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
-        _client.pack_and_send(
-            *(_writeframe->rgb_ptr),
-            _worker->m_pose->m_bboxes,
-            _worker->m_pose->m_result,
-            _writeframe->timestamp);
-        // _resultframe_queue.push(
-        //     Resultframe{
-        //         _writeframe->rgb_ptr,
-        //         _worker->m_pose->m_bboxes,
-        //         _worker->m_pose->m_result});
+        _resultframe.pose_result = _worker->m_pose->m_result;
+        _resultframe.timestamp = _writeframe->timestamp;
+        _rs485.sendDoubleArray(_resultframe.pose_result.data());
+
+        _resultframe_queue.push(_resultframe);
+        _client.pack_and_send(_resultframe_queue.back());
     }
 }
 
@@ -50,18 +48,17 @@ void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
     cv::String folder = "/home/cvia/yifei/images1/*.png";
-
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     int current_idx = 0;
 
     while (1)
     {
+        Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
 
-        cv::Mat img = cv::imread(filenames[current_idx]);
-        *(_writeframe->rgb_ptr) = img;
+        *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         auto now = std::chrono::system_clock::now();
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         current_idx++;
@@ -70,16 +67,18 @@ void prj_v8detector::camera_foldimages()
             break;
         }
         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
+        _resultframe.rgb = *(_writeframe->rgb_ptr);
+        _resultframe.timestamp = _writeframe->timestamp;
         _timer->start_cpu();
-        _worker->inference(*(_writeframe->rgb_ptr), _writeframe->timestamp);
+        _worker->inference(_resultframe);
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
-        _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
-        _client.pack_and_send(
-            *(_writeframe->rgb_ptr),
-            _worker->m_pose->m_bboxes,
-            _worker->m_pose->m_result,
-            _writeframe->timestamp);
+        _resultframe.bboxes = _worker->m_pose->m_bboxes;
+        _resultframe.pose_result = _worker->m_pose->m_result;
+        _rs485.sendDoubleArray(_resultframe.pose_result.data());
+
+        _resultframe_queue.push(_resultframe);
+        _client.pack_and_send(_resultframe_queue.back());
     }
 }
 

@@ -22,8 +22,8 @@ namespace model
         public:
             virtual void setup(void const *data, std::size_t size) override;
             virtual void reset_task() override;
-            virtual bool preprocess_cpu(cv::Mat &img) override;
-            virtual bool preprocess_gpu(cv::Mat &img) override;
+            virtual bool preprocess_cpu(const cv::Mat &img) override;
+            virtual bool preprocess_gpu(const cv::Mat &img) override;
             virtual bool postprocess_cpu(const uint64_t &timestamp) override;
             virtual bool postprocess_gpu(const uint64_t &timestamp) override;
 

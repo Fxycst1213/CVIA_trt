@@ -16,10 +16,7 @@ public:
 
     void init(const prj_params &p_params);
 
-    bool pack_and_send(const cv::Mat &img,
-                       const std::vector<model::pose::bbox> &bboxes,
-                       const std::vector<double> &pose_result,
-                       uint64_t timestamp);
+    bool pack_and_send(const Resultframe &frame);
 
 private:
     // 内部使用的发送函数，设为 private 也可以，或者 public 也可以

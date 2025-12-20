@@ -170,28 +170,28 @@ namespace model
         fclose(f);
     }
 
-    void Model::inference(cv::Mat &img, const uint64_t &timestamp)
+    void Model::inference(const Resultframe &resultframe)
     {
         m_timer->init();
         reset_task();
         if (m_params->dev == CPU)
         {
-            preprocess_cpu(img);
+            preprocess_cpu(resultframe.rgb);
         }
         else
         {
-            preprocess_gpu(img);
+            preprocess_gpu(resultframe.rgb);
         }
 
         enqueue_bindings();
 
         if (m_params->dev == CPU)
         {
-            postprocess_cpu(timestamp);
+            postprocess_cpu(resultframe.timestamp);
         }
         else
         {
-            postprocess_gpu(timestamp);
+            postprocess_gpu(resultframe.timestamp);
         }
     }
 
