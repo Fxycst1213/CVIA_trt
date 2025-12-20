@@ -24,8 +24,8 @@ namespace model
             virtual void reset_task() override;
             virtual bool preprocess_cpu(cv::Mat &img) override;
             virtual bool preprocess_gpu(cv::Mat &img) override;
-            virtual bool postprocess_cpu() override;
-            virtual bool postprocess_gpu() override;
+            virtual bool postprocess_cpu(uint64_t &timestamp) override;
+            virtual bool postprocess_gpu(uint64_t &timestamp) override;
 
         private:
             float m_confidence;

@@ -53,6 +53,7 @@ private:
     queue<Resultframe> _resultframe_queue;
     client _client;
     RS485 _rs485;
+    uint64_t m_time;
 };
 
 #endif // PRJ_DETECTOR_HPP

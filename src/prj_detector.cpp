@@ -29,7 +29,7 @@ void prj_v8detector::camera()
         *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
         _timer->start_cpu();
-        _worker->inference(*(_writeframe->rgb_ptr));
+        _worker->inference(*(_writeframe->rgb_ptr), _writeframe->timestamp);
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
         _rs485.sendDoubleArray(_worker->m_pose->m_result.data());
@@ -55,6 +55,9 @@ void prj_v8detector::camera_foldimages()
     std::sort(filenames.begin(), filenames.end());
     int current_idx = 0;
 
+    auto now = std::chrono::system_clock::now();
+    long long current_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
     while (1)
     {
         _timer->init();
@@ -62,8 +65,11 @@ void prj_v8detector::camera_foldimages()
 
         cv::Mat img = cv::imread(filenames[current_idx]);
         *(_writeframe->rgb_ptr) = img;
-        auto now = std::chrono::system_clock::now();
-        _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        // auto now = std::chrono::system_clock::now();
+        // _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        _writeframe->timestamp = current_timestamp;
+        current_timestamp += 33;
+
         current_idx++;
         if (current_idx >= filenames.size())
         {
@@ -71,7 +77,7 @@ void prj_v8detector::camera_foldimages()
         }
         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
         _timer->start_cpu();
-        _worker->inference(*(_writeframe->rgb_ptr));
+        _worker->inference(*(_writeframe->rgb_ptr), _writeframe->timestamp);
         _timer->stop_cpu<timer::Timer::ms>("inference");
         _timer->show();
         _rs485.sendDoubleArray(_worker->m_pose->m_result.data());

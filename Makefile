@@ -249,6 +249,54 @@ src/ZEDX/ZEDX.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/ZEDX/ZEDX.cpp.s
 .PHONY : src/ZEDX/ZEDX.cpp.s
 
+src/algorithms/PeriodEstimator.o: src/algorithms/PeriodEstimator.cpp.o
+.PHONY : src/algorithms/PeriodEstimator.o
+
+# target to build an object file
+src/algorithms/PeriodEstimator.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/PeriodEstimator.cpp.o
+.PHONY : src/algorithms/PeriodEstimator.cpp.o
+
+src/algorithms/PeriodEstimator.i: src/algorithms/PeriodEstimator.cpp.i
+.PHONY : src/algorithms/PeriodEstimator.i
+
+# target to preprocess a source file
+src/algorithms/PeriodEstimator.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/PeriodEstimator.cpp.i
+.PHONY : src/algorithms/PeriodEstimator.cpp.i
+
+src/algorithms/PeriodEstimator.s: src/algorithms/PeriodEstimator.cpp.s
+.PHONY : src/algorithms/PeriodEstimator.s
+
+# target to generate assembly for a file
+src/algorithms/PeriodEstimator.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/PeriodEstimator.cpp.s
+.PHONY : src/algorithms/PeriodEstimator.cpp.s
+
+src/algorithms/TrajectoryKF.o: src/algorithms/TrajectoryKF.cpp.o
+.PHONY : src/algorithms/TrajectoryKF.o
+
+# target to build an object file
+src/algorithms/TrajectoryKF.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/TrajectoryKF.cpp.o
+.PHONY : src/algorithms/TrajectoryKF.cpp.o
+
+src/algorithms/TrajectoryKF.i: src/algorithms/TrajectoryKF.cpp.i
+.PHONY : src/algorithms/TrajectoryKF.i
+
+# target to preprocess a source file
+src/algorithms/TrajectoryKF.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/TrajectoryKF.cpp.i
+.PHONY : src/algorithms/TrajectoryKF.cpp.i
+
+src/algorithms/TrajectoryKF.s: src/algorithms/TrajectoryKF.cpp.s
+.PHONY : src/algorithms/TrajectoryKF.s
+
+# target to generate assembly for a file
+src/algorithms/TrajectoryKF.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/TrajectoryKF.cpp.s
+.PHONY : src/algorithms/TrajectoryKF.cpp.s
+
 src/communication/RS485.o: src/communication/RS485.cpp.o
 .PHONY : src/communication/RS485.o
 
@@ -296,30 +344,6 @@ src/communication/client.s: src/communication/client.cpp.s
 src/communication/client.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/communication/client.cpp.s
 .PHONY : src/communication/client.cpp.s
-
-src/filter/TrajectoryKF.o: src/filter/TrajectoryKF.cpp.o
-.PHONY : src/filter/TrajectoryKF.o
-
-# target to build an object file
-src/filter/TrajectoryKF.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/filter/TrajectoryKF.cpp.o
-.PHONY : src/filter/TrajectoryKF.cpp.o
-
-src/filter/TrajectoryKF.i: src/filter/TrajectoryKF.cpp.i
-.PHONY : src/filter/TrajectoryKF.i
-
-# target to preprocess a source file
-src/filter/TrajectoryKF.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/filter/TrajectoryKF.cpp.i
-.PHONY : src/filter/TrajectoryKF.cpp.i
-
-src/filter/TrajectoryKF.s: src/filter/TrajectoryKF.cpp.s
-.PHONY : src/filter/TrajectoryKF.s
-
-# target to generate assembly for a file
-src/filter/TrajectoryKF.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/filter/TrajectoryKF.cpp.s
-.PHONY : src/filter/TrajectoryKF.cpp.s
 
 src/main.o: src/main.cpp.o
 .PHONY : src/main.o
@@ -585,15 +609,18 @@ help:
 	@echo "... src/ZEDX/ZEDX.o"
 	@echo "... src/ZEDX/ZEDX.i"
 	@echo "... src/ZEDX/ZEDX.s"
+	@echo "... src/algorithms/PeriodEstimator.o"
+	@echo "... src/algorithms/PeriodEstimator.i"
+	@echo "... src/algorithms/PeriodEstimator.s"
+	@echo "... src/algorithms/TrajectoryKF.o"
+	@echo "... src/algorithms/TrajectoryKF.i"
+	@echo "... src/algorithms/TrajectoryKF.s"
 	@echo "... src/communication/RS485.o"
 	@echo "... src/communication/RS485.i"
 	@echo "... src/communication/RS485.s"
 	@echo "... src/communication/client.o"
 	@echo "... src/communication/client.i"
 	@echo "... src/communication/client.s"
-	@echo "... src/filter/TrajectoryKF.o"
-	@echo "... src/filter/TrajectoryKF.i"
-	@echo "... src/filter/TrajectoryKF.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"

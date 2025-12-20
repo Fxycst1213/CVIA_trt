@@ -7,7 +7,9 @@
 #include "NvInfer.h"
 #include "logger.hpp"
 #include "model.hpp"
-
+#include "../algorithms/TrajectoryKF.h"
+#include "../ZEDX/ZEDX.h"
+#include "../algorithms/PeriodEstimator.h"
 namespace model
 {
 
@@ -67,9 +69,9 @@ namespace model
             virtual void reset_task() override;
             virtual bool preprocess_cpu(cv::Mat &img) override;
             virtual bool preprocess_gpu(cv::Mat &img) override;
-            virtual bool postprocess_cpu() override;
-            virtual bool postprocess_gpu() override;
-            void run_pnp_multi_stage();
+            virtual bool postprocess_cpu(uint64_t &timestamp) override;
+            virtual bool postprocess_gpu(uint64_t &timestamp) override;
+            void run_pnp_multi_stage(uint64_t &timestamp);
             void run_pnp_single_stage();
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);
@@ -77,7 +79,6 @@ namespace model
 
             std::vector<bbox> m_bboxes;
             bool is_current_frame_good = false;
-            // cv::Mat final_R, final_T;
 
         private:
             int m_inputSize;
@@ -95,6 +96,10 @@ namespace model
             double _candidate_z = 0.0;
             int _candidate_count = 0;
             int _candidate_limit = 2; // 连续多少帧稳定才更新，默认2
+            TrajectoryKF m_kf;
+            uint64_t _last_timestamp = 0;
+
+            PeriodEstimator m_estimator{2500, 1500, PeriodEstimator::MODE_FREQ_DOMAIN_ONLY};
         };
 
         std::shared_ptr<Pose> make_pose(

@@ -27,6 +27,7 @@ find_package(OpenCV REQUIRED)
 include_directories(${TENSORRT_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${CUDA_INCLUDE_DIRS})
+include_directories("/usr/include/eigen3")
 include_directories(
     ${PROJECT_SOURCE_DIR}/src/preprocess
     ${PROJECT_SOURCE_DIR}/src/yolov8_detector
@@ -42,8 +43,8 @@ include_directories(
     ${PROJECT_SOURCE_DIR}/src/worker
     ${PROJECT_SOURCE_DIR}/src/ZEDX
     ${PROJECT_SOURCE_DIR}/src/communication
-    ${PROJECT_SOURCE_DIR}/src/filter
     ${PROJECT_SOURCE_DIR}/src/params
+    ${PROJECT_SOURCE_DIR}/src/algorithms
     ${ZED_INCLUDE_DIRS}
 )
 
@@ -70,3 +71,4 @@ target_link_libraries(trt nvinfer nvinfer_plugin)
 target_link_libraries(trt cudart curand)
 target_link_libraries(trt ${OpenCV_LIBS})
 target_link_libraries(trt ${ZED_LIBS})
+target_link_libraries(trt fftw3)
