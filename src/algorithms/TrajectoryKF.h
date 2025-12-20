@@ -39,6 +39,7 @@ private:
 
     // 调试用：打印矩阵
     void printState();
+    float base_Q_pos = 1e-5;
 };
 
 #endif // TRAJECTORY_KF_H

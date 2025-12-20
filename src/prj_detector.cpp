@@ -49,7 +49,7 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images3/*.png";
+    cv::String folder = "/home/cvia/yifei/images1/*.png";
 
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());

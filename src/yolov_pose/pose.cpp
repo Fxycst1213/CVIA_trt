@@ -202,7 +202,7 @@ namespace model
             m_result.resize(6, 0.0);
 
             _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
-                  0.0, 1067.37400981335, 525.523361276358,
+                  0.0, 1067.37400981335, 525.023361276358,
                   0.0, 0.0, 1.0);
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
@@ -521,7 +521,7 @@ namespace model
                                                       false, 100, 2.0, 0.99, inliers, cv::SOLVEPNP_SQPNP);
 
                     // 4. 验证解算质量
-                    if (success && inliers.size() > 5)
+                    if (success && inliers.size() >= 5)
                     {
                         double current_z = T1.at<double>(2, 0);
                         bool is_depth_safe = false;
