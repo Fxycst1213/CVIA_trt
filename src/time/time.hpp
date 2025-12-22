@@ -26,9 +26,11 @@ namespace timer
     public:
         void start_cpu();
         void start_gpu();
+        void start_cpu_1();
 
         void stop_cpu();
         void stop_gpu();
+        void stop_cpu_1();
 
         template <typename span>
         void stop_cpu(std::string msg);

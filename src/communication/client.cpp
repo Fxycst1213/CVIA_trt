@@ -66,15 +66,51 @@ bool client::pack_and_send(const Resultframe &frame)
     if (!_buffer || _fd == -1)
         return false;
 
+    int current_packet_size = 0;
+
     // 根据模式进行打包
     if (_socket_mode == 0)
     {
+        // --- 修复1: 声明局部变量 ---
+        std::vector<uchar> encoded_img;
+        uint32_t img_len = 0;
+
+        // 1. 压缩图片
+        auto start = std::chrono::high_resolution_clock::now();
         if (!frame.rgb.empty() && frame.rgb.isContinuous())
         {
-            memcpy(_buffer, frame.rgb.data, _img_size_bytes);
+            std::vector<int> params;
+            params.push_back(cv::IMWRITE_JPEG_QUALITY);
+            params.push_back(50); // 质量设为 50
+
+            cv::imencode(".jpg", frame.rgb, encoded_img, params);
+            img_len = static_cast<uint32_t>(encoded_img.size());
         }
-        char *ptr_kpt = _buffer + _img_size_bytes;
-        memset(ptr_kpt, 0, _kpt_size_bytes);
+        auto end = std::chrono::high_resolution_clock::now();
+        double duration = std::chrono::duration<double, std::milli>(end - start).count();
+
+        // 2. 如果你想看日志，直接打印出来，或者手动添加到 timer 的列表里（如果 timer 有 addLog 接口）
+        LOG("\tJPEG uses %.6lf ms", duration);
+
+        // 使用 ptr_curr 作为移动指针，全程跟踪写入位置
+        char *ptr_curr = _buffer;
+
+        // 2. 写入图片大小头 (4字节)
+        uint32_t net_img_len = htonl(img_len); // 转网络字节序
+        memcpy(ptr_curr, &net_img_len, sizeof(uint32_t));
+        ptr_curr += sizeof(uint32_t); // --- 指针移动 ---
+
+        // 3. 写入图片数据
+        if (img_len > 0)
+        {
+            memcpy(ptr_curr, encoded_img.data(), img_len);
+            ptr_curr += img_len; // --- 指针移动 ---
+        }
+
+        // 4. 写入 KeyPoints
+        // 直接向 ptr_curr 写入，省去中间变量 ptr_kpt 防止算错
+        memset(ptr_curr, 0, _kpt_size_bytes);
+
         if (!frame.bboxes.empty())
         {
             float *tmp = new float[_keyPoint_box];
@@ -92,27 +128,40 @@ bool client::pack_and_send(const Resultframe &frame)
             tmp[_keyPoint_box - 3] = frame.bboxes[0].x1;
             tmp[_keyPoint_box - 2] = frame.bboxes[0].y1;
             tmp[_keyPoint_box - 1] = frame.bboxes[0].confidence;
+
             // copy data
-            memcpy(ptr_kpt, tmp, _kpt_size_bytes);
+            memcpy(ptr_curr, tmp, _kpt_size_bytes);
             delete[] tmp;
         }
+        // --- 修复2: 写入完 KPT 后必须移动指针 ---
+        ptr_curr += _kpt_size_bytes;
 
-        char *ptr_pose = ptr_kpt + _kpt_size_bytes;
-        memset(ptr_pose, 0, _pose_size_bytes);
+        // 5. 写入 Pose
+        memset(ptr_curr, 0, _pose_size_bytes);
 
         if (!frame.pose_result.empty())
         {
             size_t data_len = frame.pose_result.size() * sizeof(double);
             if (data_len <= _pose_size_bytes)
             {
-                memcpy(ptr_pose, frame.pose_result.data(), data_len);
+                memcpy(ptr_curr, frame.pose_result.data(), data_len);
             }
         }
-        memcpy(ptr_pose + _pose_size_bytes - 8, &frame.timestamp, sizeof(uint64_t));
+        // 写入时间戳 (在 Pose 区域的末尾)
+        memcpy(ptr_curr + _pose_size_bytes - 8, &frame.timestamp, sizeof(uint64_t));
+
+        // --- 修复3: 写入完 Pose 后必须移动指针 ---
+        ptr_curr += _pose_size_bytes;
+
+        // 6. 计算最终总包大小
+        // 因为 ptr_curr 一路都在累加，现在减去起始地址就是总有效长度
+        current_packet_size = ptr_curr - _buffer;
     }
     else if (_socket_mode == 1)
     {
-        memset(_buffer, 0, _total_send_size); // 清零
+        // Mode 1 (纯数据模式) 保持不变，使用定长
+        current_packet_size = _total_send_size;
+        memset(_buffer, 0, _total_send_size);
         if (!frame.pose_result.empty())
         {
             size_t data_len = frame.pose_result.size() * sizeof(double);
@@ -125,7 +174,7 @@ bool client::pack_and_send(const Resultframe &frame)
     }
 
     // 统一发送
-    return SendAll(_buffer, _total_send_size);
+    return SendAll(_buffer, current_packet_size);
 }
 
 bool client::SendAll(char *buffer, int size)
