@@ -58,14 +58,12 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images3/*.png";
+    cv::String folder = "/home/cvia/yifei/images1/*.png";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     int current_idx = 0;
 
     auto now = std::chrono::system_clock::now();
-    long long current_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-
     while (1)
     {
         auto mstart = std::chrono::high_resolution_clock::now();
@@ -113,7 +111,10 @@ void prj_v8detector::tcp_loop()
             // 等待条件：有数据 或者 停止运行
             _queue_cv.wait(lock, [this]
                            { return !_resultframe_queue.empty() || !_is_running; });
-
+            if (_resultframe_queue.empty())
+            {
+                continue;
+            }
             frame_to_send = _resultframe_queue.front();
             _resultframe_queue.pop();
         }
@@ -131,7 +132,10 @@ void prj_v8detector::run()
     // auto t1 = std::thread(_func_camera);
     auto t2 = std::thread(_func_camera_foldimages);
     auto t3 = std::thread(_func_pack_and_send);
-    // t1.join();
+    // if (t1.joinable())
+    // {
+    //     t1.join();
+    // }
     if (t2.joinable())
     {
         t2.join();
