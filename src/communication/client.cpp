@@ -33,6 +33,7 @@ void client::init(const prj_params &p_params)
     }
     else if (_socket_mode == 1)
     {
+        header[1] = 'H';
         header[2] = 'D';
         _total_send_size = _pose_size_bytes;
         _buffer = new char[_total_send_size];

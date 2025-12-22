@@ -151,12 +151,14 @@ namespace model
 
             /*Preprocess -- 读取数据*/
             // m_inputImage = cv::imread(m_imagePath);
-            m_inputImage = img.clone();
+            m_timer->start_gpu();
+            m_inputImage = img;
             if (m_inputImage.data == nullptr)
             {
                 LOGE("ERROR: file not founded! Program terminated");
                 return false;
             }
+            m_timer->stop_gpu("preprocess(clone)");
 
             /*Preprocess -- 测速*/
             m_timer->start_gpu();
@@ -215,14 +217,14 @@ namespace model
                     -128.86, -374.6, 40.37,
                     93.18, 2.06, -2.96);
             // 指定容器大小
-            m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(1000);
+            m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(800);
             // 【关键】设置 X, Y, Z 三轴的周期 (单位：帧)
             // 满 了以后开始计算
             double x_period = 760;
             double y_period = 760;
             double z_period = 760;
             m_lookback_estimator->setPeriods(x_period, y_period, z_period);
-            m_lookback_estimator->setLookbackOffsets(750.5, 751.5, 749.5);
+            m_lookback_estimator->setLookbackOffsets(748.5, 750.5, 748.5);
         }
 
         bool Pose::postprocess_cpu(const uint64_t &timestamp)

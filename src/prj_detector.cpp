@@ -26,28 +26,32 @@ void prj_v8detector::camera()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        // _zed->grab_frame(_writeframe);
-        *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
+        _zed->grab_frame(_writeframe);
+        // *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
         _resultframe.rgb = *(_writeframe->rgb_ptr);
         _resultframe.timestamp = _writeframe->timestamp;
         _timer->start_cpu();
         _worker->inference(_resultframe);
         _timer->stop_cpu<timer::Timer::ms>("inference");
-        _timer->show();
-        _resultframe.pose_result = _worker->m_pose->m_result;
-        _resultframe.timestamp = _writeframe->timestamp;
-        _rs485.sendDoubleArray(_resultframe.pose_result.data());
 
+        _resultframe.bboxes = _worker->m_pose->m_bboxes;
+        _resultframe.pose_result = _worker->m_pose->m_result;
+        _timer->start_cpu();
+        _rs485.sendDoubleArray(_resultframe.pose_result.data());
+        _timer->stop_cpu<timer::Timer::ms>("RS485");
+        _timer->start_cpu();
         _resultframe_queue.push(_resultframe);
         _client.pack_and_send(_resultframe_queue.back());
+        _timer->stop_cpu<timer::Timer::ms>("TCP");
+        _timer->show();
     }
 }
 
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images1/*.png";
+    cv::String folder = "/home/cvia/yifei/images3/*.png";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     int current_idx = 0;
@@ -60,7 +64,6 @@ void prj_v8detector::camera_foldimages()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         auto now = std::chrono::system_clock::now();
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
@@ -75,13 +78,17 @@ void prj_v8detector::camera_foldimages()
         _timer->start_cpu();
         _worker->inference(_resultframe);
         _timer->stop_cpu<timer::Timer::ms>("inference");
-        _timer->show();
+
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
+        _timer->start_cpu();
         _rs485.sendDoubleArray(_resultframe.pose_result.data());
-
+        _timer->stop_cpu<timer::Timer::ms>("RS485");
+        _timer->start_cpu();
         _resultframe_queue.push(_resultframe);
         _client.pack_and_send(_resultframe_queue.back());
+        _timer->stop_cpu<timer::Timer::ms>("TCP");
+        _timer->show();
     }
 }
 
