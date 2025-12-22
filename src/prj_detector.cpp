@@ -26,7 +26,6 @@ void prj_v8detector::camera()
 {
     while (1)
     {
-        auto mstart = std::chrono::high_resolution_clock::now();
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
@@ -53,9 +52,6 @@ void prj_v8detector::camera()
         }
         _timer->stop_cpu<timer::Timer::ms>("Load TCP");
         _timer->show();
-        auto mend = std::chrono::high_resolution_clock::now();
-        double mduration = std::chrono::duration<double, std::milli>(mend - mstart).count();
-        LOG("\tone images %.6lf ms", mduration);
     }
 }
 
@@ -77,7 +73,6 @@ void prj_v8detector::camera_foldimages()
         _timer->init();
         _timer->start_cpu();
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
-        auto now = std::chrono::system_clock::now();
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         current_idx++;
         if (current_idx >= filenames.size())
@@ -104,9 +99,6 @@ void prj_v8detector::camera_foldimages()
         }
         _timer->stop_cpu<timer::Timer::ms>("Load TCP");
         _timer->show();
-        auto mend = std::chrono::high_resolution_clock::now();
-        double mduration = std::chrono::duration<double, std::milli>(mend - mstart).count();
-        LOG("\tone images %.6lf ms", mduration);
     }
 }
 
@@ -122,18 +114,6 @@ void prj_v8detector::tcp_loop()
             _queue_cv.wait(lock, [this]
                            { return !_resultframe_queue.empty() || !_is_running; });
 
-            // 退出检查
-            if (_resultframe_queue.empty() && !_is_running)
-            {
-                break;
-            }
-
-            if (_resultframe_queue.empty())
-            {
-                continue;
-            }
-
-            // 取数据
             frame_to_send = _resultframe_queue.front();
             _resultframe_queue.pop();
         }
