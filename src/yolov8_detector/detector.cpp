@@ -80,7 +80,7 @@ namespace model
             m_bboxes.clear();
         }
 
-        bool Detector::preprocess_cpu(cv::Mat &img)
+        bool Detector::preprocess_cpu(const cv::Mat &img)
         {
             /*Preprocess -- yolo的预处理并没有mean和std，所以可以直接skip掉mean和std的计算 */
 
@@ -145,7 +145,7 @@ namespace model
             return true;
         }
 
-        bool Detector::preprocess_gpu(cv::Mat &img)
+        bool Detector::preprocess_gpu(const cv::Mat &img)
         {
             /*Preprocess -- yolo的预处理并没有mean和std，所以可以直接skip掉mean和std的计算 */
 
@@ -170,7 +170,7 @@ namespace model
             return true;
         }
 
-        bool Detector::postprocess_cpu()
+        bool Detector::postprocess_cpu(const uint64_t &timestamp)
         {
             m_timer->start_cpu();
 
@@ -332,9 +332,9 @@ namespace model
             return true;
         }
 
-        bool Detector::postprocess_gpu()
+        bool Detector::postprocess_gpu(const uint64_t &timestamp)
         {
-            return postprocess_cpu();
+            return postprocess_cpu(timestamp);
         }
 
         shared_ptr<Detector> make_detector(

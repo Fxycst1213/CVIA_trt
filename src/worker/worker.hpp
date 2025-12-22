@@ -16,7 +16,7 @@ namespace thread
     {
     public:
         Worker(std::string onnxPath, logger::Level level, model::Params params);
-        void inference(cv::Mat &img);
+        void inference(const Resultframe &resultframe);
 
     public:
         std::shared_ptr<logger::Logger> m_logger;

@@ -7,6 +7,11 @@
 #include "NvInfer.h"
 #include "logger.hpp"
 #include "model.hpp"
+#include "../algorithms/TrajectoryKF.h"
+#include "../algorithms/PeriodEstimator.h"
+#include "../ZEDX/ZEDX.h"
+#include "../params/pose_params.hpp"
+#include "../algorithms/FrameLookbackEstimator.h"
 
 namespace model
 {
@@ -19,28 +24,6 @@ namespace model
         {
             YOLOV8,
             YOLOV11
-        };
-        const int NUM_KEYPOINTS = 7;
-
-        struct keypoint
-        {
-            float x, y, conf;
-            keypoint(float x = 0, float y = 0, float conf = 0) : x(x), y(y), conf(conf) {}
-        };
-        struct bbox
-        {
-            float x0, x1, y0, y1;
-            float confidence;
-            bool flg_remove;
-            int label;
-            vector<keypoint> keypoints;
-            bbox() = default;
-            bbox(float x0, float y0, float x1, float y1, float conf, int label) : x0(x0), y0(y0), x1(x1), y1(y1),
-                                                                                  confidence(conf), flg_remove(false),
-                                                                                  label(label)
-            {
-                keypoints.reserve(NUM_KEYPOINTS);
-            };
         };
 
         class Pose : public Model
@@ -65,11 +48,13 @@ namespace model
         public:
             virtual void setup(void const *data, std::size_t size) override;
             virtual void reset_task() override;
-            virtual bool preprocess_cpu(cv::Mat &img) override;
-            virtual bool preprocess_gpu(cv::Mat &img) override;
-            virtual bool postprocess_cpu() override;
-            virtual bool postprocess_gpu() override;
+            virtual bool preprocess_cpu(const cv::Mat &img) override;
+            virtual bool preprocess_gpu(const cv::Mat &img) override;
+            virtual bool postprocess_cpu(const uint64_t &timestamp) override;
+            virtual bool postprocess_gpu(const uint64_t &timestamp) override;
             void run_pnp_multi_stage();
+            std::shared_ptr<FrameLookbackEstimator> m_lookback_estimator;
+            void run_filter_and_estimation(const uint64_t &timestamp, uint64_t m_frame_counter);
             void run_pnp_single_stage();
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);
@@ -77,7 +62,6 @@ namespace model
 
             std::vector<bbox> m_bboxes;
             bool is_current_frame_good = false;
-            // cv::Mat final_R, final_T;
 
         private:
             int m_inputSize;
@@ -95,6 +79,9 @@ namespace model
             double _candidate_z = 0.0;
             int _candidate_count = 0;
             int _candidate_limit = 2; // 连续多少帧稳定才更新，默认2
+            TrajectoryKF m_kf;
+            uint64_t _last_timestamp = 0;
+            uint64_t m_frame_counter = -1;
         };
 
         std::shared_ptr<Pose> make_pose(

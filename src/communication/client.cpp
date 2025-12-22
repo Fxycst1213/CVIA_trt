@@ -33,6 +33,7 @@ void client::init(const prj_params &p_params)
     }
     else if (_socket_mode == 1)
     {
+        header[1] = 'H';
         header[2] = 'D';
         _total_send_size = _pose_size_bytes;
         _buffer = new char[_total_send_size];
@@ -60,10 +61,7 @@ void client::init(const prj_params &p_params)
 }
 
 // --- 新增函数的实现 ---
-bool client::pack_and_send(const cv::Mat &img,
-                           const std::vector<model::pose::bbox> &bboxes,
-                           const std::vector<double> &pose_result,
-                           uint64_t timestamp)
+bool client::pack_and_send(const Resultframe &frame)
 {
     if (!_buffer || _fd == -1)
         return false;
@@ -71,29 +69,29 @@ bool client::pack_and_send(const cv::Mat &img,
     // 根据模式进行打包
     if (_socket_mode == 0)
     {
-        if (!img.empty() && img.isContinuous())
+        if (!frame.rgb.empty() && frame.rgb.isContinuous())
         {
-            memcpy(_buffer, img.data, _img_size_bytes);
+            memcpy(_buffer, frame.rgb.data, _img_size_bytes);
         }
         char *ptr_kpt = _buffer + _img_size_bytes;
         memset(ptr_kpt, 0, _kpt_size_bytes);
-        if (!bboxes.empty())
+        if (!frame.bboxes.empty())
         {
             float *tmp = new float[_keyPoint_box];
-            int size = (bboxes[0].keypoints).size();
+            int size = (frame.bboxes[0].keypoints).size();
             for (int j = 0; j < size; j++)
             {
-                auto &keypoint = bboxes[0].keypoints[j];
+                auto &keypoint = frame.bboxes[0].keypoints[j];
                 tmp[3 * j] = keypoint.x;
                 tmp[3 * j + 1] = keypoint.y;
                 tmp[3 * j + 2] = keypoint.conf;
             }
 
-            tmp[_keyPoint_box - 5] = bboxes[0].x0;
-            tmp[_keyPoint_box - 4] = bboxes[0].y0;
-            tmp[_keyPoint_box - 3] = bboxes[0].x1;
-            tmp[_keyPoint_box - 2] = bboxes[0].y1;
-            tmp[_keyPoint_box - 1] = bboxes[0].confidence;
+            tmp[_keyPoint_box - 5] = frame.bboxes[0].x0;
+            tmp[_keyPoint_box - 4] = frame.bboxes[0].y0;
+            tmp[_keyPoint_box - 3] = frame.bboxes[0].x1;
+            tmp[_keyPoint_box - 2] = frame.bboxes[0].y1;
+            tmp[_keyPoint_box - 1] = frame.bboxes[0].confidence;
             // copy data
             memcpy(ptr_kpt, tmp, _kpt_size_bytes);
             delete[] tmp;
@@ -102,28 +100,28 @@ bool client::pack_and_send(const cv::Mat &img,
         char *ptr_pose = ptr_kpt + _kpt_size_bytes;
         memset(ptr_pose, 0, _pose_size_bytes);
 
-        if (!pose_result.empty())
+        if (!frame.pose_result.empty())
         {
-            size_t data_len = pose_result.size() * sizeof(double);
+            size_t data_len = frame.pose_result.size() * sizeof(double);
             if (data_len <= _pose_size_bytes)
             {
-                memcpy(ptr_pose, pose_result.data(), data_len);
+                memcpy(ptr_pose, frame.pose_result.data(), data_len);
             }
         }
-        memcpy(ptr_pose + _pose_size_bytes - 8, &timestamp, sizeof(uint64_t));
+        memcpy(ptr_pose + _pose_size_bytes - 8, &frame.timestamp, sizeof(uint64_t));
     }
     else if (_socket_mode == 1)
     {
         memset(_buffer, 0, _total_send_size); // 清零
-        if (!pose_result.empty())
+        if (!frame.pose_result.empty())
         {
-            size_t data_len = pose_result.size() * sizeof(double);
+            size_t data_len = frame.pose_result.size() * sizeof(double);
             if (data_len <= _total_send_size)
             {
-                memcpy(_buffer, pose_result.data(), data_len);
+                memcpy(_buffer, frame.pose_result.data(), data_len);
             }
         }
-        memcpy(_buffer + _total_send_size - 8, &timestamp, sizeof(uint64_t));
+        memcpy(_buffer + _total_send_size - 8, &frame.timestamp, sizeof(uint64_t));
     }
 
     // 统一发送

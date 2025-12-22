@@ -49,7 +49,7 @@ namespace model
 
         void Classifier::reset_task() {}
 
-        bool Classifier::preprocess_cpu(cv::Mat &img)
+        bool Classifier::preprocess_cpu(const cv::Mat &img)
         {
             float mean[] = {0.406, 0.456, 0.485};
             float std[] = {0.225, 0.224, 0.229};
@@ -89,7 +89,7 @@ namespace model
             return true;
         }
 
-        bool Classifier::preprocess_gpu(cv::Mat &img)
+        bool Classifier::preprocess_gpu(const cv::Mat &img)
         {
             /*Preprocess -- 获取mean, std*/
             float mean[] = {0.406, 0.456, 0.485};
@@ -116,7 +116,7 @@ namespace model
             return true;
         }
 
-        bool Classifier::postprocess_cpu()
+        bool Classifier::postprocess_cpu(const uint64_t &timestamp)
         {
             /*Postprocess -- 测速*/
             m_timer->start_cpu();
@@ -142,13 +142,13 @@ namespace model
             return true;
         }
 
-        bool Classifier::postprocess_gpu()
+        bool Classifier::postprocess_gpu(const uint64_t &timestamp)
         {
             /*
                 由于classification task的postprocess比较简单，所以CPU/GPU的处理这里用一样的
                 对于像yolo这种detection model, postprocess会包含decode, nms这些处理。可以选择在CPU还是在GPU上跑
             */
-            return postprocess_cpu();
+            return postprocess_cpu(timestamp);
         }
 
         shared_ptr<Classifier> make_classifier(
