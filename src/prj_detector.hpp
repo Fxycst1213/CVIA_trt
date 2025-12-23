@@ -20,6 +20,8 @@
 #include "params/params.hpp"
 #include "params/pose_params.hpp"
 #include <opencv2/opencv.hpp>
+#include <thread>
+#include <queue>
 
 using namespace std;
 
@@ -31,22 +33,24 @@ public:
     void run();
     void camera();
     void camera_foldimages();
-    template <typename T>
-    void swapPtr(T **a, T **b)
-    {
-        T *temp = *a;
-        *a = *b;
-        *b = temp;
-    }
+    void tcp_loop();
 
 private:
     shared_ptr<thread::Worker> _worker;
     ZEDX *_zed = nullptr;
     std::shared_ptr<timer::Timer> _timer;
+    std::shared_ptr<timer::Timer> _timer_tcp;
+
     std::function<void()> _func_camera;
     std::function<void()> _func_camera_foldimages;
+    std::function<void()> _func_pack_and_send;
     ZEDframe *_writeframe = nullptr;
+
     queue<Resultframe> _resultframe_queue;
+    std::mutex _queue_mtx;             // 保护队列的互斥锁
+    std::condition_variable _queue_cv; // 用于通知"有新数据了"
+    std::atomic<bool> _is_running;
+
     client _client;
     RS485 _rs485;
     uint64_t m_time;

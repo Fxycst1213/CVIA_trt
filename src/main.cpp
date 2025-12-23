@@ -26,7 +26,7 @@ int main(int argc, char const *argv[])
     p_params.cameraID = 0;
     p_params.ip = "192.168.31.165";
     p_params.port = 1234;
-    p_params.socket_mode = 1;
+    p_params.socket_mode = 0;
     p_params.rs485_port = "/dev/ttyUSB0";
     p_params.rs485_baudrate = 115200;
 

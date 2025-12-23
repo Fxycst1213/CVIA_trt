@@ -6,6 +6,8 @@
 #include "../params/params.hpp"
 // 假设 bbox 定义在这里，如果在其他地方请 include 对应头文件
 #include "../yolov_pose/pose.hpp" // (假设你的 bbox 定义在这里)
+#include <chrono>
+#include <ratio>
 using namespace std;
 
 class client
@@ -15,7 +17,6 @@ public:
     ~client();
 
     void init(const prj_params &p_params);
-
     bool pack_and_send(const Resultframe &frame);
 
 private:
