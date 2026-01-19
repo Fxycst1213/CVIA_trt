@@ -44,6 +44,10 @@ private:
     // 调试用：打印矩阵
     void printState();
     float base_Q_pos = 1e-5;
+
+    int consecutive_reject_count = 0;    // 连续拒绝计数器
+    const int MAX_REJECT_COUNT = 1;      // 最多连续拒绝5帧，超过就强制更新
+    const float GATE_THRESHOLD = 0.015f; // 门控阈值 0.05m (5cm)，超过这个距离认为离谱
 };
 
 #endif // TRAJECTORY_KF_H

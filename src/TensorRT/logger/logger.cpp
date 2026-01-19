@@ -29,7 +29,6 @@ namespace logger
     }
     Level Logger::get_level(Severity severity)
     {
-        string str;
         switch (severity)
         {
         case Severity::kINTERNAL_ERROR:

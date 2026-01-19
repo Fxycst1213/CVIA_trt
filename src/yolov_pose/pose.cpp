@@ -204,18 +204,56 @@ namespace model
             m_result.resize(6, 0.0);
 
             _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
-                  0.0, 1067.37400981335, 525.023361276358,
+                  0.0, 1067.37400981335, 525.523361276358,
                   0.0, 0.0, 1.0);
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
 
-            _p3d = (cv::Mat_<double>(7, 3) << -255.41, -5.3, -5.9,
-                    -97.45, -4.11, -6.34,
-                    -141.12, 366.99, 54.88,
-                    -113.87, 212.02, 49.2,
-                    -107.09, -221.28, 38.62,
-                    -128.86, -374.6, 40.37,
-                    93.18, 2.06, -2.96);
+            // 原来
+            // _p3d = (cv::Mat_<double>(7, 3) << -255.41, -5.3, -5.9,
+            //         -97.45, -4.11, -6.34,
+            //         -141.12, 366.99, 54.88,
+            //         -113.87, 212.02, 49.2,
+            //         -107.09, -221.28, 38.62,
+            //         -128.86, -374.6, 40.37,
+            //         93.18, 2.06, -2.96);
+
+            // 新
+            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -14.17,
+            //         -95.4, -6.84, -12.9,
+            //         -148.72, 364.33, 46.67,
+            //         -118.91, 208.11, 40.76,
+            //         -102.54, -226.07, 30.13,
+            //         -120.56, -379.84, 34.283,
+            //         92.51, -3.9, -8.07);
+
+            // // 新 - 8
+            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -6.17,
+            //         -95.4, -6.84, -4.9,
+            //         -148.72, 364.33, 54.67,
+            //         -118.91, 208.11, 48.76,
+            //         -102.54, -226.07, 38.13,
+            //         -120.56, -379.84, 42.283,
+            //         92.51, -3.9, -0.07);
+
+            // 新 - 10
+            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -4.17,
+            //         -95.4, -6.84, -2.9,
+            //         -148.72, 364.33, 56.67,
+            //         -118.91, 208.11, 50.76,
+            //         -102.54, -226.07, 40.13,
+            //         -120.56, -379.84, 44.283,
+            //         92.51, -3.9, 2.07);
+
+            // 新 - 12
+            _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -2.17,
+                    -95.4, -6.84, -0.9,
+                    -148.72, 364.33, 58.67,
+                    -118.91, 208.11, 52.76,
+                    -102.54, -226.07, 42.13,
+                    -120.56, -379.84, 46.283,
+                    92.51, -3.9, 4.07);
+
             // 指定容器大小
             m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(800);
             // 【关键】设置 X, Y, Z 三轴的周期 (单位：帧)
@@ -408,7 +446,22 @@ namespace model
                 cv::Mat target_img = channels[0]; // B通道
 
                 cv::Mat mask;
-                cv::threshold(target_img, mask, 170, 255, cv::THRESH_BINARY);
+                cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best
+
+                // mask 太小 → C 调大一点（比如 -2）mask 吃进背景 → C 更负一点（比如 -8）
+                // cv::Mat mask;
+                // cv::adaptiveThreshold(
+                //     target_img, mask,
+                //     255,
+                //     cv::ADAPTIVE_THRESH_GAUSSIAN_C,
+                //     cv::THRESH_BINARY,
+                //     15,
+                //     -5);
+
+                // // 去噪
+                // cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, {3, 3});
+                // cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+                //
 
                 std::vector<std::vector<cv::Point>> contours;
                 cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -423,7 +476,7 @@ namespace model
 
                 int best_idx = -1;
                 double max_area = 0;
-                const double DIST_LIMIT = 5.0;
+                const double DIST_LIMIT = 4.5;
 
                 for (size_t i = 0; i < contours.size(); ++i)
                 {
@@ -472,6 +525,8 @@ namespace model
                 float final_x = x1 + final_gx + 0.5f;
                 float final_y = y1 + final_gy + 0.5f;
 
+                // float final_x = x1 + final_gx;
+                // float final_y = y1 + final_gy;
                 double final_dist = std::sqrt(std::pow(final_x - kpt.x, 2) + std::pow(final_y - kpt.y, 2));
 
                 if (final_dist > DIST_LIMIT)
@@ -512,114 +567,23 @@ namespace model
                 if (p3d_Mat.rows >= 4)
                 {
                     std::vector<int> inliers;
-                    bool use_guess = !_R1_prev.empty() && !_T1_prev.empty();
-                    if (use_guess)
-                    {
-                        _R1_prev.copyTo(R1);
-                        _T1_prev.copyTo(T1);
-                    }
-
                     bool success = cv::solvePnPRansac(p3d_Mat, p2d_Mat, _K, _diff, R1, T1,
                                                       false, 100, 2.0, 0.99, inliers, cv::SOLVEPNP_SQPNP);
 
                     // 4. 验证解算质量
-                    if (success && inliers.size() >= 5)
+                    if (success && inliers.size() >= 4)
                     {
-                        double current_z = T1.at<double>(2, 0);
-                        bool is_depth_safe = false;
-
-                        if (_T1_prev.empty())
-                        {
-                            is_depth_safe = true;
-                        }
-                        else
-                        {
-                            double prev_z = _T1_prev.at<double>(2, 0);
-                            double z_diff = std::abs(current_z - prev_z);
-
-                            if (z_diff <= 9.0)
-                            {
-                                is_depth_safe = true;
-                                _candidate_count = 0;
-                            }
-                            else
-                            {
-                                int MAX_STALE_FRAMES = 2;
-                                if (_stale_frame_count >= MAX_STALE_FRAMES)
-                                {
-                                    if (_candidate_count == 0)
-                                    {
-                                        _candidate_z = current_z;
-                                        _candidate_count = 1;
-                                        is_depth_safe = false;
-                                    }
-                                    else
-                                    {
-                                        if (std::abs(current_z - _candidate_z) <= 9.0)
-                                        {
-                                            _candidate_count++;
-                                            _candidate_z = current_z;
-                                            if (_candidate_count >= 2)
-                                            {
-                                                is_depth_safe = true;
-                                                _candidate_count = 0;
-                                            }
-                                        }
-                                        else
-                                        {
-                                            _candidate_z = current_z;
-                                            _candidate_count = 1;
-                                            is_depth_safe = false;
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    is_depth_safe = false;
-                                    _candidate_count = 0;
-                                }
-                            }
-                        }
-
-                        if (is_depth_safe)
-                        {
-                            is_current_frame_good = true;
-                            R1.copyTo(_R1_prev);
-                            T1.copyTo(_T1_prev); // 更新历史观测值
-                        }
+                        is_current_frame_good = true;
+                        R1.copyTo(_R1_prev);
+                        T1.copyTo(_T1_prev);
                     }
                 }
             }
-
-            if (is_current_frame_good)
+            if (is_current_frame_good && !T1.empty())
             {
-                _stale_frame_count = 0;
-                _candidate_count = 0;
-            }
-            else
-            {
-                if (!_R1_prev.empty() && !_T1_prev.empty())
-                {
-                    _stale_frame_count++;
-
-                    _R1_prev.copyTo(R1);
-                    _T1_prev.copyTo(T1);
-                }
-                else
-                {
-                    return;
-                }
-            }
-
-            if (!T1.empty())
-            {
-                // 1. 获取当前观测值 (PnP Raw)
                 m_result[0] = T1.at<double>(0, 0);
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
-
-                LOG("\tlook what: x:%.4f,y: %.4f , z: %.4f, ",
-                    m_result[0], m_result[1], m_result[2]);
             }
         }
 

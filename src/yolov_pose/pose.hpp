@@ -78,7 +78,7 @@ namespace model
             int _stale_frame_count = 0;
             double _candidate_z = 0.0;
             int _candidate_count = 0;
-            int _candidate_limit = 2; // 连续多少帧稳定才更新，默认2
+            int _candidate_limit = 1; // 连续多少帧稳定才更新，默认2
             TrajectoryKF m_kf;
             uint64_t _last_timestamp = 0;
             uint64_t m_frame_counter = -1;
