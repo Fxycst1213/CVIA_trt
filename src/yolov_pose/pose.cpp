@@ -411,134 +411,302 @@ namespace model
 
         void Pose::refine_keypoints(std::vector<keypoint> &keypoints)
         {
-            // 遍历每一个关键点
-            for (auto &kpt : keypoints)
+            if (m_result[5] <= 2160.0f)
             {
-                if (kpt.conf < 0.9f)
+                for (auto &kpt : keypoints)
                 {
-                    kpt.x = 0.0f;
-                    kpt.y = 0.0f;
-                    kpt.conf = 0.0f;
-                    continue;
+                    if (kpt.conf < 0.75f)
+                    {
+                        kpt.x = 0.0f;
+                        kpt.y = 0.0f;
+                        kpt.conf = 0.0f;
+                        continue;
+                    }
+                    int cx = static_cast<int>(kpt.x);
+                    int cy = static_cast<int>(kpt.y);
+
+                    int search_side = 20;
+                    int half_side = search_side / 2;
+
+                    int x1 = std::max(0, cx - half_side);
+                    int y1 = std::max(0, cy - half_side);
+                    int x2 = std::min(m_inputImage.cols, x1 + search_side);
+                    int y2 = std::min(m_inputImage.rows, y1 + search_side);
+
+                    if (x2 - x1 < 5 || y2 - y1 < 5)
+                    {
+                        continue;
+                    }
+
+                    cv::Rect roi_rect(x1, y1, x2 - x1, y2 - y1);
+                    cv::Mat roi = m_inputImage(roi_rect);
+
+                    // 颜色对比提取 (蓝色通道)
+                    std::vector<cv::Mat> channels;
+                    cv::split(roi, channels);
+                    cv::Mat target_img = channels[0]; // B通道
+
+                    cv::Mat mask;
+                    cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best
+
+                    // mask 太小 → C 调大一点（比如 -2）mask 吃进背景 → C 更负一点（比如 -8）
+                    // cv::Mat mask;
+                    // cv::adaptiveThreshold(
+                    //     target_img, mask,
+                    //     255,
+                    //     cv::ADAPTIVE_THRESH_GAUSSIAN_C,
+                    //     cv::THRESH_BINARY,
+                    //     15,
+                    //     -5);
+
+                    // // 去噪
+                    // cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, {3, 3});
+                    // cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+                    //
+
+                    std::vector<std::vector<cv::Point>> contours;
+                    cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+                    if (contours.empty())
+                    {
+                        continue; // 直接跳过，kpt 保持原值不变
+                    }
+
+                    // 计算相对坐标中心
+                    cv::Point2f center_ref((float)(cx - x1), (float)(cy - y1));
+
+                    int best_idx = -1;
+                    double max_area = 0;
+                    const double DIST_LIMIT = 4;
+
+                    for (size_t i = 0; i < contours.size(); ++i)
+                    {
+                        double area = cv::contourArea(contours[i]);
+
+                        if (area < 2 || area > 66.0)
+                            continue;
+
+                        cv::Moments M = cv::moments(contours[i]);
+                        if (M.m00 <= 0)
+                            continue;
+
+                        float gx = static_cast<float>(M.m10 / M.m00);
+                        float gy = static_cast<float>(M.m01 / M.m00);
+
+                        double dx = gx - center_ref.x;
+                        double dy = gy - center_ref.y;
+                        double dist = std::sqrt(dx * dx + dy * dy);
+
+                        // 距离过滤
+                        if (dist > DIST_LIMIT)
+                            continue;
+
+                        // 择优
+                        if (area > max_area)
+                        {
+                            max_area = area;
+                            best_idx = i;
+                        }
+                    }
+
+                    if (best_idx == -1)
+                    {
+                        kpt.x = 0.0f;
+                        kpt.y = 0.0f;
+                        kpt.conf = 0.0f; // 认为检测到的点无效（可能是背景噪点），置零
+                        continue;
+                    }
+
+                    // 计算最终坐标
+                    cv::Moments M = cv::moments(contours[best_idx]);
+                    float final_gx = static_cast<float>(M.m10 / M.m00);
+                    float final_gy = static_cast<float>(M.m01 / M.m00);
+
+                    // 还原到全图坐标
+                    float final_x = x1 + final_gx + 0.5f;
+                    float final_y = y1 + final_gy + 0.5f;
+
+                    // float final_x = x1 + final_gx;
+                    // float final_y = y1 + final_gy;
+                    double final_dist = std::sqrt(std::pow(final_x - kpt.x, 2) + std::pow(final_y - kpt.y, 2));
+
+                    if (final_dist > DIST_LIMIT)
+                    {
+                        kpt.x = 0.0f;
+                        kpt.y = 0.0f;
+                        kpt.conf = 0.0f; // 最终计算结果偏离太大，置零
+                        continue;
+                    }
+
+                    kpt.x = final_x;
+                    kpt.y = final_y;
                 }
-                int cx = static_cast<int>(kpt.x);
-                int cy = static_cast<int>(kpt.y);
-
-                int search_side = 20;
-                int half_side = search_side / 2;
-
-                int x1 = std::max(0, cx - half_side);
-                int y1 = std::max(0, cy - half_side);
-                int x2 = std::min(m_inputImage.cols, x1 + search_side);
-                int y2 = std::min(m_inputImage.rows, y1 + search_side);
-
-                if (x2 - x1 < 5 || y2 - y1 < 5)
+            }
+            else
+            {
+                for (auto &kpt : keypoints)
                 {
-                    continue;
-                }
-
-                cv::Rect roi_rect(x1, y1, x2 - x1, y2 - y1);
-                cv::Mat roi = m_inputImage(roi_rect);
-
-                // 颜色对比提取 (蓝色通道)
-                std::vector<cv::Mat> channels;
-                cv::split(roi, channels);
-                cv::Mat target_img = channels[0]; // B通道
-
-                cv::Mat mask;
-                cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best
-
-                // mask 太小 → C 调大一点（比如 -2）mask 吃进背景 → C 更负一点（比如 -8）
-                // cv::Mat mask;
-                // cv::adaptiveThreshold(
-                //     target_img, mask,
-                //     255,
-                //     cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                //     cv::THRESH_BINARY,
-                //     15,
-                //     -5);
-
-                // // 去噪
-                // cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, {3, 3});
-                // cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
-                //
-
-                std::vector<std::vector<cv::Point>> contours;
-                cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
-                if (contours.empty())
-                {
-                    continue; // 直接跳过，kpt 保持原值不变
-                }
-
-                // 计算相对坐标中心
-                cv::Point2f center_ref((float)(cx - x1), (float)(cy - y1));
-
-                int best_idx = -1;
-                double max_area = 0;
-                const double DIST_LIMIT = 4.5;
-
-                for (size_t i = 0; i < contours.size(); ++i)
-                {
-                    double area = cv::contourArea(contours[i]);
-
-                    if (area < 3.0 || area > 200.0)
+                    if (kpt.conf < 0.75f)
                         continue;
 
-                    cv::Moments M = cv::moments(contours[i]);
+                    int cx = static_cast<int>(kpt.x);
+                    int cy = static_cast<int>(kpt.y);
+
+                    // -----------------------------
+                    // 1. 取 ROI（比你原来稍大）
+                    // -----------------------------
+                    const int search_side = 30;
+                    const int half = search_side / 2;
+
+                    int x1 = std::max(0, cx - half);
+                    int y1 = std::max(0, cy - half);
+                    int x2 = std::min(m_inputImage.cols, x1 + search_side);
+                    int y2 = std::min(m_inputImage.rows, y1 + search_side);
+
+                    if (x2 - x1 < 10 || y2 - y1 < 10)
+                        continue;
+
+                    cv::Rect roi_rect(x1, y1, x2 - x1, y2 - y1);
+                    cv::Mat roi = m_inputImage(roi_rect);
+
+                    // -----------------------------
+                    // 2. HSV 空间提取红色贴纸
+                    // -----------------------------
+                    cv::Mat hsv;
+                    cv::cvtColor(roi, hsv, cv::COLOR_BGR2HSV);
+
+                    cv::Mat mask1, mask2, red_mask;
+                    cv::inRange(hsv, cv::Scalar(0, 80, 80),
+                                cv::Scalar(15, 255, 255), mask1);
+                    cv::inRange(hsv, cv::Scalar(160, 80, 80),
+                                cv::Scalar(180, 255, 255), mask2);
+
+                    red_mask = mask1 | mask2;
+
+                    // 去一点噪（可选但推荐）
+                    cv::Mat kernel = cv::getStructuringElement(
+                        cv::MORPH_ELLIPSE, {3, 3});
+                    cv::morphologyEx(red_mask, red_mask,
+                                     cv::MORPH_OPEN, kernel);
+
+                    // -----------------------------
+                    // 3. 找红色轮廓
+                    // -----------------------------
+                    std::vector<std::vector<cv::Point>> contours;
+                    cv::findContours(red_mask, contours,
+                                     cv::RETR_EXTERNAL,
+                                     cv::CHAIN_APPROX_SIMPLE);
+
+                    if (contours.empty())
+                        continue; // 回退到 YOLO 点
+
+                    int best_idx = -1;
+                    double max_area = 0.0;
+
+                    for (size_t i = 0; i < contours.size(); ++i)
+                    {
+                        double area = cv::contourArea(contours[i]);
+                        if (area < 130.0 || area > 420.0)
+                            continue;
+
+                        if (area > max_area)
+                        {
+                            max_area = area;
+                            best_idx = static_cast<int>(i);
+                        }
+                    }
+
+                    if (best_idx == -1)
+                    {
+                        kpt.x = 0.0f;
+                        kpt.y = 0.0f;
+                        kpt.conf = 0.0f;
+                        continue;
+                    }
+
+                    // -----------------------------
+                    // 4. 红色贴纸质心（anchor）
+                    // -----------------------------
+                    cv::Moments M = cv::moments(contours[best_idx]);
                     if (M.m00 <= 0)
                         continue;
 
-                    float gx = static_cast<float>(M.m10 / M.m00);
-                    float gy = static_cast<float>(M.m01 / M.m00);
+                    float rx = static_cast<float>(M.m10 / M.m00);
+                    float ry = static_cast<float>(M.m01 / M.m00);
 
-                    double dx = gx - center_ref.x;
-                    double dy = gy - center_ref.y;
-                    double dist = std::sqrt(dx * dx + dy * dy);
+                    float final_x = x1 + rx + 0.5f;
+                    float final_y = y1 + ry + 0.5f;
 
-                    // 距离过滤
+                    // -----------------------------
+                    // 5. 距离 sanity check（放宽）
+                    // -----------------------------
+                    const double DIST_LIMIT = 10.0;
+                    double dist = std::hypot(final_x - kpt.x,
+                                             final_y - kpt.y);
+
                     if (dist > DIST_LIMIT)
-                        continue;
-
-                    // 择优
-                    if (area > max_area)
                     {
-                        max_area = area;
-                        best_idx = i;
+                        kpt.x = 0.0f;
+                        kpt.y = 0.0f;
+                        kpt.conf = 0.0f;
+                        continue; // 回退到 YOLO 点
                     }
+
+                    // -----------------------------
+                    // 6. 更新 keypoint（anchor）
+                    // -----------------------------
+                    kpt.x = final_x;
+                    kpt.y = final_y;
+
+                    // =================================================
+                    // 7. （可选）在红色 anchor 附近精修蓝白贴纸
+                    // =================================================
+                    /*
+                    const int refine_r = 8;
+                    int bx1 = std::max(0, int(final_x) - refine_r);
+                    int by1 = std::max(0, int(final_y) - refine_r);
+                    int bx2 = std::min(m_inputImage.cols, bx1 + 2 * refine_r);
+                    int by2 = std::min(m_inputImage.rows, by1 + 2 * refine_r);
+
+                    if (bx2 - bx1 >= 5 && by2 - by1 >= 5)
+                    {
+                        cv::Mat sub_roi = m_inputImage(
+                            cv::Rect(bx1, by1, bx2 - bx1, by2 - by1));
+
+                        std::vector<cv::Mat> ch;
+                        cv::split(sub_roi, ch);
+                        cv::Mat blue = ch[0];
+
+                        cv::Mat bw_mask;
+                        cv::threshold(blue, bw_mask,
+                                    140, 255,
+                                    cv::THRESH_BINARY);
+
+                        std::vector<std::vector<cv::Point>> bw_contours;
+                        cv::findContours(bw_mask, bw_contours,
+                                        cv::RETR_EXTERNAL,
+                                        cv::CHAIN_APPROX_SIMPLE);
+
+                        for (auto &c : bw_contours)
+                        {
+                            double a = cv::contourArea(c);
+                            if (a < 1.0 || a > 20.0)
+                                continue;
+
+                            cv::Moments Mm = cv::moments(c);
+                            if (Mm.m00 <= 0)
+                                continue;
+
+                            float bx = bx1 + Mm.m10 / Mm.m00;
+                            float by = by1 + Mm.m01 / Mm.m00;
+
+                            kpt.x = bx;
+                            kpt.y = by;
+                            break;
+                        }
+                    }
+                    */
                 }
-
-                if (best_idx == -1)
-                {
-                    kpt.x = 0.0f;
-                    kpt.y = 0.0f;
-                    kpt.conf = 0.0f; // 认为检测到的点无效（可能是背景噪点），置零
-                    continue;
-                }
-
-                // 计算最终坐标
-                cv::Moments M = cv::moments(contours[best_idx]);
-                float final_gx = static_cast<float>(M.m10 / M.m00);
-                float final_gy = static_cast<float>(M.m01 / M.m00);
-
-                // 还原到全图坐标
-                float final_x = x1 + final_gx + 0.5f;
-                float final_y = y1 + final_gy + 0.5f;
-
-                // float final_x = x1 + final_gx;
-                // float final_y = y1 + final_gy;
-                double final_dist = std::sqrt(std::pow(final_x - kpt.x, 2) + std::pow(final_y - kpt.y, 2));
-
-                if (final_dist > DIST_LIMIT)
-                {
-                    kpt.x = 0.0f;
-                    kpt.y = 0.0f;
-                    kpt.conf = 0.0f; // 最终计算结果偏离太大，置零
-                    continue;
-                }
-
-                kpt.x = final_x;
-                kpt.y = final_y;
             }
         }
 
@@ -553,7 +721,7 @@ namespace model
                 int valid_count = 0;
                 for (int i = 0; i < 7; i++)
                 {
-                    if (target.keypoints[i].conf > 0.9)
+                    if (target.keypoints[i].conf > 0.75)
                     {
                         p2d_Mat.at<double>(valid_count, 0) = target.keypoints[i].x;
                         p2d_Mat.at<double>(valid_count, 1) = target.keypoints[i].y;
@@ -584,6 +752,9 @@ namespace model
                 m_result[0] = T1.at<double>(0, 0);
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
+                // m_result[3] = T1.at<double>(0, 0);
+                // m_result[4] = T1.at<double>(1, 0);
+                // m_result[5] = T1.at<double>(2, 0);
             }
         }
 
@@ -595,11 +766,10 @@ namespace model
                 dt = static_cast<double>(timestamp - _last_timestamp) / 1000.0;
             }
             _last_timestamp = timestamp;
-
-            if (dt > 1.0 || dt < 0.0)
+            if (dt > 1.0 || dt <= 0.0)
                 dt = 0.033;
-
-            cv::Point3f predicted_pos = m_kf.predict(dt);
+            std::cout << "时间间隔 :" << dt << std::endl;
+            cv::Point3f predicted_pos = m_kf.predict(dt); // 先验估计，预测值
             cv::Point3f kf_result;
             if (!_T1_prev.empty())
             {
@@ -609,16 +779,17 @@ namespace model
                 }
                 else
                 {
-                    if (m_kf.isInitialized())
-                    {
-                        // 使用预测值作为测量值更新，或者只 predict 不 update
-                        // 原代码逻辑是：如果初始化了用 predict 更新，否则用历史值(这里逻辑略奇怪，照搬原逻辑)
-                        kf_result = m_kf.update(predicted_pos.x, predicted_pos.y, predicted_pos.z);
-                    }
-                    else
-                    {
-                        kf_result = m_kf.update(m_result[0], m_result[1], m_result[2]);
-                    }
+                    // if (m_kf.isInitialized())
+                    // {
+                    //     // 使用预测值作为测量值更新，或者只 predict 不 update
+                    //     // 原代码逻辑是：如果初始化了用 predict 更新，否则用历史值(这里逻辑略奇怪，照搬原逻辑)
+                    //     kf_result = m_kf.update(predicted_pos.x, predicted_pos.y, predicted_pos.z);
+                    // }
+                    // else
+                    // {
+                    //     kf_result = m_kf.update(m_result[0], m_result[1], m_result[2]);
+                    // }
+                    kf_result = predicted_pos;
                 }
 
                 // 4. 保存滤波后的结果
@@ -661,7 +832,7 @@ namespace model
             int valid_count = 0;
             for (int i = 0; i < 7; i++)
             {
-                if (target.keypoints[i].conf > 0.9)
+                if (target.keypoints[i].conf > 0.70)
                 {
                     p2d_Mat.at<double>(valid_count, 0) = target.keypoints[i].x;
                     p2d_Mat.at<double>(valid_count, 1) = target.keypoints[i].y;

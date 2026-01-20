@@ -10,26 +10,10 @@ public:
     TrajectoryKF();
     ~TrajectoryKF();
 
-    /**
-     * @brief 初始化卡尔曼滤波器
-     * @param x, y, z 初始位置
-     */
     void init(float x, float y, float z);
 
-    /**
-     * @brief 预测下一时刻的位置
-     * @param dt 距离上一次更新的时间间隔 (秒)
-     * @return 预测的 x, y, z 坐标
-     */
     cv::Point3f predict(double dt);
-
-    /**
-     * @brief 使用观测值更新滤波器
-     * @param x, y, z 观测到的位置 (来自 PnP 或 ZED)
-     * @return 修正后的最优估计位置 x, y, z
-     */
     cv::Point3f update(float x, float y, float z);
-    cv::Point3f Auto_update(float x, float y, float z);
 
     bool isInitialized() const
     {
@@ -41,13 +25,23 @@ private:
     cv::Mat measurement;
     bool initialized = false;
 
-    // 调试用：打印矩阵
-    void printState();
-    float base_Q_pos = 1e-5;
+    int consecutive_reject_count = 0;
+    const int MAX_REJECT_COUNT = 4;
 
-    int consecutive_reject_count = 0;    // 连续拒绝计数器
-    const int MAX_REJECT_COUNT = 1;      // 最多连续拒绝5帧，超过就强制更新
-    const float GATE_THRESHOLD = 0.015f; // 门控阈值 0.05m (5cm)，超过这个距离认为离谱
+    // --- 自适应参数配置 ---
+
+    // 1. 基础过程噪声 (对应平稳直线运动)
+    // 稍微调大一点点，防止过拟合直线
+    const float BASE_Q_POS = 1e-5f;
+    const float BASE_Q_VEL = 5e-4f;
+
+    // 2. 机动判定阈值 (Maneuver Threshold)
+    // 预测值和观测值相差超过 1.5cm，认为物体在急转弯/变速
+    const float MANEUVER_THRESHOLD = 15.0f;
+
+    // 3. 离谱阈值 (Outlier Threshold)
+    // 预测值和观测值相差超过 50cm，认为绝对是传感器飞了
+    const float IMPOSSIBLE_THRESHOLD = 35.0f;
 };
 
 #endif // TRAJECTORY_KF_H

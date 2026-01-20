@@ -58,20 +58,19 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images1/*.png";
+    cv::String folder = "/home/cvia/yifei/images10/*.png";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
     int current_idx = 0;
-
-    auto now = std::chrono::system_clock::now();
     while (1)
     {
+        auto now = std::chrono::system_clock::now();
         auto mstart = std::chrono::high_resolution_clock::now();
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        // usleep(400000);
+        // usleep(200000);
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         current_idx++;
