@@ -64,6 +64,9 @@ namespace model
             bool is_current_frame_good = false;
 
         private:
+            // [修改] 新增标志位，记录当前颜色检测模式 (false=蓝色/近距离, true=红色/远距离)
+            bool m_use_red_mode = false; 
+
             int m_inputSize;
             int m_imgArea;
             int m_outputSize;

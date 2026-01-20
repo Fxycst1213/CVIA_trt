@@ -58,7 +58,7 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images10/*.png";
+    cv::String folder = "/home/cvia/yifei/images7/*.png";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
@@ -70,7 +70,7 @@ void prj_v8detector::camera_foldimages()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        // usleep(200000);
+        usleep(500000);
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         current_idx++;
@@ -87,8 +87,16 @@ void prj_v8detector::camera_foldimages()
 
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
+        for (int i =0;i<6;i++){
+            std::cout<< _resultframe.pose_result[i]<<"\t";
+        }
+        std::cout<<std::endl;
         _timer->start_cpu();
-        _rs485.sendDoubleArray(_resultframe.pose_result.data());
+        //
+        std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
+        _rs485.sendDoubleArray(partial_result.data());
+        //
+        // _rs485.sendDoubleArray(_resultframe.pose_result.data());
         _timer->stop_cpu<timer::Timer::ms>("RS485");
         _timer->start_cpu();
         {

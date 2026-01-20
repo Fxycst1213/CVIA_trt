@@ -41,20 +41,12 @@ namespace model
 
         void Pose::setup(void const *data, size_t size)
         {
-            /*
-             * pose setup需要做的事情
-             *   创建engine, context
-             *   设置bindings。这里需要注意，不同版本的yolo的输出binding可能还不一样
-             *   分配memory空间。这里需要注意，不同版本的yolo的输出所需要的空间也还不一样
-             */
-
             m_runtime = shared_ptr<IRuntime>(createInferRuntime(*m_logger), destroy_trt_ptr<IRuntime>);
             m_engine = shared_ptr<ICudaEngine>(m_runtime->deserializeCudaEngine(data, size), destroy_trt_ptr<ICudaEngine>);
             m_context = shared_ptr<IExecutionContext>(m_engine->createExecutionContext(), destroy_trt_ptr<IExecutionContext>);
             char const *input_name = m_engine->getIOTensorName(0);
             char const *output_name = m_engine->getIOTensorName(1);
 
-            // 2. 再通过名字获取维度
             m_inputDims = m_engine->getTensorShape(input_name);
             m_outputDims = m_engine->getTensorShape(output_name);
 
@@ -64,13 +56,11 @@ namespace model
             m_imgArea = m_params->img.h * m_params->img.w;
             m_outputSize = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
 
-            // 这里对host和device上的memory一起分配空间
             CUDA_CHECK(cudaMallocHost(&m_inputMemory[0], m_inputSize));
             CUDA_CHECK(cudaMallocHost(&m_outputMemory[0], m_outputSize));
             CUDA_CHECK(cudaMalloc(&m_inputMemory[1], m_inputSize));
             CUDA_CHECK(cudaMalloc(&m_outputMemory[1], m_outputSize));
 
-            // 创建m_bindings，之后再寻址就直接从这里找
             m_bindings[0] = m_inputMemory[1];
             m_bindings[1] = m_outputMemory[1];
         }
@@ -82,10 +72,6 @@ namespace model
 
         bool Pose::preprocess_cpu(const cv::Mat &img)
         {
-            /*Preprocess -- yolo的预处理并没有mean和std，所以可以直接skip掉mean和std的计算 */
-
-            /*Preprocess -- 读取数据*/
-            // m_inputImage = cv::imread(m_imagePath);
             m_inputImage = img;
             if (m_inputImage.data == nullptr)
             {
@@ -93,10 +79,8 @@ namespace model
                 return false;
             }
 
-            /*Preprocess -- 测速*/
             m_timer->start_cpu();
 
-            /*Preprocess -- resize(手动实现一个CPU版本的letterbox)*/
             int input_w = m_inputImage.cols;
             int input_h = m_inputImage.rows;
             int target_w = m_params->img.w;
@@ -111,18 +95,15 @@ namespace model
             cv::Mat resized_img;
             cv::resize(m_inputImage, resized_img, cv::Size(new_w, new_h));
 
-            /* 寻找resize后的图片在背景中的位置*/
             int x, y;
             x = (new_w < target_w) ? (target_w - new_w) / 2 : 0;
             y = (new_h < target_h) ? (target_h - new_h) / 2 : 0;
 
             cv::Rect roi(x, y, new_w, new_h);
 
-            /* 指定背景图片里居中的图片roi，把resized_img给放入到这个roi中*/
             cv::Mat roiOfTar = tar(roi);
             resized_img.copyTo(roiOfTar);
 
-            /*Preprocess -- host端进行normalization和BGR2RGB, NHWC->NCHW*/
             int index;
             int offset_ch0 = m_imgArea * 0;
             int offset_ch1 = m_imgArea * 1;
@@ -138,7 +119,6 @@ namespace model
                 }
             }
 
-            /*Preprocess -- 将host的数据移动到device上*/
             CUDA_CHECK(cudaMemcpyAsync(m_inputMemory[1], m_inputMemory[0], m_inputSize, cudaMemcpyKind::cudaMemcpyHostToDevice, m_stream));
 
             m_timer->stop_cpu<timer::Timer::ms>("preprocess(CPU)");
@@ -147,10 +127,6 @@ namespace model
 
         bool Pose::preprocess_gpu(const cv::Mat &img)
         {
-            /*Preprocess -- yolo的预处理并没有mean和std，所以可以直接skip掉mean和std的计算 */
-
-            /*Preprocess -- 读取数据*/
-            // m_inputImage = cv::imread(m_imagePath);
             m_timer->start_gpu();
             m_inputImage = img;
             if (m_inputImage.data == nullptr)
@@ -160,10 +136,8 @@ namespace model
             }
             m_timer->stop_gpu("preprocess(clone)");
 
-            /*Preprocess -- 测速*/
             m_timer->start_gpu();
 
-            /*Preprocess -- 使用GPU进行warpAffine, 并将结果返回到m_inputMemory中*/
             preprocess::preprocess_resize_gpu(m_inputImage, m_inputMemory[1],
                                               m_params->img.h, m_params->img.w,
                                               preprocess::tactics::GPU_WARP_AFFINE, m_stream);
@@ -182,7 +156,7 @@ namespace model
                 int y0 = static_cast<int>(box.y0);
                 int x1 = static_cast<int>(box.x1);
                 int y1 = static_cast<int>(box.y1);
-                cv::rectangle(vis, cv::Point(x0, y0), cv::Point(x1, y1), cv::Scalar(0, 0, 255), 2); // 线宽2
+                cv::rectangle(vis, cv::Point(x0, y0), cv::Point(x1, y1), cv::Scalar(0, 0, 255), 2);
                 for (int k = 0; k < box.keypoints.size(); ++k)
                 {
                     const auto &kpt = box.keypoints[k];
@@ -200,99 +174,62 @@ namespace model
         Pose::Pose(std::string onnx_path, logger::Level level, Params params)
             : Model(onnx_path, level, params)
         {
+            //初始化模式为红色(远距离)
+            m_use_red_mode = true;
 
             m_result.resize(6, 0.0);
+            //  一飞院
+            // _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
+            //       0.0, 1067.37400981335, 525.523361276358,
+            //       0.0, 0.0, 1.0);
 
-            _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
-                  0.0, 1067.37400981335, 525.523361276358,
+            // _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
+
+            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -2.17,
+            //         -95.4, -6.84, -0.9,
+            //         -148.72, 364.33, 58.67,
+            //         -118.91, 208.11, 52.76,
+            //         -102.54, -226.07, 42.13,
+            //         -120.56, -379.84, 46.283,
+            //         92.51, -3.9, 4.07);
+            // 凯丽
+            _K = (cv::Mat_<double>(3, 3) << 1064.0, 0.0, 971.2,
+                  0.0, 1064.1, 544.3,
                   0.0, 0.0, 1.0);
 
-            _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
+            _diff = (cv::Mat_<float>(1, 5) << -0.0933, 0.0668, 0.0003459, -0.0002221, 0.0225);
 
-            // 原来
-            // _p3d = (cv::Mat_<double>(7, 3) << -255.41, -5.3, -5.9,
-            //         -97.45, -4.11, -6.34,
-            //         -141.12, 366.99, 54.88,
-            //         -113.87, 212.02, 49.2,
-            //         -107.09, -221.28, 38.62,
-            //         -128.86, -374.6, 40.37,
-            //         93.18, 2.06, -2.96);
+            _p3d = (cv::Mat_<double>(7, 3) << -206.6246, 4.9622, 16.4583,
+                                -84.987, 4.5814, 7.3884,
+                                -89.4077, 276.2537, 47.472,
+                                -82.036, 166.9897, 46.9556,
+                                -77.928, -154.0283, 35.5093,
+                                -93.1905, -273.8243, 27.4523,
+                                51.005, 0.1395, 3.9154
+                                );
 
-            // 新
-            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -14.17,
-            //         -95.4, -6.84, -12.9,
-            //         -148.72, 364.33, 46.67,
-            //         -118.91, 208.11, 40.76,
-            //         -102.54, -226.07, 30.13,
-            //         -120.56, -379.84, 34.283,
-            //         92.51, -3.9, -8.07);
-
-            // // 新 - 8
-            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -6.17,
-            //         -95.4, -6.84, -4.9,
-            //         -148.72, 364.33, 54.67,
-            //         -118.91, 208.11, 48.76,
-            //         -102.54, -226.07, 38.13,
-            //         -120.56, -379.84, 42.283,
-            //         92.51, -3.9, -0.07);
-
-            // 新 - 10
-            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -4.17,
-            //         -95.4, -6.84, -2.9,
-            //         -148.72, 364.33, 56.67,
-            //         -118.91, 208.11, 50.76,
-            //         -102.54, -226.07, 40.13,
-            //         -120.56, -379.84, 44.283,
-            //         92.51, -3.9, 2.07);
-
-            // 新 - 12
-            _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -2.17,
-                    -95.4, -6.84, -0.9,
-                    -148.72, 364.33, 58.67,
-                    -118.91, 208.11, 52.76,
-                    -102.54, -226.07, 42.13,
-                    -120.56, -379.84, 46.283,
-                    92.51, -3.9, 4.07);
-
-            // 指定容器大小
-            m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(800);
-            // 【关键】设置 X, Y, Z 三轴的周期 (单位：帧)
-            // 满 了以后开始计算
+            m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(800);//容器大小
+            //开始输出周期
             double x_period = 760;
             double y_period = 760;
             double z_period = 760;
+            
             m_lookback_estimator->setPeriods(x_period, y_period, z_period);
-            m_lookback_estimator->setLookbackOffsets(748.5, 750.5, 748.5);
+            m_lookback_estimator->setLookbackOffsets(748.5, 750.5, 748.5);//离线计算周期
         }
 
         bool Pose::postprocess_cpu(const uint64_t &timestamp)
         {
 
             m_timer->start_cpu();
-            /*Postprocess -- 将device上的数据移动到host上*/
             int output_size = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
             CUDA_CHECK(cudaMemcpyAsync(m_outputMemory[0], m_outputMemory[1], output_size, cudaMemcpyKind::cudaMemcpyDeviceToHost, m_stream));
             CUDA_CHECK(cudaStreamSynchronize(m_stream));
-            /*Postprocess -- yolov8的postprocess需要做的事情*/
-            /*
-             * 1. 把bbox从输出tensor拿出来，并进行decode，把获取的bbox放入到m_bboxes中
-             * 2. 把decode得到的m_bboxes根据nms threshold进行NMS处理
-             * 3. 把最终得到的bbox绘制到原图中
-             */
 
-            float conf_threshold = 0.25; // 用来过滤decode时的bboxes
-            float nms_threshold = 0.45;  // 用来过滤nms时的bboxes
+            float conf_threshold = 0.25;
+            float nms_threshold = 0.45;
             float kpt_conf_threshold = 0.5f;
-            /*Postprocess -- 1. decode*/
-            /*
-             * 我们需要做的就是将[batch, bboxes, ch]转换为vector<bbox>
-             * 几个步骤:
-             * 1. 从每一个bbox中对应的ch中获取cx, cy, width, height
-             * 2. 对每一个bbox中对应的ch中，找到最大的class label, 可以使用std::max_element
-             * 3. 将cx, cy, width, height转换为x0, y0, x1, y1
-             * 4. 因为图像是经过resize了的，所以需要根据resize的scale和shift进行坐标的转换(这里面可以根据preprocess中的到的affine matrix来进行逆变换)
-             * 5. 将转换好的x0, y0, x1, y1，以及confidence和classness给存入到box中，并push到m_bboxes中，准备接下来的NMS处理
-             */
+
             int boxes_count = m_outputDims.d[1];
             int dim_kpts = NUM_KEYPOINTS * 3;
             int class_count = m_outputDims.d[2] - 4 - dim_kpts;
@@ -321,10 +258,9 @@ namespace model
                 y1 = y0 + h;
                 preprocess::affine_transformation(preprocess::affine_matrix.reverse, x0, y0, &x0, &y0);
                 preprocess::affine_transformation(preprocess::affine_matrix.reverse, x1, y1, &x1, &y1);
-                // Keypoint
 
                 vector<keypoint> keypoints;
-                keypoints.reserve(NUM_KEYPOINTS); // 预分配17个关键点空间
+                keypoints.reserve(NUM_KEYPOINTS);
 
                 int Keypoint_start = 4 + class_count;
                 for (int i = 0; i < NUM_KEYPOINTS; ++i)
@@ -347,15 +283,6 @@ namespace model
                 m_bboxes.emplace_back(std::move(pose_box));
             }
             LOGD("the count of decoded bbox is %d", m_bboxes.size());
-
-            /*Postprocess -- 2. NMS*/
-            /*
-             * 几个步骤:
-             * 1. 做一个IoU计算的lambda函数
-             * 2. 将m_bboxes中的所有数据，按照confidence从高到低进行排序
-             * 3. 最终希望是对于每一个class，我们都只有一个bbox，所以对同一个class的所有bboxes进行IoU比较，
-             *    选取confidence最大。并与其他的同类bboxes的IoU的重叠率最大的同时IoU > IoU threshold
-             */
 
             vector<bbox> final_bboxes;
             final_bboxes.reserve(m_bboxes.size());
@@ -383,8 +310,7 @@ namespace model
             }
             LOGD("the count of bbox after NMS is %d", final_bboxes.size());
             m_bboxes = final_bboxes;
-            // this->show("unrefine.png");
-            /*Postprocess -- 2. 精修关键点*/
+
             m_frame_counter++;
             if (!m_bboxes.empty())
             {
@@ -392,7 +318,7 @@ namespace model
             }
             run_pnp_multi_stage();
             run_filter_and_estimation(timestamp, m_frame_counter);
-            // this->show("refine.png");
+
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
             return true;
@@ -411,8 +337,32 @@ namespace model
 
         void Pose::refine_keypoints(std::vector<keypoint> &keypoints)
         {
-            if (m_result[5] <= 2160.0f)
+            // [修改] -------------------- 滞回区间逻辑开始 --------------------
+            float dist_enter_red = 2200.0f; // 大于此值切入红色模式
+            float dist_enter_blue = 2160.0f; // 小于此值切回蓝色模式
+
+            if (m_use_red_mode)
             {
+                // 当前是红色，检测是否足够近以切换回蓝色
+                if (m_result[5] < dist_enter_blue)
+                {
+                    m_use_red_mode = false;
+                }
+            }
+            else
+            {
+                // 当前是蓝色，检测是否足够远以切换回红色
+                if (m_result[5] > dist_enter_red)
+                {
+                    m_use_red_mode = true;
+                }
+            }
+            // [修改] -------------------- 滞回区间逻辑结束 --------------------
+
+            // 使用 m_use_red_mode 标志位替代原来的 hard code 判断
+            if (!m_use_red_mode)
+            {
+                // ================== [蓝色通道模式 / 近距离] ==================
                 for (auto &kpt : keypoints)
                 {
                     if (kpt.conf < 0.75f)
@@ -447,22 +397,8 @@ namespace model
                     cv::Mat target_img = channels[0]; // B通道
 
                     cv::Mat mask;
-                    cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best
-
-                    // mask 太小 → C 调大一点（比如 -2）mask 吃进背景 → C 更负一点（比如 -8）
-                    // cv::Mat mask;
-                    // cv::adaptiveThreshold(
-                    //     target_img, mask,
-                    //     255,
-                    //     cv::ADAPTIVE_THRESH_GAUSSIAN_C,
-                    //     cv::THRESH_BINARY,
-                    //     15,
-                    //     -5);
-
-                    // // 去噪
-                    // cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, {3, 3});
-                    // cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
-                    //
+                    // cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best
+                    cv::threshold(target_img, mask, 200, 255, cv::THRESH_BINARY); // 140 best
 
                     std::vector<std::vector<cv::Point>> contours;
                     cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -477,15 +413,19 @@ namespace model
 
                     int best_idx = -1;
                     double max_area = 0;
-                    const double DIST_LIMIT = 4;
+                    // const double DIST_LIMIT = 4;
+                    const double DIST_LIMIT = 10;
 
                     for (size_t i = 0; i < contours.size(); ++i)
                     {
                         double area = cv::contourArea(contours[i]);
 
-                        if (area < 2 || area > 66.0)
-                            continue;
+                        // if (area < 2 || area > 66.0)
+                        //     continue;
 
+                        if (area < 10 || area > 130.0)
+                            continue;
+                        
                         cv::Moments M = cv::moments(contours[i]);
                         if (M.m00 <= 0)
                             continue;
@@ -526,8 +466,6 @@ namespace model
                     float final_x = x1 + final_gx + 0.5f;
                     float final_y = y1 + final_gy + 0.5f;
 
-                    // float final_x = x1 + final_gx;
-                    // float final_y = y1 + final_gy;
                     double final_dist = std::sqrt(std::pow(final_x - kpt.x, 2) + std::pow(final_y - kpt.y, 2));
 
                     if (final_dist > DIST_LIMIT)
@@ -544,6 +482,7 @@ namespace model
             }
             else
             {
+                // ================== [红色 HSV 模式 / 远距离] ==================
                 for (auto &kpt : keypoints)
                 {
                     if (kpt.conf < 0.75f)
@@ -552,9 +491,7 @@ namespace model
                     int cx = static_cast<int>(kpt.x);
                     int cy = static_cast<int>(kpt.y);
 
-                    // -----------------------------
-                    // 1. 取 ROI（比你原来稍大）
-                    // -----------------------------
+                    // 1. 取 ROI
                     const int search_side = 30;
                     const int half = search_side / 2;
 
@@ -569,9 +506,7 @@ namespace model
                     cv::Rect roi_rect(x1, y1, x2 - x1, y2 - y1);
                     cv::Mat roi = m_inputImage(roi_rect);
 
-                    // -----------------------------
                     // 2. HSV 空间提取红色贴纸
-                    // -----------------------------
                     cv::Mat hsv;
                     cv::cvtColor(roi, hsv, cv::COLOR_BGR2HSV);
 
@@ -583,15 +518,13 @@ namespace model
 
                     red_mask = mask1 | mask2;
 
-                    // 去一点噪（可选但推荐）
+                    // 去一点噪
                     cv::Mat kernel = cv::getStructuringElement(
                         cv::MORPH_ELLIPSE, {3, 3});
                     cv::morphologyEx(red_mask, red_mask,
                                      cv::MORPH_OPEN, kernel);
 
-                    // -----------------------------
                     // 3. 找红色轮廓
-                    // -----------------------------
                     std::vector<std::vector<cv::Point>> contours;
                     cv::findContours(red_mask, contours,
                                      cv::RETR_EXTERNAL,
@@ -624,9 +557,7 @@ namespace model
                         continue;
                     }
 
-                    // -----------------------------
                     // 4. 红色贴纸质心（anchor）
-                    // -----------------------------
                     cv::Moments M = cv::moments(contours[best_idx]);
                     if (M.m00 <= 0)
                         continue;
@@ -637,9 +568,7 @@ namespace model
                     float final_x = x1 + rx + 0.5f;
                     float final_y = y1 + ry + 0.5f;
 
-                    // -----------------------------
-                    // 5. 距离 sanity check（放宽）
-                    // -----------------------------
+                    // 5. 距离 sanity check
                     const double DIST_LIMIT = 10.0;
                     double dist = std::hypot(final_x - kpt.x,
                                              final_y - kpt.y);
@@ -652,60 +581,9 @@ namespace model
                         continue; // 回退到 YOLO 点
                     }
 
-                    // -----------------------------
-                    // 6. 更新 keypoint（anchor）
-                    // -----------------------------
+                    // 6. 更新 keypoint
                     kpt.x = final_x;
                     kpt.y = final_y;
-
-                    // =================================================
-                    // 7. （可选）在红色 anchor 附近精修蓝白贴纸
-                    // =================================================
-                    /*
-                    const int refine_r = 8;
-                    int bx1 = std::max(0, int(final_x) - refine_r);
-                    int by1 = std::max(0, int(final_y) - refine_r);
-                    int bx2 = std::min(m_inputImage.cols, bx1 + 2 * refine_r);
-                    int by2 = std::min(m_inputImage.rows, by1 + 2 * refine_r);
-
-                    if (bx2 - bx1 >= 5 && by2 - by1 >= 5)
-                    {
-                        cv::Mat sub_roi = m_inputImage(
-                            cv::Rect(bx1, by1, bx2 - bx1, by2 - by1));
-
-                        std::vector<cv::Mat> ch;
-                        cv::split(sub_roi, ch);
-                        cv::Mat blue = ch[0];
-
-                        cv::Mat bw_mask;
-                        cv::threshold(blue, bw_mask,
-                                    140, 255,
-                                    cv::THRESH_BINARY);
-
-                        std::vector<std::vector<cv::Point>> bw_contours;
-                        cv::findContours(bw_mask, bw_contours,
-                                        cv::RETR_EXTERNAL,
-                                        cv::CHAIN_APPROX_SIMPLE);
-
-                        for (auto &c : bw_contours)
-                        {
-                            double a = cv::contourArea(c);
-                            if (a < 1.0 || a > 20.0)
-                                continue;
-
-                            cv::Moments Mm = cv::moments(c);
-                            if (Mm.m00 <= 0)
-                                continue;
-
-                            float bx = bx1 + Mm.m10 / Mm.m00;
-                            float by = by1 + Mm.m01 / Mm.m00;
-
-                            kpt.x = bx;
-                            kpt.y = by;
-                            break;
-                        }
-                    }
-                    */
                 }
             }
         }
@@ -752,6 +630,7 @@ namespace model
                 m_result[0] = T1.at<double>(0, 0);
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
+
                 // m_result[3] = T1.at<double>(0, 0);
                 // m_result[4] = T1.at<double>(1, 0);
                 // m_result[5] = T1.at<double>(2, 0);
@@ -779,16 +658,6 @@ namespace model
                 }
                 else
                 {
-                    // if (m_kf.isInitialized())
-                    // {
-                    //     // 使用预测值作为测量值更新，或者只 predict 不 update
-                    //     // 原代码逻辑是：如果初始化了用 predict 更新，否则用历史值(这里逻辑略奇怪，照搬原逻辑)
-                    //     kf_result = m_kf.update(predicted_pos.x, predicted_pos.y, predicted_pos.z);
-                    // }
-                    // else
-                    // {
-                    //     kf_result = m_kf.update(m_result[0], m_result[1], m_result[2]);
-                    // }
                     kf_result = predicted_pos;
                 }
 
@@ -803,19 +672,22 @@ namespace model
                 double predicted_vals[3] = {0.0, 0.0, 0.0};
                 bool is_ready = m_lookback_estimator->getPrediction(predicted_vals);
 
-                if (is_ready)
-                {
-                    m_result[0] = predicted_vals[0];
-                    m_result[1] = predicted_vals[1];
-                    m_result[2] = predicted_vals[2];
-                }
-                else
-                {
-                    m_result[0] = 0;
-                    m_result[1] = 0;
-                    m_result[2] = 0;
-                }
-                // 【新增集成代码 End】 -------------------------------------
+                // if (is_ready)
+                // {
+                //     m_result[0] = predicted_vals[0];
+                //     m_result[1] = predicted_vals[1];
+                //     m_result[2] = predicted_vals[2];
+                // }
+                // else
+                // {
+                //     m_result[0] = 0;
+                //     m_result[1] = 0;
+                //     m_result[2] = 0;
+                // }
+
+                m_result[0] = m_result[3];
+                m_result[1] = m_result[4];
+                m_result[2] = m_result[5];
 
                 LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
