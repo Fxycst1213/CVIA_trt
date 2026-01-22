@@ -59,6 +59,7 @@ namespace model
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);
             std::vector<double> m_result;
+            std::vector<double> uart_result;
             float linear_map(float val, float in_min, float in_max, float out_min, float out_max);
             std::vector<bbox> m_bboxes;
             bool is_current_frame_good = false;
@@ -73,6 +74,11 @@ namespace model
             cv::Mat _K;
             cv::Mat _diff;
             cv::Mat _p3d;
+
+            cv::Mat _handTrans;
+            cv::Mat _wxj2cam;
+            cv::Mat combined_inv;
+            cv::Mat combined;
 
             cv::Mat R1, T1;
             cv::Mat _R1_prev;

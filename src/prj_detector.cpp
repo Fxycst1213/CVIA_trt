@@ -83,14 +83,14 @@ void prj_v8detector::camera()
         
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
-
+        _resultframe.rs485_result = _worker->m_pose->uart_result;
         // 3. 串口发送 (保持不变)
         _timer->start_cpu();
         // _rs485.sendDoubleArray(_resultframe.pose_result.data());
         float float_temp_pose[3];
-        float_temp_pose[0] = (float)_resultframe.pose_result[0];
-        float_temp_pose[1] = (float)_resultframe.pose_result[1];
-        float_temp_pose[2] = (float)_resultframe.pose_result[2];
+        float_temp_pose[0] = (float)_resultframe.rs485_result[0];
+        float_temp_pose[1] = (float)_resultframe.rs485_result[1];
+        float_temp_pose[2] = (float)_resultframe.rs485_result[2];
         _rs485.sendFloatArray(float_temp_pose);
         _timer->stop_cpu<timer::Timer::ms>("RS485");
 
@@ -150,16 +150,17 @@ void prj_v8detector::camera_foldimages()
 
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
+        _resultframe.rs485_result = _worker->m_pose->uart_result;
         _timer->start_cpu();
         //
         // std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
         // _rs485.sendDoubleArray(partial_result.data());
         if (_resultframe.pose_result.size() >= 3) {
-            // _rs485.sendDoubleArray(_resultframe.pose_result.data());
+            // _rs485.sendDoubleArray(_resultframe.rs485_result.data());
             float float_temp_pose[3];
-            float_temp_pose[0] = (float)_resultframe.pose_result[0];
-            float_temp_pose[1] = (float)_resultframe.pose_result[1];
-            float_temp_pose[2] = (float)_resultframe.pose_result[2];
+            float_temp_pose[0] = (float)_resultframe.rs485_result[0];
+            float_temp_pose[1] = (float)_resultframe.rs485_result[1];
+            float_temp_pose[2] = (float)_resultframe.rs485_result[2];
             _rs485.sendFloatArray(float_temp_pose);
         } else {
             std::cerr << "错误：数据不足，无法发送串口数据" << std::endl;

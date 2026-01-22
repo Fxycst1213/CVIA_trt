@@ -178,6 +178,7 @@ namespace model
             m_use_red_mode = true;
 
             m_result.resize(6, 0.0);
+            uart_result.resize(3,0.0);
             //  一飞院
             _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
                   0.0, 1067.37400981335, 525.523361276358,
@@ -185,13 +186,37 @@ namespace model
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
 
-            _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -2.17,
-                    -95.4, -6.84, -0.9,
-                    -148.72, 364.33, 58.67,
-                    -118.91, 208.11, 52.76,
-                    -102.54, -226.07, 42.13,
-                    -120.56, -379.84, 46.283,
-                    92.51, -3.9, 4.07);
+            // new
+            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -2.17,
+            //         -95.4, -6.84, -0.9,
+            //         -148.72, 364.33, 58.67,
+            //         -118.91, 208.11, 52.76,
+            //         -102.54, -226.07, 42.13,
+            //         -120.56, -379.84, 46.283,
+            //         92.51, -3.9, 4.07);
+
+            // old
+            _p3d = (cv::Mat_<double>(7, 3) << -255.41,	-5.3,	-10.9,
+                                            -97.45,	-4.11,	-11.34,
+                                            -141.12,	366.99,	49.88,
+                                            -113.87,	212.02,	44.2,
+                                            -107.09,	-221.28,	33.62,
+                                            -128.86,	-374.6, 35.37,
+                                            93.18,	2.06,	-7.96);
+
+            _handTrans = (cv::Mat_<double>(4, 4) << 0.99924, 0.029944, -0.0247853, -51.98,
+                                                    -0.0317989, 0.996434, -0.078150, 11.1460,
+                                                    -0.022356, -0.0788796, -0.9966334, -0.78764,
+                                                    0.000, 0.000, 0.000, 1.000);
+
+            _wxj2cam = (cv::Mat_<double>(4, 4) << 1.0, 0.0, 0.0, 0.0,
+                                                  0.0, 1.0, 0.0, 0.0,
+                                                  0.0, 0.0, 1.0, 0.0,
+                                                  0.0, 0.0, 0.0, 1.0);
+                        
+            combined = _wxj2cam * _handTrans;
+            combined_inv = _handTrans.inv() * _wxj2cam.inv();
+            
             // 凯丽
             // _K = (cv::Mat_<double>(3, 3) << 1064.0, 0.0, 971.2,
             //       0.0, 1064.1, 544.3,
@@ -664,31 +689,59 @@ namespace model
                 m_result[3] = kf_result.x;
                 m_result[4] = kf_result.y;
                 m_result[5] = kf_result.z;
-                
 
+                cv::Mat point_homogeneous = (cv::Mat_<double>(4, 1) << 
+                                            m_result[3], 
+                                            m_result[4], 
+                                            m_result[5], 
+                                            1.0);
 
-                m_lookback_estimator->update(frame_id, m_result[3], m_result[4], m_result[5]);
+                cv::Mat transformed_point = combined * point_homogeneous;
+
+                uart_result[0] = transformed_point.at<double>(0, 0); // 新的 X
+                uart_result[1] = transformed_point.at<double>(1, 0); // 新的 Y
+                uart_result[2] = transformed_point.at<double>(2, 0); // 新的 Z
+
+                // m_lookback_estimator->update(frame_id, m_result[3], m_result[4], m_result[5]);
+                m_lookback_estimator->update(frame_id, uart_result[0], 
+                                            uart_result[1], uart_result[2]);
 
                 // 步骤 B: 获取回溯预测值
                 double predicted_vals[3] = {0.0, 0.0, 0.0};
                 bool is_ready = m_lookback_estimator->getPrediction(predicted_vals);
 
                 if (is_ready)
-                {
-                    m_result[0] = predicted_vals[0];
-                    m_result[1] = predicted_vals[1];
-                    m_result[2] = predicted_vals[2];
+                {                    
+                    // 2. 直接应用计算好的矩阵
+                    // 假设 predicted_vals 是 cv::Mat (3x1) 或者 cv::Point3f/d
+                    // 注意：如果 predicted_vals 是 Point 类型，可能需要转为 Mat 进行乘法，或者使用 perspectiveTransform
+                    cv::Mat point_homogeneous_inv = (cv::Mat_<double>(4, 1) << 
+                                            predicted_vals[0], 
+                                            predicted_vals[1], 
+                                            predicted_vals[2], 
+                                            1.0);
+                    cv::Mat transformed_point_inv = combined_inv * point_homogeneous_inv;
+
+                    m_result[0] = transformed_point_inv.at<double>(0, 0); // 新的 X
+                    m_result[1] = transformed_point_inv.at<double>(1, 0); // 新的 Y
+                    m_result[2] = transformed_point_inv.at<double>(2, 0); // 新的 Z
+                    
+                    // 3. 赋值 uart_result
+                    uart_result[0] = predicted_vals[0];
+                    uart_result[1] = predicted_vals[1];
+                    uart_result[2] = predicted_vals[2];
                 }
                 else
                 {
                     m_result[0] = 0;
                     m_result[1] = 0;
                     m_result[2] = 0;
+                    uart_result[0] = 0;
+                    uart_result[1] = 0;
+                    uart_result[2] = 0;
                 }
 
-                // m_result[0] = m_result[3];
-                // m_result[1] = m_result[4];
-                // m_result[2] = m_result[5];
+    
 
                 LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);

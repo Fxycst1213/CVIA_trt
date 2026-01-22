@@ -11,6 +11,7 @@ struct Resultframe
     cv::Mat rgb;
     std::vector<model::pose::bbox> bboxes;
     std::vector<double> pose_result;
+    std::vector<double> rs485_result;
     uint64_t timestamp;
 };
 
