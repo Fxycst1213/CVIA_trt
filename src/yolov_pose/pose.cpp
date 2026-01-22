@@ -179,33 +179,33 @@ namespace model
 
             m_result.resize(6, 0.0);
             //  一飞院
-            // _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
-            //       0.0, 1067.37400981335, 525.523361276358,
-            //       0.0, 0.0, 1.0);
-
-            // _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
-
-            // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -2.17,
-            //         -95.4, -6.84, -0.9,
-            //         -148.72, 364.33, 58.67,
-            //         -118.91, 208.11, 52.76,
-            //         -102.54, -226.07, 42.13,
-            //         -120.56, -379.84, 46.283,
-            //         92.51, -3.9, 4.07);
-            // 凯丽
-            _K = (cv::Mat_<double>(3, 3) << 1064.0, 0.0, 971.2,
-                  0.0, 1064.1, 544.3,
+            _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
+                  0.0, 1067.37400981335, 525.523361276358,
                   0.0, 0.0, 1.0);
 
-            _diff = (cv::Mat_<float>(1, 5) << -0.0933, 0.0668, 0.0003459, -0.0002221, 0.0225);
+            _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
 
-            _p3d = (cv::Mat_<double>(7, 3) << -183.7073,	11.25681,	16.7002,
-                                        -63.425,	5.11481,	6.7676,
-                                        -56.275,	276.95511,	41.9942,
-                                        -52.444,	166.85011,	43.4943,
-                                        -62.388,	-153.32389,	37.1131,
-                                        -83.24,	-272.24389,	31.8423,
-                                        72.554,	-6.07653,	3.5579);
+            _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -2.17,
+                    -95.4, -6.84, -0.9,
+                    -148.72, 364.33, 58.67,
+                    -118.91, 208.11, 52.76,
+                    -102.54, -226.07, 42.13,
+                    -120.56, -379.84, 46.283,
+                    92.51, -3.9, 4.07);
+            // 凯丽
+            // _K = (cv::Mat_<double>(3, 3) << 1064.0, 0.0, 971.2,
+            //       0.0, 1064.1, 544.3,
+            //       0.0, 0.0, 1.0);
+
+            // _diff = (cv::Mat_<float>(1, 5) << -0.0933, 0.0668, 0.0003459, -0.0002221, 0.0225);
+
+            // _p3d = (cv::Mat_<double>(7, 3) << -183.7073,	11.25681,	16.7002,
+            //                             -63.425,	5.11481,	6.7676,
+            //                             -56.275,	276.95511,	41.9942,
+            //                             -52.444,	166.85011,	43.4943,
+            //                             -62.388,	-153.32389,	37.1131,
+            //                             -83.24,	-272.24389,	31.8423,
+            //                             72.554,	-6.07653,	3.5579);
 
             m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(800);//容器大小
             //开始输出周期
@@ -396,8 +396,8 @@ namespace model
                     cv::Mat target_img = channels[0]; // B通道
 
                     cv::Mat mask;
-                    // cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best 一飞院
-                    cv::threshold(target_img, mask, 200, 255, cv::THRESH_BINARY); // 140 best 凯丽
+                    cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best 一飞院
+                    //cv::threshold(target_img, mask, 200, 255, cv::THRESH_BINARY); // 140 best 凯丽
 
                     std::vector<std::vector<cv::Point>> contours;
                     cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -412,18 +412,18 @@ namespace model
 
                     int best_idx = -1;
                     double max_area = 0;
-                    // const double DIST_LIMIT = 4;//一飞院
-                    const double DIST_LIMIT = 12;//凯丽
+                    const double DIST_LIMIT = 4.5;//一飞院
+                    //const double DIST_LIMIT = 12;//凯丽
 
                     for (size_t i = 0; i < contours.size(); ++i)
                     {
                         double area = cv::contourArea(contours[i]);
                         //一飞院
-                        // if (area < 2 || area > 66.0)
-                        //     continue;
-                        //凯丽
-                        if (area < 10 || area > 160.0)
+                        if (area < 2 || area > 68.0)
                             continue;
+                        //凯丽
+                        // if (area < 10 || area > 160.0)
+                        //     continue;
                         
                         cv::Moments M = cv::moments(contours[i]);
                         if (M.m00 <= 0)
@@ -630,9 +630,9 @@ namespace model
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
 
-                m_result[3] = T1.at<double>(0, 0);
-                m_result[4] = T1.at<double>(1, 0);
-                m_result[5] = T1.at<double>(2, 0);
+                // m_result[3] = T1.at<double>(0, 0);
+                // m_result[4] = T1.at<double>(1, 0);
+                // m_result[5] = T1.at<double>(2, 0);
             }
         }
 
@@ -660,10 +660,12 @@ namespace model
                     kf_result = predicted_pos;
                 }
 
-                // 4. 保存滤波后的结果
+                // 4. 相机坐标系下滤波后的结果
                 m_result[3] = kf_result.x;
                 m_result[4] = kf_result.y;
                 m_result[5] = kf_result.z;
+                
+
 
                 m_lookback_estimator->update(frame_id, m_result[3], m_result[4], m_result[5]);
 
@@ -671,22 +673,22 @@ namespace model
                 double predicted_vals[3] = {0.0, 0.0, 0.0};
                 bool is_ready = m_lookback_estimator->getPrediction(predicted_vals);
 
-                // if (is_ready)
-                // {
-                //     m_result[0] = predicted_vals[0];
-                //     m_result[1] = predicted_vals[1];
-                //     m_result[2] = predicted_vals[2];
-                // }
-                // else
-                // {
-                //     m_result[0] = 0;
-                //     m_result[1] = 0;
-                //     m_result[2] = 0;
-                // }
+                if (is_ready)
+                {
+                    m_result[0] = predicted_vals[0];
+                    m_result[1] = predicted_vals[1];
+                    m_result[2] = predicted_vals[2];
+                }
+                else
+                {
+                    m_result[0] = 0;
+                    m_result[1] = 0;
+                    m_result[2] = 0;
+                }
 
-                m_result[0] = m_result[3];
-                m_result[1] = m_result[4];
-                m_result[2] = m_result[5];
+                // m_result[0] = m_result[3];
+                // m_result[1] = m_result[4];
+                // m_result[2] = m_result[5];
 
                 LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);

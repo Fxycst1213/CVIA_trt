@@ -86,7 +86,12 @@ void prj_v8detector::camera()
 
         // 3. 串口发送 (保持不变)
         _timer->start_cpu();
-        _rs485.sendDoubleArray(_resultframe.pose_result.data());
+        // _rs485.sendDoubleArray(_resultframe.pose_result.data());
+        float float_temp_pose[3];
+        float_temp_pose[0] = (float)_resultframe.pose_result[0];
+        float_temp_pose[1] = (float)_resultframe.pose_result[1];
+        float_temp_pose[2] = (float)_resultframe.pose_result[2];
+        _rs485.sendFloatArray(float_temp_pose);
         _timer->stop_cpu<timer::Timer::ms>("RS485");
 
         // 4. TCP 队列处理
@@ -116,10 +121,10 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images0112/*.png";
+    cv::String folder = "/home/cvia/yifei/images9/*.png";
     cv::glob(folder, filenames, false);
-    // std::sort(filenames.begin(), filenames.end());
-    std::sort(filenames.rbegin(), filenames.rend());
+    std::sort(filenames.begin(), filenames.end());
+    // std::sort(filenames.rbegin(), filenames.rend());
     int current_idx = 0;
     while (1)
     {
@@ -150,7 +155,12 @@ void prj_v8detector::camera_foldimages()
         // std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
         // _rs485.sendDoubleArray(partial_result.data());
         if (_resultframe.pose_result.size() >= 3) {
-            _rs485.sendDoubleArray(_resultframe.pose_result.data());
+            // _rs485.sendDoubleArray(_resultframe.pose_result.data());
+            float float_temp_pose[3];
+            float_temp_pose[0] = (float)_resultframe.pose_result[0];
+            float_temp_pose[1] = (float)_resultframe.pose_result[1];
+            float_temp_pose[2] = (float)_resultframe.pose_result[2];
+            _rs485.sendFloatArray(float_temp_pose);
         } else {
             std::cerr << "错误：数据不足，无法发送串口数据" << std::endl;
         }
@@ -197,17 +207,17 @@ void prj_v8detector::tcp_loop()
 void prj_v8detector::run()
 {
     _is_running = true;
-    auto t1 = std::thread(_func_camera);
-    // auto t2 = std::thread(_func_camera_foldimages);
+    // auto t1 = std::thread(_func_camera);
+    auto t2 = std::thread(_func_camera_foldimages);
     auto t3 = std::thread(_func_pack_and_send);
-    if (t1.joinable())
-    {
-        t1.join();
-    }
-    // if (t2.joinable())
+    // if (t1.joinable())
     // {
-    //     t2.join();
+    //     t1.join();
     // }
+    if (t2.joinable())
+    {
+        t2.join();
+    }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
     if (t3.joinable())

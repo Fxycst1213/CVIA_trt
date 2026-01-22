@@ -4,11 +4,15 @@
 
 #include <iostream>
 #include <cstring>
+#include <cstdio>   // 新增：用于 snprintf 格式化
+#include <unistd.h> // 新增：用于 write, close
+#include <fcntl.h>  // 用于 open 等
+#include <termios.h> // 用于串口设置
 #include "RS485.h"
 
 using namespace std;
 
-// 帧头定义: 0xAA 0x55
+// 帧头定义: 0xAA 0x55 (注：新协议如果不使用，可保留定义防止编译错误，但逻辑中不再引用)
 const unsigned char RS485::FRAME_HEADER[2] = {0xAA, 0x55};
 // 帧尾定义: 0x0D 0x0A (回车换行)
 const unsigned char RS485::FRAME_FOOTER[2] = {0x0D, 0x0A};
@@ -90,10 +94,7 @@ int RS485::init(const prj_params &p_params)
 
 /*
     @brief: CRC8校验计算
-    @param:
-    1.const unsigned char* data : 数据指针
-    2.int length : 数据长度
-    @return: CRC校验值
+    @note: 新协议已不再使用CRC，保留此函数以防其他模块调用或编译报错
 */
 unsigned char RS485::calculateCRC(const unsigned char *data, int length)
 {
@@ -121,100 +122,57 @@ unsigned char RS485::calculateCRC(const unsigned char *data, int length)
 
 /*
     @brief: 单精度数据帧打包
-    @param:
-    1.const float arr[3] : 要发送的浮点数数组
-    2.unsigned char* buffer : 输出缓冲区
-    3.int* frame_size : 输出帧大小
+    @note: 已被新的文本协议取代，保留定义以兼容头文件
 */
 void RS485::packFloatDataFrame(const float arr[3], unsigned char *buffer, int *frame_size)
 {
+    // 旧协议实现，新逻辑中不再调用
     int index = 0;
-    // 1. 添加帧头
     buffer[index++] = FRAME_HEADER[0];
     buffer[index++] = FRAME_HEADER[1];
-    // 2. 添加数据类型标识
     buffer[index++] = DATA_TYPE_FLOAT;
-    // 3. 添加数据长度信息 (3个float = 12字节)
     unsigned char data_length = 12;
     buffer[index++] = data_length;
-    // 4. 添加浮点数数据
     unsigned char *float_ptr = (unsigned char *)arr;
     for (int i = 0; i < data_length; i++)
     {
         buffer[index++] = float_ptr[i];
     }
-    // 5. 计算并添加CRC校验 (对数据部分进行校验: 类型+长度+数据)
-    unsigned char crc = calculateCRC(&buffer[2], data_length + 2); // +2是包含类型和长度字节
+    unsigned char crc = calculateCRC(&buffer[2], data_length + 2);
     buffer[index++] = crc;
-    // 6. 添加帧尾
     buffer[index++] = FRAME_FOOTER[0];
     buffer[index++] = FRAME_FOOTER[1];
     *frame_size = index;
-    // 调试输出
-    if (_debug)
-    {
-        LOG("单精度数据帧(%d字节): ", *frame_size);
-        for (int i = 0; i < *frame_size; i++)
-        {
-            LOG("%02X ", buffer[i]);
-        }
-        LOG("\n");
-    }
 }
 
 /*
     @brief: 双精度数据帧打包
-    @param:
-    1.const double arr[3] : 要发送的双精度浮点数数组
-    2.unsigned char* buffer : 输出缓冲区
-    3.int* frame_size : 输出帧大小
+    @note: 已被新的文本协议取代，保留定义以兼容头文件
 */
 void RS485::packDoubleDataFrame(const double arr[3], unsigned char *buffer, int *frame_size)
 {
+    // 旧协议实现，新逻辑中不再调用
     int index = 0;
-
-    // 1. 添加帧头
     buffer[index++] = FRAME_HEADER[0];
     buffer[index++] = FRAME_HEADER[1];
-
-    // 2. 添加数据类型标识
     buffer[index++] = DATA_TYPE_DOUBLE;
-
-    // 3. 添加数据长度信息 (3个double = 24字节)
     unsigned char data_length = 24;
     buffer[index++] = data_length;
-
-    // 4. 添加双精度浮点数数据
     unsigned char *double_ptr = (unsigned char *)arr;
     for (int i = 0; i < data_length; i++)
     {
         buffer[index++] = double_ptr[i];
     }
-
-    // 5. 计算并添加CRC校验 (对数据部分进行校验: 类型+长度+数据)
-    unsigned char crc = calculateCRC(&buffer[2], data_length + 2); // +2是包含类型和长度字节
+    unsigned char crc = calculateCRC(&buffer[2], data_length + 2);
     buffer[index++] = crc;
-
-    // 6. 添加帧尾
     buffer[index++] = FRAME_FOOTER[0];
     buffer[index++] = FRAME_FOOTER[1];
-
     *frame_size = index;
-
-    // 调试输出
-    if (_debug)
-    {
-        LOG("双精度数据帧(%d字节): ", *frame_size);
-        for (int i = 0; i < *frame_size; i++)
-        {
-            LOG("%02X ", buffer[i]);
-        }
-        LOG("\n");
-    }
 }
 
 /*
     @brief: 发送单精度浮点数数组
+    @brief: 修改为ASCII格式发送，格式: "x.xxx,y.yyy,z.zzz\n"
     @param:
     1.const float arr[3] : 要发送的浮点数数组
     @return: 成功返回true，失败返回false
@@ -227,35 +185,42 @@ bool RS485::sendFloatArray(const float arr[3])
         return false;
     }
 
-    // 打包数据帧
-    unsigned char frame_buffer[22]; // 帧头2 + 类型1 + 长度1 + 数据12 + CRC1 + 帧尾2 = 19字节
-    int frame_size = 0;
-    packFloatDataFrame(arr, frame_buffer, &frame_size);
+    // 定义发送缓冲区 (文本格式)
+    char buffer[128]; 
+    memset(buffer, 0, sizeof(buffer));
+
+    // 使用snprintf格式化字符串
+    // %.3f: 保留三位小数
+    // ,: 逗号分隔
+    // \n: 换行符
+    int len = snprintf(buffer, sizeof(buffer), "%.3f,%.3f,%.3f\n", arr[0], arr[1], arr[2]);
 
     // 发送数据帧
-    int bytes_written = write(_fd, frame_buffer, frame_size);
+    int bytes_written = write(_fd, buffer, len);
 
     // 等待数据发送完成
     tcdrain(_fd);
 
-    if (bytes_written == frame_size)
+    if (bytes_written == len)
     {
         if (_debug)
         {
-            LOG("成功发送单精度数据%d字节", bytes_written);
-            LOG("发送的数据: [%f, %f, %f]", arr[0], arr[1], arr[2]);
+            LOG("成功发送文本数据%d字节", bytes_written);
+            // 此时buffer本身就是可读字符串
+            LOG("发送的数据: %s", buffer); 
         }
         return true;
     }
     else
     {
-        LOGE("发送失败，预期%d字节，实际发送%d字节", frame_size, bytes_written);
+        LOGE("发送失败，预期%d字节，实际发送%d字节", len, bytes_written);
         return false;
     }
 }
 
 /*
     @brief: 发送双精度浮点数数组
+    @brief: 修改为ASCII格式发送，格式: "x.xxx,y.yyy,z.zzz\n"
     @param:
     1.const double arr[3] : 要发送的双精度浮点数数组
     @return: 成功返回true，失败返回false
@@ -267,33 +232,33 @@ bool RS485::sendDoubleArray(const double arr[3])
         LOGE("串口未初始化");
         return false;
     }
-    // for(int i = 0; i < 3; i++)
-    // {
-    //     std:: cout << arr[i] << std::endl;
-    // }
-    // 打包数据帧
-    unsigned char frame_buffer[32]; // 帧头2 + 类型1 + 长度1 + 数据24 + CRC1 + 帧尾2 = 31字节
-    int frame_size = 0;
-    packDoubleDataFrame(arr, frame_buffer, &frame_size);
+
+    // 定义发送缓冲区 (double可能比float长，给大一点空间)
+    char buffer[256]; 
+    memset(buffer, 0, sizeof(buffer));
+
+    // 使用snprintf格式化字符串
+    // %.3lf: double类型保留三位小数
+    int len = snprintf(buffer, sizeof(buffer), "%.3lf,%.3lf,%.3lf\n", arr[0], arr[1], arr[2]);
 
     // 发送数据帧
-    int bytes_written = write(_fd, frame_buffer, frame_size);
+    int bytes_written = write(_fd, buffer, len);
 
     // 等待数据发送完成
-    // tcdrain(_fd);
-    // std::cout<<"等待fd改变"<<std::endl;
-    if (bytes_written == frame_size)
+    // tcdrain(_fd); 
+    
+    if (bytes_written == len)
     {
-        //if (_debug)
-        //{
-            LOG("成功发送双精度数据%d字节", bytes_written);
-            LOG("发送的数据: [%f, %f, %f]", arr[0], arr[1], arr[2]);
-        //}
+        if (_debug)
+        {
+            LOG("成功发送双精度文本数据%d字节", bytes_written);
+            LOG("发送的数据: %s", buffer);
+        }
         return true;
     }
     else
     {
-        LOGE("发送失败，预期%d字节，实际发送%d字节", frame_size, bytes_written);
+        LOGE("发送失败，预期%d字节，实际发送%d字节", len, bytes_written);
         return false;
     }
 }
