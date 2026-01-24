@@ -193,13 +193,13 @@ bool RS485::sendFloatArray(const float arr[3])
     // %.3f: 保留三位小数
     // ,: 逗号分隔
     // \n: 换行符
-    int len = snprintf(buffer, sizeof(buffer), "%.3f,%.3f,%.3f\n", arr[0], arr[1], arr[2]);
+    int len = snprintf(buffer, sizeof(buffer), "%.3f,%.3f,%.3f", arr[0], arr[1], arr[2]);
 
     // 发送数据帧
     int bytes_written = write(_fd, buffer, len);
 
     // 等待数据发送完成
-    tcdrain(_fd);
+    // tcdrain(_fd);
 
     if (bytes_written == len)
     {

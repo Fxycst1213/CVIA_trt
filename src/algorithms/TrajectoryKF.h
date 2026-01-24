@@ -26,7 +26,7 @@ private:
     bool initialized = false;
 
     int consecutive_reject_count = 0;
-    const int MAX_REJECT_COUNT = 4;
+    const int MAX_REJECT_COUNT = 3;
 
     // --- 自适应参数配置 ---
 
@@ -37,11 +37,11 @@ private:
 
     // 2. 机动判定阈值 (Maneuver Threshold)
     // 预测值和观测值相差超过 1.5cm，认为物体在急转弯/变速
-    const float MANEUVER_THRESHOLD = 18.0f;
+    const float MANEUVER_THRESHOLD = 40.00f;
 
     // 3. 离谱阈值 (Outlier Threshold)
     // 预测值和观测值相差超过 50cm，认为绝对是传感器飞了
-    const float IMPOSSIBLE_THRESHOLD = 35.0f;
+    // const float IMPOSSIBLE_THRESHOLD = 40.0f;
 };
 
 #endif // TRAJECTORY_KF_H

@@ -86,12 +86,13 @@ void prj_v8detector::camera()
         _resultframe.rs485_result = _worker->m_pose->uart_result;
         // 3. 串口发送 (保持不变)
         _timer->start_cpu();
-        // _rs485.sendDoubleArray(_resultframe.pose_result.data());
+        // _rs485.sendDoubleArray(_resultframe.ose_result.data());
         float float_temp_pose[3];
         float_temp_pose[0] = (float)_resultframe.rs485_result[0];
         float_temp_pose[1] = (float)_resultframe.rs485_result[1];
         float_temp_pose[2] = (float)_resultframe.rs485_result[2];
         _rs485.sendFloatArray(float_temp_pose);
+        // usleep(600000);
         _timer->stop_cpu<timer::Timer::ms>("RS485");
 
         // 4. TCP 队列处理
@@ -121,7 +122,7 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images9/*.png";
+    cv::String folder = "/home/cvia/yifei/images0123/*.png";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
@@ -133,7 +134,7 @@ void prj_v8detector::camera_foldimages()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        // usleep(500000);
+        usleep(300000);
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         current_idx++;

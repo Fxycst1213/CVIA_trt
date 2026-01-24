@@ -235,21 +235,21 @@ cv::Point3f TrajectoryKF::update(float x, float y, float z)
 
     // --- 情况 A: 离谱噪声 (Impossible) ---
     // 比如一帧跳变 50cm，物理上不可能，直接拒绝
-    if (dist > IMPOSSIBLE_THRESHOLD)
-    {
-        std::cout << "[KF] Reject Outlier___: " << dist << std::endl;
-        consecutive_reject_count++;
-        if (consecutive_reject_count < MAX_REJECT_COUNT)
-        {
-            std::cout << "[KF] Reject Outlier: " << dist << std::endl;
-            return cv::Point3f(pred_x, pred_y, pred_z);
-        }
-    }
+    // if (dist > IMPOSSIBLE_THRESHOLD)
+    // {
+    //     std::cout << "[KF] Reject Outlier___: " << dist << std::endl;
+    //     consecutive_reject_count++;
+    //     if (consecutive_reject_count < MAX_REJECT_COUNT)
+    //     {
+    //         std::cout << "[KF] Reject Outlier: " << dist << std::endl;
+    //         return cv::Point3f(pred_x, pred_y, pred_z);
+    //     }
+    // }
 
     // --- 情况 B: 机动模式 (Maneuver) ---
     // 误差在 1.5cm ~ 50cm 之间，说明物体急转弯/反向了
     // 此时预测值还在往前冲，但观测值已经回来了
-    else if (dist > MANEUVER_THRESHOLD)
+    if (dist > MANEUVER_THRESHOLD)
     {
         std::cout << "[KF] MANEUVER_THRESHOLD: " << dist << std::endl;
         float dynamic_Q = 1e-1;

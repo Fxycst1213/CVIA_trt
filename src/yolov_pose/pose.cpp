@@ -186,7 +186,7 @@ namespace model
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
 
-            // new
+            // new -12
             // _p3d = (cv::Mat_<double>(7, 3) << -253.95, -10.78, -2.17,
             //         -95.4, -6.84, -0.9,
             //         -148.72, 364.33, 58.67,
@@ -195,28 +195,48 @@ namespace model
             //         -120.56, -379.84, 46.283,
             //         92.51, -3.9, 4.07);
 
+            //  _p3d = (cv::Mat_<double>(7, 3) << -253.95,	-10.78,	-7.17,
+            //             -95.4,	-6.84,	-5.9,
+            //             -148.72,	364.33,	53.67,
+            //             -118.91,	208.11,	47.76,
+            //             -102.54,	-226.07,	37.13,
+            //             -120.5,	-379.84,	41.29,
+            //             92.51,	-3.9,	-1.07);
+
+            // 0123
+            _p3d = (cv::Mat_<double>(7, 3) << -251.696, -10.28, -10.043,
+                    -93.829, -7.33, -9.62,
+                    -151.899, 363.404, 48.299,
+                    -119.014, 207.414, 42.926,
+                    -100.598, -224.46, 34.07,
+                    -118.778, -379.29, 40.951,
+                    92.84, 2.75, -7.008);
+
             // old
-            _p3d = (cv::Mat_<double>(7, 3) << -255.41,	-5.3,	-10.9,
-                                            -97.45,	-4.11,	-11.34,
-                                            -141.12,	366.99,	49.88,
-                                            -113.87,	212.02,	44.2,
-                                            -107.09,	-221.28,	33.62,
-                                            -128.86,	-374.6, 35.37,
-                                            93.18,	2.06,	-7.96);
+            // _p3d = (cv::Mat_<double>(7, 3) << -255.41,	-5.3,	-10.9,
+            //                                 -97.45,	-4.11,	-11.34,
+            //                                 -141.12,	366.99,	49.88,
+            //                                 -113.87,	212.02,	44.2,
+            //                                 -107.09,	-221.28,	33.62,
+            //                                 -128.86,	-374.6, 35.37,
+            //                                 93.18,	2.06,	-7.96);
 
-            _handTrans = (cv::Mat_<double>(4, 4) << 0.99924, 0.029944, -0.0247853, -51.98,
-                                                    -0.0317989, 0.996434, -0.078150, 11.1460,
-                                                    -0.022356, -0.0788796, -0.9966334, -0.78764,
-                                                    0.000, 0.000, 0.000, 1.000);
+            // _handTrans = (cv::Mat_<double>(4, 4) << 0.99924, 0.029944, -0.0247853, -51.98,
+            //                                         -0.0317989, 0.996434, -0.078150, 11.1460,
+            //                                         -0.022356, -0.0788796, -0.9966334, -0.78764,
+            //                                         0.000, 0.000, 0.000, 1.000);
 
-            _wxj2cam = (cv::Mat_<double>(4, 4) << 1.0, 0.0, 0.0, 0.0,
-                                                  0.0, 1.0, 0.0, 0.0,
-                                                  0.0, 0.0, 1.0, 0.0,
-                                                  0.0, 0.0, 0.0, 1.0);
-                        
-            combined = _wxj2cam * _handTrans;
-            combined_inv = _handTrans.inv() * _wxj2cam.inv();
-            
+            // _wxj2cam = (cv::Mat_<double>(4, 4) << 1.0, 0.0, 0.0, 0.0,
+            //                                       0.0, 1.0, 0.0, 0.0,
+            //                                       0.0, 0.0, 1.0, 0.0,
+            //                                       0.0, 0.0, 0.0, 1.0);
+
+            combined = (cv::Mat_<double>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
+                        9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
+                        -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
+                        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
+            combined_inv = combined.inv();
+
             // 凯丽
             // _K = (cv::Mat_<double>(3, 3) << 1064.0, 0.0, 971.2,
             //       0.0, 1064.1, 544.3,
@@ -232,14 +252,14 @@ namespace model
             //                             -83.24,	-272.24389,	31.8423,
             //                             72.554,	-6.07653,	3.5579);
 
-            m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(800);//容器大小
-            //开始输出周期
-            double x_period = 760;
-            double y_period = 760;
-            double z_period = 760;
-            
+            m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(2100); // 容器大小
+            // 开始输出周期
+            double x_period = 2000;
+            double y_period = 2000;
+            double z_period = 2000;
+
             m_lookback_estimator->setPeriods(x_period, y_period, z_period);
-            m_lookback_estimator->setLookbackOffsets(748.5, 750.5, 748.5);//离线计算周期
+            m_lookback_estimator->setLookbackOffsets(1477, 1477, 1477);
         }
 
         bool Pose::postprocess_cpu(const uint64_t &timestamp)
@@ -362,8 +382,11 @@ namespace model
         void Pose::refine_keypoints(std::vector<keypoint> &keypoints)
         {
             // [修改] -------------------- 滞回区间逻辑开始 --------------------
-            float dist_enter_red = 2200.0f; // 大于此值切入红色模式
-            float dist_enter_blue = 2160.0f; // 小于此值切回蓝色模式
+            // float dist_enter_red = 2200.0f; // 大于此值切入红色模式
+            // float dist_enter_blue = 2160.0f; // 小于此值切回蓝色模式
+
+            float dist_enter_red = 1600.0f; // 大于此值切入红色模式
+            float dist_enter_blue = 0.0f;   // 小于此值切回蓝色模式
 
             if (m_use_red_mode)
             {
@@ -399,7 +422,7 @@ namespace model
                     int cx = static_cast<int>(kpt.x);
                     int cy = static_cast<int>(kpt.y);
 
-                    int search_side = 20;
+                    int search_side = 28;
                     int half_side = search_side / 2;
 
                     int x1 = std::max(0, cx - half_side);
@@ -421,8 +444,8 @@ namespace model
                     cv::Mat target_img = channels[0]; // B通道
 
                     cv::Mat mask;
-                    cv::threshold(target_img, mask, 140, 255, cv::THRESH_BINARY); // 140 best 一飞院
-                    //cv::threshold(target_img, mask, 200, 255, cv::THRESH_BINARY); // 140 best 凯丽
+                    cv::threshold(target_img, mask, 130, 255, cv::THRESH_BINARY); // 140 best 一飞院
+                    // cv::threshold(target_img, mask, 200, 255, cv::THRESH_BINARY); // 140 best 凯丽
 
                     std::vector<std::vector<cv::Point>> contours;
                     cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -437,14 +460,14 @@ namespace model
 
                     int best_idx = -1;
                     double max_area = 0;
-                    const double DIST_LIMIT = 4.5;//一飞院
-                    //const double DIST_LIMIT = 12;//凯丽
+                    const double DIST_LIMIT = 5.4; // 一飞院
+                    // const double DIST_LIMIT = 12;//凯丽
 
                     for (size_t i = 0; i < contours.size(); ++i)
                     {
                         double area = cv::contourArea(contours[i]);
                         //一飞院
-                        if (area < 2 || area > 68.0)
+                        if (area < 2 || area > 110.0)
                             continue;
                         //凯丽
                         // if (area < 10 || area > 160.0)
@@ -475,9 +498,9 @@ namespace model
 
                     if (best_idx == -1)
                     {
-                        kpt.x = 0.0f;
-                        kpt.y = 0.0f;
-                        kpt.conf = 0.0f; // 认为检测到的点无效（可能是背景噪点），置零
+                        // kpt.x = 0.0f;
+                        // kpt.y = 0.0f;
+                        // kpt.conf = 0.0f; // 认为检测到的点无效（可能是背景噪点），置零
                         continue;
                     }
 
@@ -487,7 +510,7 @@ namespace model
                     float final_gy = static_cast<float>(M.m01 / M.m00);
 
                     // 还原到全图坐标
-                    float final_x = x1 + final_gx + 0.5f;
+                    float final_x = x1 + final_gx + 0.5f; // 尝试
                     float final_y = y1 + final_gy + 0.5f;
 
                     double final_dist = std::sqrt(std::pow(final_x - kpt.x, 2) + std::pow(final_y - kpt.y, 2));
@@ -516,7 +539,7 @@ namespace model
                     int cy = static_cast<int>(kpt.y);
 
                     // 1. 取 ROI
-                    const int search_side = 30;
+                    const int search_side = 48;
                     const int half = search_side / 2;
 
                     int x1 = std::max(0, cx - half);
@@ -563,8 +586,13 @@ namespace model
                     for (size_t i = 0; i < contours.size(); ++i)
                     {
                         double area = cv::contourArea(contours[i]);
-                        if (area < 130.0 || area > 420.0)
+                        if (area < 30.0 || area > 1000.0)
+                        {
+                            // kpt.x = 0;
+                            // kpt.y = 0;
+                            // kpt.conf = 0;
                             continue;
+                        }
 
                         if (area > max_area)
                         {
@@ -593,7 +621,7 @@ namespace model
                     float final_y = y1 + ry + 0.5f;
 
                     // 5. 距离 sanity check
-                    const double DIST_LIMIT = 10.0;
+                    const double DIST_LIMIT = 13.0;
                     double dist = std::hypot(final_x - kpt.x,
                                              final_y - kpt.y);
 
@@ -655,9 +683,9 @@ namespace model
                 m_result[1] = T1.at<double>(1, 0);
                 m_result[2] = T1.at<double>(2, 0);
 
-                // m_result[3] = T1.at<double>(0, 0);
-                // m_result[4] = T1.at<double>(1, 0);
-                // m_result[5] = T1.at<double>(2, 0);
+                m_result[3] = T1.at<double>(0, 0);
+                m_result[4] = T1.at<double>(1, 0);
+                m_result[5] = T1.at<double>(2, 0);
             }
         }
 
@@ -702,46 +730,46 @@ namespace model
                 uart_result[1] = transformed_point.at<double>(1, 0); // 新的 Y
                 uart_result[2] = transformed_point.at<double>(2, 0); // 新的 Z
 
-                // m_lookback_estimator->update(frame_id, m_result[3], m_result[4], m_result[5]);
-                m_lookback_estimator->update(frame_id, uart_result[0], 
-                                            uart_result[1], uart_result[2]);
+                LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
+                    uart_result[0], uart_result[1], uart_result[2]);
 
-                // 步骤 B: 获取回溯预测值
-                double predicted_vals[3] = {0.0, 0.0, 0.0};
-                bool is_ready = m_lookback_estimator->getPrediction(predicted_vals);
+                // m_lookback_estimator->update(frame_id, uart_result[0],
+                //                             uart_result[1], uart_result[2]);
 
-                if (is_ready)
-                {                    
-                    // 2. 直接应用计算好的矩阵
-                    // 假设 predicted_vals 是 cv::Mat (3x1) 或者 cv::Point3f/d
-                    // 注意：如果 predicted_vals 是 Point 类型，可能需要转为 Mat 进行乘法，或者使用 perspectiveTransform
-                    cv::Mat point_homogeneous_inv = (cv::Mat_<double>(4, 1) << 
-                                            predicted_vals[0], 
-                                            predicted_vals[1], 
-                                            predicted_vals[2], 
-                                            1.0);
-                    cv::Mat transformed_point_inv = combined_inv * point_homogeneous_inv;
+                // // 步骤 B: 获取回溯预测值
+                // double predicted_vals[3] = {0.0, 0.0, 0.0};
+                // bool is_ready = m_lookback_estimator->getPrediction(predicted_vals);
 
-                    m_result[0] = transformed_point_inv.at<double>(0, 0); // 新的 X
-                    m_result[1] = transformed_point_inv.at<double>(1, 0); // 新的 Y
-                    m_result[2] = transformed_point_inv.at<double>(2, 0); // 新的 Z
-                    
-                    // 3. 赋值 uart_result
-                    uart_result[0] = predicted_vals[0];
-                    uart_result[1] = predicted_vals[1];
-                    uart_result[2] = predicted_vals[2];
-                }
-                else
-                {
-                    m_result[0] = 0;
-                    m_result[1] = 0;
-                    m_result[2] = 0;
-                    uart_result[0] = 0;
-                    uart_result[1] = 0;
-                    uart_result[2] = 0;
-                }
+                // if (is_ready)
+                // {
+                //     // 2. 直接应用计算好的矩阵
+                //     // 假设 predicted_vals 是 cv::Mat (3x1) 或者 cv::Point3f/d
+                //     // 注意：如果 predicted_vals 是 Point 类型，可能需要转为 Mat 进行乘法，或者使用 perspectiveTransform
+                //     cv::Mat point_homogeneous_inv = (cv::Mat_<double>(4, 1) <<
+                //                             predicted_vals[0],
+                //                             predicted_vals[1],
+                //                             predicted_vals[2],
+                //                             1.0);
+                //     cv::Mat transformed_point_inv = combined_inv * point_homogeneous_inv;
 
-    
+                //     m_result[0] = transformed_point_inv.at<double>(0, 0); // 新的 X
+                //     m_result[1] = transformed_point_inv.at<double>(1, 0); // 新的 Y
+                //     m_result[2] = transformed_point_inv.at<double>(2, 0); // 新的 Z
+
+                //     // 3. 赋值 uart_result
+                //     uart_result[0] = predicted_vals[0];
+                //     uart_result[1] = predicted_vals[1];
+                //     uart_result[2] = predicted_vals[2];
+                // }
+                // else
+                // {
+                //     m_result[0] = m_result[3];
+                //     m_result[1] = m_result[4];
+                //     m_result[2] = m_result[5];
+                //     uart_result[0] = 0;
+                //     uart_result[1] = 0;
+                //     uart_result[2] = 0;
+                // }
 
                 LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);

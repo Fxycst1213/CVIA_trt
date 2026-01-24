@@ -43,7 +43,7 @@ struct prj_params
     int socket_mode = 0;
     tcp_params t_params;
     std::string rs485_port = "/dev/ttyUSB0";
-    int rs485_baudrate = 115200;
+    int rs485_baudrate = 57600;
 };
 
 #endif // PARAMS_HPP
