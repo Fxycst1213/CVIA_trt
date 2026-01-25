@@ -177,8 +177,8 @@ namespace model
             //初始化模式为红色(远距离)
             m_use_red_mode = true;
 
-            m_result.resize(6, 0.0);
-            uart_result.resize(3,0.0);
+            m_result.resize(6, 0.0f);
+            uart_result.resize(3, 0.0f);
             //  一飞院
             _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
                   0.0, 1067.37400981335, 525.523361276358,
@@ -231,7 +231,7 @@ namespace model
             //                                       0.0, 0.0, 1.0, 0.0,
             //                                       0.0, 0.0, 0.0, 1.0);
 
-            combined = (cv::Mat_<double>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
+            combined = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
                         9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
                         -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
                         0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
@@ -361,7 +361,7 @@ namespace model
                 refine_keypoints(m_bboxes[0].keypoints);
             }
             run_pnp_multi_stage();
-            // run_filter_and_estimation(timestamp, m_frame_counter);
+            run_filter_and_estimation(timestamp, m_frame_counter);
 
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
@@ -687,13 +687,13 @@ namespace model
             }
             if (is_current_frame_good && !T1.empty())
             {
-                m_result[0] = T1.at<double>(0, 0);
-                m_result[1] = T1.at<double>(1, 0);
-                m_result[2] = T1.at<double>(2, 0);
+                m_result[0] = static_cast<float>(T1.at<double>(0, 0));
+                m_result[1] = static_cast<float>(T1.at<double>(1, 0));
+                m_result[2] = static_cast<float>(T1.at<double>(2, 0));
 
-                m_result[3] = T1.at<double>(0, 0);
-                m_result[4] = T1.at<double>(1, 0);
-                m_result[5] = T1.at<double>(2, 0);
+                m_result[3] = static_cast<float>(T1.at<double>(0, 0));
+                m_result[4] = static_cast<float>(T1.at<double>(1, 0));
+                m_result[5] = static_cast<float>(T1.at<double>(2, 0));
             }
         }
 
@@ -726,91 +726,23 @@ namespace model
                 m_result[4] = kf_result.y;
                 m_result[5] = kf_result.z;
 
-                cv::Mat point_homogeneous = (cv::Mat_<double>(4, 1) << 
-                                            m_result[3], 
-                                            m_result[4], 
-                                            m_result[5], 
-                                            1.0);
+                cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[3],
+                                             m_result[4],
+                                             m_result[5],
+                                             1.0);
 
                 cv::Mat transformed_point = combined * point_homogeneous;
 
-                uart_result[0] = transformed_point.at<double>(0, 0); // 新的 X
-                uart_result[1] = transformed_point.at<double>(1, 0); // 新的 Y
-                uart_result[2] = transformed_point.at<double>(2, 0); // 新的 Z
+                uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
+                uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
+                uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
 
                 LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
                     uart_result[0], uart_result[1], uart_result[2]);
 
-                // m_lookback_estimator->update(frame_id, uart_result[0],
-                //                             uart_result[1], uart_result[2]);
-
-                // // 步骤 B: 获取回溯预测值
-                // double predicted_vals[3] = {0.0, 0.0, 0.0};
-                // bool is_ready = m_lookback_estimator->getPrediction(predicted_vals);
-
-                // if (is_ready)
-                // {
-                //     // 2. 直接应用计算好的矩阵
-                //     // 假设 predicted_vals 是 cv::Mat (3x1) 或者 cv::Point3f/d
-                //     // 注意：如果 predicted_vals 是 Point 类型，可能需要转为 Mat 进行乘法，或者使用 perspectiveTransform
-                //     cv::Mat point_homogeneous_inv = (cv::Mat_<double>(4, 1) <<
-                //                             predicted_vals[0],
-                //                             predicted_vals[1],
-                //                             predicted_vals[2],
-                //                             1.0);
-                //     cv::Mat transformed_point_inv = combined_inv * point_homogeneous_inv;
-
-                //     m_result[0] = transformed_point_inv.at<double>(0, 0); // 新的 X
-                //     m_result[1] = transformed_point_inv.at<double>(1, 0); // 新的 Y
-                //     m_result[2] = transformed_point_inv.at<double>(2, 0); // 新的 Z
-
-                //     // 3. 赋值 uart_result
-                //     uart_result[0] = predicted_vals[0];
-                //     uart_result[1] = predicted_vals[1];
-                //     uart_result[2] = predicted_vals[2];
-                // }
-                // else
-                // {
-                //     m_result[0] = m_result[3];
-                //     m_result[1] = m_result[4];
-                //     m_result[2] = m_result[5];
-                //     uart_result[0] = 0;
-                //     uart_result[1] = 0;
-                //     uart_result[2] = 0;
-                // }
-
                 LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
             }
-        }
-
-        void Pose::run_pnp_single_stage()
-        {
-            cv::Mat R1, T1;
-            auto &target = m_bboxes[0];
-            cv::Mat p3d_Mat = cv::Mat::zeros(7, 3, CV_64FC1);
-            cv::Mat p2d_Mat = cv::Mat::zeros(7, 2, CV_64FC1);
-            std::vector<int> inliers;
-            int valid_count = 0;
-            for (int i = 0; i < 7; i++)
-            {
-                if (target.keypoints[i].conf > 0.70)
-                {
-                    p2d_Mat.at<double>(valid_count, 0) = target.keypoints[i].x;
-                    p2d_Mat.at<double>(valid_count, 1) = target.keypoints[i].y;
-                    _p3d.row(i).copyTo(p3d_Mat.row(valid_count));
-                    valid_count++;
-                }
-            }
-
-            p3d_Mat.resize(valid_count);
-            p2d_Mat.resize(valid_count);
-            bool success = cv::solvePnPRansac(p3d_Mat, p2d_Mat, _K, _diff, R1, T1,
-                                              false, 100, 2.0, 0.99, inliers, cv::SOLVEPNP_SQPNP);
-            m_result[0] = T1.at<double>(0, 0);
-            m_result[1] = T1.at<double>(1, 0);
-            m_result[2] = T1.at<double>(2, 0);
-            LOG("\tPose result x: %.4f , y: %.4f , z: %.4f", m_result[0], m_result[1], m_result[2]);
         }
     };
 };

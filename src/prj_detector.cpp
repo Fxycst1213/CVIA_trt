@@ -88,9 +88,9 @@ void prj_v8detector::camera()
         _timer->start_cpu();
         // _rs485.sendDoubleArray(_resultframe.ose_result.data());
         float float_temp_pose[3];
-        float_temp_pose[0] = (float)_resultframe.rs485_result[0];
-        float_temp_pose[1] = (float)_resultframe.rs485_result[1];
-        float_temp_pose[2] = (float)_resultframe.rs485_result[2];
+        float_temp_pose[0] = _resultframe.rs485_result[0];
+        float_temp_pose[1] = _resultframe.rs485_result[1];
+        float_temp_pose[2] = _resultframe.rs485_result[2];
         _rs485.sendFloatArray(float_temp_pose);
         // usleep(600000);
         _timer->stop_cpu<timer::Timer::ms>("RS485");
@@ -122,7 +122,7 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images0123/*.png";
+    cv::String folder = "/home/cvia/yifei/images_old1/*.png";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());

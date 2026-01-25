@@ -10,8 +10,8 @@ struct Resultframe
 {
     cv::Mat rgb;
     std::vector<model::pose::bbox> bboxes;
-    std::vector<double> pose_result;
-    std::vector<double> rs485_result;
+    std::vector<float> pose_result;
+    std::vector<float> rs485_result;
     uint64_t timestamp;
 };
 
@@ -22,7 +22,7 @@ struct tcp_params
     static constexpr int Point_num = 7;
     static constexpr int KeyPoint_box = (Point_num * 3 + 5);
     static constexpr int KEYPOINTS_BUFSIZE = KeyPoint_box * 4;
-    static constexpr int POSE_BUFSIZE = 7 * 8;
+    static constexpr int POSE_BUFSIZE = 8 * 4;
     static constexpr int POSE_DATE_NUM = 7;
 
     // 这两个是变量，不加 const

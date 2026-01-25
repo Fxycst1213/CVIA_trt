@@ -58,8 +58,8 @@ namespace model
             void run_pnp_single_stage();
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);
-            std::vector<double> m_result;
-            std::vector<double> uart_result;
+            std::vector<float> m_result;
+            std::vector<float> uart_result;
             float linear_map(float val, float in_min, float in_max, float out_min, float out_max);
             std::vector<bbox> m_bboxes;
             bool is_current_frame_good = false;

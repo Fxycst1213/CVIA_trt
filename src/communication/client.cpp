@@ -129,7 +129,7 @@ bool client::pack_and_send(const Resultframe &frame)
 
         if (!frame.pose_result.empty())
         {
-            size_t data_len = frame.pose_result.size() * sizeof(double);
+            size_t data_len = frame.pose_result.size() * sizeof(float);
             if (data_len <= _pose_size_bytes)
             {
                 memcpy(ptr_curr, frame.pose_result.data(), data_len);
@@ -148,7 +148,7 @@ bool client::pack_and_send(const Resultframe &frame)
         memset(_buffer, 0, _total_send_size);
         if (!frame.pose_result.empty())
         {
-            size_t data_len = frame.pose_result.size() * sizeof(double);
+            size_t data_len = frame.pose_result.size() * sizeof(float);
             if (data_len <= _total_send_size)
             {
                 memcpy(_buffer, frame.pose_result.data(), data_len);
