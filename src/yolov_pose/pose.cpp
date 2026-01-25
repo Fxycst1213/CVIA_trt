@@ -361,7 +361,7 @@ namespace model
                 refine_keypoints(m_bboxes[0].keypoints);
             }
             run_pnp_multi_stage();
-            run_filter_and_estimation(timestamp, m_frame_counter);
+            // run_filter_and_estimation(timestamp, m_frame_counter);
 
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
@@ -530,8 +530,16 @@ namespace model
             else
             {
                 // ================== [红色 HSV 模式 / 远距离] ==================
-                for (auto &kpt : keypoints)
+                for (size_t i = 0; i < keypoints.size(); ++i)
                 {
+                    auto &kpt = keypoints[i];
+                    // if (i == 6)
+                    // {
+                    //     kpt.conf = 0.0f;
+                    //     kpt.x = 0.0f; // 建议同时清空坐标，防止误用
+                    //     kpt.y = 0.0f;
+                    // }
+
                     if (kpt.conf < 0.75f)
                         continue;
 

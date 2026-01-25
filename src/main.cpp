@@ -35,12 +35,5 @@ int main(int argc, char const *argv[])
     prj_v8detector prj(onnxPath, level, params, p_params);
     prj.run();
 
-    // auto worker = thread::create_worker(onnxPath, level, params);
-    // preprocess::init_process(p_params.H, p_params.W);
-    // cv::Mat Image = cv::imread("data/source/00590.png");
-    // for (int i = 0; i < 2; i++)
-    // {
-    //     worker->inference(Image);
-    // }
     return 0;
 }

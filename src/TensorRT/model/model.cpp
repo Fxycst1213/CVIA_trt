@@ -72,6 +72,7 @@ namespace model
             LOGE("Failed to parse ONNX file: %s", m_onnxPath.c_str());
             return false;
         }
+        
         if (builder->platformHasFastFp16() && m_params->prec == model::FP16)
         {
             config->setFlag(BuilderFlag::kFP16);
