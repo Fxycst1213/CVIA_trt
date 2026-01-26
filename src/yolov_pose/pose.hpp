@@ -13,6 +13,8 @@
 #include "../params/pose_params.hpp"
 #include "../algorithms/FrameLookbackEstimator.h"
 
+class LSTMPredictor;
+
 namespace model
 {
 
@@ -91,6 +93,8 @@ namespace model
             TrajectoryKF m_kf;
             uint64_t _last_timestamp = 0;
             uint64_t m_frame_counter = -1;
+            std::shared_ptr<LSTMPredictor> m_lstm;
+            bool m_lstm_ready = false; // 标记 LSTM 是否已经加载成功
         };
 
         std::shared_ptr<Pose> make_pose(

@@ -10,6 +10,7 @@
 #include "pose.hpp"
 #include "preprocess.hpp"
 #include "cudatools.hpp"
+#include "../lstm/lstm_predictor.hpp"
 
 using namespace std;
 using namespace nvinfer1;
@@ -252,14 +253,23 @@ namespace model
             //                             -83.24,	-272.24389,	31.8423,
             //                             72.554,	-6.07653,	3.5579);
 
-            m_lookback_estimator = std::make_shared<FrameLookbackEstimator>(2100); // 容器大小
-            // 开始输出周期
-            double x_period = 2000;
-            double y_period = 2000;
-            double z_period = 2000;
+            LSTMPredictor::Config lstm_cfg;
+            lstm_cfg.onnx_path = "models/onnx/model_multi.onnx"; // 【注意】这里填你LSTM模型的路径
+            lstm_cfg.input_seq_len = 58;
+            lstm_cfg.output_seq_len = 25;
+            lstm_cfg.target_frame_idx = 22; // 取第23帧
 
-            m_lookback_estimator->setPeriods(x_period, y_period, z_period);
-            m_lookback_estimator->setLookbackOffsets(1477, 1477, 1477);
+            m_lstm = std::make_shared<LSTMPredictor>(lstm_cfg, level);
+            if (m_lstm->init())
+            {
+                LOG("LSTM Engine initialized successfully.");
+                m_lstm_ready = true;
+            }
+            else
+            {
+                LOGE("Failed to initialize LSTM Engine.");
+                m_lstm_ready = false;
+            }
         }
 
         bool Pose::postprocess_cpu(const uint64_t &timestamp)
@@ -725,6 +735,37 @@ namespace model
                 m_result[3] = kf_result.x;
                 m_result[4] = kf_result.y;
                 m_result[5] = kf_result.z;
+
+                // 3. === LSTM 推理 ===
+                // 逻辑：将 KF 滤波后的平滑数据喂给 LSTM
+
+                if (m_lstm_ready)
+                {
+                    // 推入当前帧 KF 结果，尝试获取未来预测
+                    // 只有当积累了 58 帧后，update 才会返回 true
+                    if (m_lstm->update(kf_result.x, kf_result.y, kf_result.z))
+                    {
+                        std::vector<float> lstm_out = m_lstm->get_prediction();
+
+                        // 【策略选择】
+                        // 这里的 lstm_out 是 LSTM 预测的第 23 帧的数据
+                        // 你是想直接用 LSTM 替换 KF 结果？还是做融合？
+                        // 假设你完全信任 LSTM 预测值用于发送给下位机：
+
+                        m_result[0] = lstm_out[0];
+                        m_result[1] = lstm_out[1];
+                        m_result[2] = lstm_out[2];
+
+                        // LOGD("LSTM Active: x:%.2f, y:%.2f, z:%.2f", final_x, final_y, final_z);
+                    }
+                    else
+                    {
+                        LOGV("LSTM warming up...");
+                        LOGV("LSTM warming up...");
+                        LOGV("LSTM warming up...");
+                        LOGV("LSTM warming up...");
+                    }
+                }
 
                 cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[3],
                                              m_result[4],

@@ -38,6 +38,7 @@ include_directories(
     ${PROJECT_SOURCE_DIR}/src/TensorRT/logger
     ${PROJECT_SOURCE_DIR}/src/TensorRT/model
     ${PROJECT_SOURCE_DIR}/src/TensorRT/utils
+    ${PROJECT_SOURCE_DIR}/src/lstm
     ${PROJECT_SOURCE_DIR}/src/time
     ${PROJECT_SOURCE_DIR}/src/lock
     ${PROJECT_SOURCE_DIR}/src/worker
