@@ -16,11 +16,52 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _func_camera = std::bind(&prj_v8detector::camera, this);
     _func_camera_foldimages = std::bind(&prj_v8detector::camera_foldimages, this);
     _func_pack_and_send = std::bind(&prj_v8detector::tcp_loop, this);
+    _func_rs485_send = std::bind(&prj_v8detector::rs485_loop, this); // [新增]
 
     _client.init(p_params);
     _rs485.init(p_params);
     _is_running = true;
 }
+
+// [新增] RS485 独立线程循环
+void prj_v8detector::rs485_loop()
+{
+    while (true)
+    {
+        std::vector<float> data_to_send;
+        {
+            std::unique_lock<std::mutex> lock(_rs485_mtx);
+            // 等待数据或停止信号
+            _rs485_cv.wait(lock, [this] { 
+                return !_rs485_queue.empty() || !_is_running; 
+            });
+
+            if (!_is_running && _rs485_queue.empty()) {
+                break;
+            }
+
+            if (_rs485_queue.empty()) {
+                continue;
+            }
+
+            data_to_send = _rs485_queue.front();
+            _rs485_queue.pop();
+        }
+
+        // 发送数据 (移除了之前的 Timer 计时，如果需要可以加回)
+        if (data_to_send.size() >= 3)
+        {
+            float float_temp_pose[3];
+            float_temp_pose[0] = data_to_send[0];
+            float_temp_pose[1] = data_to_send[1];
+            float_temp_pose[2] = data_to_send[2];
+            _rs485.sendFloatArray(float_temp_pose);
+        }
+
+        usleep(796000);
+    }
+}
+
 
 // void prj_v8detector::camera()
 // {
@@ -85,15 +126,26 @@ void prj_v8detector::camera()
         _resultframe.pose_result = _worker->m_pose->m_result;
         _resultframe.rs485_result = _worker->m_pose->uart_result;
         // 3. 串口发送 (保持不变)
-        _timer->start_cpu();
-        // _rs485.sendDoubleArray(_resultframe.ose_result.data());
-        float float_temp_pose[3];
-        float_temp_pose[0] = _resultframe.rs485_result[0];
-        float_temp_pose[1] = _resultframe.rs485_result[1];
-        float_temp_pose[2] = _resultframe.rs485_result[2];
-        _rs485.sendFloatArray(float_temp_pose);
-        // usleep(600000);
-        _timer->stop_cpu<timer::Timer::ms>("RS485");
+        // _timer->start_cpu();
+        // // _rs485.sendDoubleArray(_resultframe.ose_result.data());
+        // float float_temp_pose[3];
+        // float_temp_pose[0] = _resultframe.rs485_result[0];
+        // float_temp_pose[1] = _resultframe.rs485_result[1];
+        // float_temp_pose[2] = _resultframe.rs485_result[2];
+        // _rs485.sendFloatArray(float_temp_pose);
+        // // usleep(600000);
+        // _timer->stop_cpu<timer::Timer::ms>("RS485");
+        // _timer->start_cpu(); // 如果不需要统计入队耗时，可以注释掉计时
+        {
+            std::lock_guard<std::mutex> lock(_rs485_mtx);
+            // 漏桶策略：如果串口发送太慢，丢弃旧数据，保证实时性
+            while (_rs485_queue.size() > 2) 
+            {
+                _rs485_queue.pop();
+            }
+            _rs485_queue.push(_resultframe.rs485_result);
+            _rs485_cv.notify_one();
+        }
 
         // 4. TCP 队列处理
         _timer->start_cpu();
@@ -152,23 +204,36 @@ void prj_v8detector::camera_foldimages()
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
         _resultframe.rs485_result = _worker->m_pose->uart_result;
-        _timer->start_cpu();
-        //
-        // std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
-        // _rs485.sendDoubleArray(partial_result.data());
-        if (_resultframe.pose_result.size() >= 3) {
-            // _rs485.sendDoubleArray(_resultframe.rs485_result.data());
-            float float_temp_pose[3];
-            float_temp_pose[0] = (float)_resultframe.rs485_result[0];
-            float_temp_pose[1] = (float)_resultframe.rs485_result[1];
-            float_temp_pose[2] = (float)_resultframe.rs485_result[2];
-            _rs485.sendFloatArray(float_temp_pose);
-        } else {
-            std::cerr << "错误：数据不足，无法发送串口数据" << std::endl;
+        // _timer->start_cpu();
+        // //
+        // // std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
+        // // _rs485.sendDoubleArray(partial_result.data());
+        // if (_resultframe.pose_result.size() >= 3) {
+        //     // _rs485.sendDoubleArray(_resultframe.rs485_result.data());
+        //     float float_temp_pose[3];
+        //     float_temp_pose[0] = (float)_resultframe.rs485_result[0];
+        //     float_temp_pose[1] = (float)_resultframe.rs485_result[1];
+        //     float_temp_pose[2] = (float)_resultframe.rs485_result[2];
+        //     _rs485.sendFloatArray(float_temp_pose);
+        // } else {
+        //     std::cerr << "错误：数据不足，无法发送串口数据" << std::endl;
+        // }
+        // //
+        // // _rs485.sendDoubleArray(_resultframe.pose_result.data());
+        // _timer->stop_cpu<timer::Timer::ms>("RS485");
+        {
+            std::lock_guard<std::mutex> lock(_rs485_mtx);
+            // 同样应用漏桶策略
+            while (_rs485_queue.size() > 2) 
+            {
+                _rs485_queue.pop();
+            }
+            if (_resultframe.rs485_result.size() >= 3) {
+                 _rs485_queue.push(_resultframe.rs485_result);
+                 _rs485_cv.notify_one();
+            }
         }
-        //
-        // _rs485.sendDoubleArray(_resultframe.pose_result.data());
-        _timer->stop_cpu<timer::Timer::ms>("RS485");
+
         _timer->start_cpu();
         {
             std::lock_guard<std::mutex> lock(_queue_mtx);
@@ -211,17 +276,24 @@ void prj_v8detector::run()
     _is_running = true;
     // auto t1 = std::thread(_func_camera);
     auto t2 = std::thread(_func_camera_foldimages);
+    auto t_rs485 = std::thread(_func_rs485_send);
     auto t3 = std::thread(_func_pack_and_send);
     // if (t1.joinable())
     // {
     //     t1.join();
     // }
+    
     if (t2.joinable())
     {
         t2.join();
     }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
+    _rs485_cv.notify_all(); // 唤醒 RS485
+    if (t_rs485.joinable())
+    {
+        t_rs485.join();
+    }
     if (t3.joinable())
     {
         t3.join();
@@ -231,6 +303,8 @@ void prj_v8detector::run()
 prj_v8detector::~prj_v8detector()
 {
     _is_running = false;
+    _queue_cv.notify_all();
+    _rs485_cv.notify_all();
     delete _writeframe->rgb_ptr;
     delete _writeframe;
     preprocess::destroy_process();

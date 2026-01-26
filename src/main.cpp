@@ -25,11 +25,11 @@ int main(int argc, char const *argv[])
     p_params.W = 1920;
     p_params.resolution = "HD1080";
     p_params.cameraID = 0;
-    p_params.ip = "192.168.31.214";
+    p_params.ip = "192.168.31.101";
     p_params.port = 1234;
     p_params.socket_mode = 0;
     p_params.rs485_port = "/dev/ttyUSB0";
-    p_params.rs485_baudrate = B115200;
+    p_params.rs485_baudrate = B57600;
 
     // // 根据worker中的task类型进行推理
     prj_v8detector prj(onnxPath, level, params, p_params);
