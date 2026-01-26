@@ -697,10 +697,6 @@ namespace model
             }
             if (is_current_frame_good && !T1.empty())
             {
-                m_result[0] = static_cast<float>(T1.at<double>(0, 0));
-                m_result[1] = static_cast<float>(T1.at<double>(1, 0));
-                m_result[2] = static_cast<float>(T1.at<double>(2, 0));
-
                 m_result[3] = static_cast<float>(T1.at<double>(0, 0));
                 m_result[4] = static_cast<float>(T1.at<double>(1, 0));
                 m_result[5] = static_cast<float>(T1.at<double>(2, 0));
@@ -715,8 +711,10 @@ namespace model
                 dt = static_cast<double>(timestamp - _last_timestamp) / 1000.0;
             }
             _last_timestamp = timestamp;
-            if (dt > 1.0 || dt <= 0.0)
+            if (dt <= 0.0)
+            {
                 dt = 0.033;
+            }
             std::cout << "时间间隔 :" << dt << std::endl;
             cv::Point3f predicted_pos = m_kf.predict(dt); // 先验估计，预测值
             cv::Point3f kf_result;
@@ -724,7 +722,7 @@ namespace model
             {
                 if (is_current_frame_good)
                 {
-                    kf_result = m_kf.update(m_result[0], m_result[1], m_result[2]);
+                    kf_result = m_kf.update(m_result[3], m_result[4], m_result[5]);
                 }
                 else
                 {
@@ -760,9 +758,6 @@ namespace model
                     }
                     else
                     {
-                        LOGV("LSTM warming up...");
-                        LOGV("LSTM warming up...");
-                        LOGV("LSTM warming up...");
                         LOGV("LSTM warming up...");
                     }
                 }

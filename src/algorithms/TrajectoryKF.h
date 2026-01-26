@@ -32,12 +32,12 @@ private:
 
     // 1. 基础过程噪声 (对应平稳直线运动)
     // 稍微调大一点点，防止过拟合直线
-    const float BASE_Q_POS = 1e-5f;
-    const float BASE_Q_VEL = 5e-4f;
+    const float BASE_Q_POS = 0.5f;
+    const float BASE_Q_VEL = 0.8f;
 
     // 2. 机动判定阈值 (Maneuver Threshold)
     // 预测值和观测值相差超过 1.5cm，认为物体在急转弯/变速
-    const float MANEUVER_THRESHOLD = 18.00f;
+    // const float MANEUVER_THRESHOLD = 18.00f;
 
     // 3. 离谱阈值 (Outlier Threshold)
     // 预测值和观测值相差超过 50cm，认为绝对是传感器飞了
