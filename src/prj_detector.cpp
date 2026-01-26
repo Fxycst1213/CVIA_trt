@@ -58,7 +58,7 @@ void prj_v8detector::rs485_loop()
             _rs485.sendFloatArray(float_temp_pose);
         }
 
-        usleep(796000);
+        usleep(500000);
     }
 }
 
