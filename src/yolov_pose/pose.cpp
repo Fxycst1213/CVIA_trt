@@ -222,36 +222,11 @@ namespace model
             //                                 -128.86,	-374.6, 35.37,
             //                                 93.18,	2.06,	-7.96);
 
-            // _handTrans = (cv::Mat_<double>(4, 4) << 0.99924, 0.029944, -0.0247853, -51.98,
-            //                                         -0.0317989, 0.996434, -0.078150, 11.1460,
-            //                                         -0.022356, -0.0788796, -0.9966334, -0.78764,
-            //                                         0.000, 0.000, 0.000, 1.000);
-
-            // _wxj2cam = (cv::Mat_<double>(4, 4) << 1.0, 0.0, 0.0, 0.0,
-            //                                       0.0, 1.0, 0.0, 0.0,
-            //                                       0.0, 0.0, 1.0, 0.0,
-            //                                       0.0, 0.0, 0.0, 1.0);
-
             combined = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
                         9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
                         -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
                         0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
             combined_inv = combined.inv();
-
-            // 凯丽
-            // _K = (cv::Mat_<double>(3, 3) << 1064.0, 0.0, 971.2,
-            //       0.0, 1064.1, 544.3,
-            //       0.0, 0.0, 1.0);
-
-            // _diff = (cv::Mat_<float>(1, 5) << -0.0933, 0.0668, 0.0003459, -0.0002221, 0.0225);
-
-            // _p3d = (cv::Mat_<double>(7, 3) << -183.7073,	11.25681,	16.7002,
-            //                             -63.425,	5.11481,	6.7676,
-            //                             -56.275,	276.95511,	41.9942,
-            //                             -52.444,	166.85011,	43.4943,
-            //                             -62.388,	-153.32389,	37.1131,
-            //                             -83.24,	-272.24389,	31.8423,
-            //                             72.554,	-6.07653,	3.5579);
 
             LSTMPredictor::Config lstm_cfg;
             lstm_cfg.onnx_path = "models/onnx/model_multi.onnx"; // 【注意】这里填你LSTM模型的路径
@@ -372,6 +347,7 @@ namespace model
             }
             run_pnp_multi_stage();
             run_filter_and_estimation(timestamp, m_frame_counter);
+            run_lstm_predictin();
 
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
@@ -734,55 +710,58 @@ namespace model
                 m_result[4] = kf_result.y;
                 m_result[5] = kf_result.z;
 
-                // 3. === LSTM 推理 ===
-                // 逻辑：将 KF 滤波后的平滑数据喂给 LSTM
-
-                if (m_lstm_ready)
-                {
-                    // 推入当前帧 KF 结果，尝试获取未来预测
-                    // 只有当积累了 58 帧后，update 才会返回 true
-                    if (m_lstm->update(kf_result.x, kf_result.y, kf_result.z))
-                    {
-                        std::vector<float> lstm_out = m_lstm->get_prediction();
-
-                        // 【策略选择】
-                        // 这里的 lstm_out 是 LSTM 预测的第 23 帧的数据
-                        // 你是想直接用 LSTM 替换 KF 结果？还是做融合？
-                        // 假设你完全信任 LSTM 预测值用于发送给下位机：
-
-                        m_result[0] = lstm_out[0];
-                        m_result[1] = lstm_out[1];
-                        m_result[2] = lstm_out[2];
-
-                        // LOGD("LSTM Active: x:%.2f, y:%.2f, z:%.2f", final_x, final_y, final_z);
-                    }
-                    else
-                    {
-                        LOGV("LSTM warming up...");
-                    }
-                }
-
-                cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[3],
-                                             m_result[4],
-                                             m_result[5],
-                                             1.0);
-
-                cv::Mat transformed_point = combined * point_homogeneous;
-
-                // uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
-                // uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
-                // uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
-
-                uart_result[0] = m_result[3]; // 新的 X
-                uart_result[1] = m_result[4]; // 新的 Y
-                uart_result[2] = m_result[5]; // 新的 Z
-
-                LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
-                    uart_result[0], uart_result[1], uart_result[2]);
-
                 LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
             }
+        }
+        void Pose::run_lstm_predictin()
+        {
+            // 3. === LSTM 推理 ===
+            // 逻辑：将 KF 滤波后的平滑数据喂给 LSTM
+            if (m_lstm_ready)
+            {
+                // 推入当前帧 KF 结果，尝试获取未来预测
+                // 只有当积累了 58 帧后，update 才会返回 true
+                if (m_lstm->update(m_result[3], m_result[4], m_result[5]))
+                {
+                    std::vector<float> lstm_out = m_lstm->get_prediction();
+
+                    // 【策略选择】
+                    m_result[0] = lstm_out[0];
+                    m_result[1] = lstm_out[1];
+                    m_result[2] = lstm_out[2];
+
+                    // LOGD("LSTM Active: x:%.2f, y:%.2f, z:%.2f", final_x, final_y, final_z);
+                }
+                else
+                {
+                    m_result[0] = 0.0f;
+                    m_result[1] = 0.0f;
+                    m_result[2] = 0.0f;
+                    // LOGV("LSTM warming up...");
+                }
+            }
+
+            cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[3],
+                                         m_result[4],
+                                         m_result[5],
+                                         1.0); // 现在是直接把观测值通过串口发出去，发预测值改0 1 2
+
+            cv::Mat transformed_point = combined * point_homogeneous;
+
+            // uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
+            // uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
+            // uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
+
+            uart_result[0] = m_result[3]; // 新的 X
+            uart_result[1] = m_result[4]; // 新的 Y
+            uart_result[2] = m_result[5]; // 新的 Z
+
+            LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
+                uart_result[0], uart_result[1], uart_result[2]);
+
+            LOG("\t [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
+                m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
         }
     };
 };

@@ -160,7 +160,7 @@ void prj_v8detector::camera()
                 // 注意：如果 Resultframe 很大，pop 可能会析构释放内存，这很好
                 _resultframe_queue.pop(); 
                 // 可选：打印个日志提示丢帧了
-                // LOGW("TCP queue full, dropping old frame!");
+                LOGW("TCP queue full, dropping old frame!");
             }
             
             _resultframe_queue.push(_resultframe);
@@ -174,7 +174,7 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images_old2/*.png";
+    cv::String folder = "/home/cvia/yifei/images_old1/*.png";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
@@ -186,7 +186,7 @@ void prj_v8detector::camera_foldimages()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        // usleep(300000);
+        // usleep(200000);
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         current_idx++;

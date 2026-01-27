@@ -60,7 +60,8 @@ void ZEDX::grab_frame(ZEDframe *frame)
     if (_zedx.grab(_runtime_parameters) == ERROR_CODE::SUCCESS)
     {
         _zedx.retrieveImage(img, sl::VIEW::LEFT_UNRECTIFIED);
-        frame->timestamp = img.timestamp.getMicroseconds();
+        // frame->timestamp = img.timestamp.getMicroseconds();// 微秒
+        frame->timestamp = img.timestamp.getMilliseconds();// 毫秒
         cv::Mat tmp = ZEDX::slMat2cvMat(img);
         cv::cvtColor(tmp, *(frame->rgb_ptr), cv::COLOR_BGRA2BGR);
         // _timer->show();

@@ -58,6 +58,7 @@ namespace model
             std::shared_ptr<FrameLookbackEstimator> m_lookback_estimator;
             void run_filter_and_estimation(const uint64_t &timestamp, uint64_t m_frame_counter);
             void run_pnp_single_stage();
+            void run_lstm_predictin();
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);
             std::vector<float> m_result;
