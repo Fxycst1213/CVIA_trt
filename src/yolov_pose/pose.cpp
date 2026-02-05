@@ -14,10 +14,12 @@
 
 using namespace std;
 using namespace nvinfer1;
-
+double deg2rad(double deg)
+{
+    return deg * CV_PI / 180.0;
+};
 namespace model
 {
-
     namespace pose
     {
 
@@ -205,13 +207,22 @@ namespace model
             //             92.51,	-3.9,	-1.07);
 
             // 0123
-            _p3d = (cv::Mat_<double>(7, 3) << -251.696, -10.28, -10.043,
-                    -93.829, -7.33, -9.62,
-                    -151.899, 363.404, 48.299,
-                    -119.014, 207.414, 42.926,
-                    -100.598, -224.46, 34.07,
-                    -118.778, -379.29, 40.951,
-                    92.84, 2.75, -7.008);
+            // _p3d = (cv::Mat_<double>(7, 3) << -251.696, -10.28, -10.043,
+            //         -93.829, -7.33, -9.62,
+            //         -151.899, 363.404, 48.299,
+            //         -119.014, 207.414, 42.926,
+            //         -100.598, -224.46, 34.07,
+            //         -118.778, -379.29, 40.951,
+            //         92.84, 2.75, -7.008);
+
+            // 0128
+            _p3d = (cv::Mat_<double>(7, 3) << -254.768, -10.362, -12.31,
+                    -96.061, -6.026, -11.411,
+                    -146.778, 363.68, 45.367,
+                    -118.098, 208.233, 40.866,
+                    -102.169, -224.97, 34.07,
+                    -120.608, -378.954, 40.523,
+                    93.057, 1.1, -7.177);
 
             // old
             // _p3d = (cv::Mat_<double>(7, 3) << -255.41,	-5.3,	-10.9,
@@ -229,10 +240,10 @@ namespace model
             combined_inv = combined.inv();
 
             LSTMPredictor::Config lstm_cfg;
-            lstm_cfg.onnx_path = "models/onnx/model_multi.onnx"; // 【注意】这里填你LSTM模型的路径
-            lstm_cfg.input_seq_len = 58;
-            lstm_cfg.output_seq_len = 25;
-            lstm_cfg.target_frame_idx = 22; // 取第23帧
+            lstm_cfg.onnx_path = "models/onnx/model_multi_0123_01_12.onnx"; // 【注意】这里填你LSTM模型的路径
+            lstm_cfg.input_seq_len = 61;
+            lstm_cfg.output_seq_len = 27;
+            lstm_cfg.target_frame_idx = 24; // 取第23帧
 
             m_lstm = std::make_shared<LSTMPredictor>(lstm_cfg, level);
             if (m_lstm->init())
@@ -452,13 +463,13 @@ namespace model
                     for (size_t i = 0; i < contours.size(); ++i)
                     {
                         double area = cv::contourArea(contours[i]);
-                        //一飞院
+                        // 一飞院
                         if (area < 2 || area > 110.0)
                             continue;
-                        //凯丽
-                        // if (area < 10 || area > 160.0)
-                        //     continue;
-                        
+                        // 凯丽
+                        //  if (area < 10 || area > 160.0)
+                        //      continue;
+
                         cv::Moments M = cv::moments(contours[i]);
                         if (M.m00 <= 0)
                             continue;
@@ -706,10 +717,22 @@ namespace model
                 }
 
                 // 4. 相机坐标系下滤波后的结果
-                m_result[3] = kf_result.x;
-                m_result[4] = kf_result.y;
-                m_result[5] = kf_result.z;
-
+                // m_result[3] = kf_result.x;
+                // m_result[4] = kf_result.y;
+                // m_result[5] = kf_result.z;
+                double angle = -0.05;
+                cv::Mat vec = (cv::Mat_<float>(3, 1) << kf_result.x, kf_result.y, kf_result.z);
+                double rad = deg2rad(angle); // 转换为弧度
+                double cos_theta = cos(rad);
+                double sin_theta = sin(rad);
+                cv::Mat rot_mat = (cv::Mat_<float>(3, 3) << 1, 0, 0,
+                                   0, cos_theta, -sin_theta,
+                                   0, sin_theta, cos_theta);
+                cv::Mat result;
+                cv::gemm(rot_mat, vec, 1.0, cv::Mat(), 0.0, result);
+                m_result[3] = result.at<float>(0, 0);
+                m_result[4] = result.at<float>(1, 0);
+                m_result[5] = result.at<float>(2, 0);
                 LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
             }
@@ -735,6 +758,10 @@ namespace model
                 }
                 else
                 {
+                    // m_result[0] = m_result[3];
+                    // m_result[1] = m_result[4];
+                    // m_result[2] = m_result[5];
+
                     m_result[0] = 0.0f;
                     m_result[1] = 0.0f;
                     m_result[2] = 0.0f;
@@ -742,26 +769,26 @@ namespace model
                 }
             }
 
-            cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[3],
-                                         m_result[4],
-                                         m_result[5],
+            cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[0],
+                                         m_result[1],
+                                         m_result[2],
                                          1.0); // 现在是直接把观测值通过串口发出去，发预测值改0 1 2
 
             cv::Mat transformed_point = combined * point_homogeneous;
 
-            // uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
-            // uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
-            // uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
+            uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
+            uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
+            uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
 
-            uart_result[0] = m_result[3]; // 新的 X
-            uart_result[1] = m_result[4]; // 新的 Y
-            uart_result[2] = m_result[5]; // 新的 Z
+            // uart_result[0] = m_result[3]; // 新的 X
+            // uart_result[1] = m_result[4]; // 新的 Y
+            // uart_result[2] = m_result[5]; // 新的 Z
 
             LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
                 uart_result[0], uart_result[1], uart_result[2]);
 
-            LOG("\t [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
-                m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
+            // LOG("\t [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
+            //     m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
         }
     };
 };

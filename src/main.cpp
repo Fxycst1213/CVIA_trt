@@ -9,8 +9,8 @@ using namespace std;
 int main(int argc, char const *argv[])
 {
     // pose
-    string onnxPath = "models/onnx/last_rebest_1203.onnx";
-    //string onnxPath = "models/onnx/20260114_last.onnx";
+    // string onnxPath = "models/onnx/last_rebest_1203.onnx";
+    string onnxPath = "models/onnx/0128last.onnx";
     auto level = logger::Level::VERB;
     auto params = model::Params();
     params.img = {640, 640, 3};

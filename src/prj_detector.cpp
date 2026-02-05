@@ -58,7 +58,7 @@ void prj_v8detector::rs485_loop()
             _rs485.sendFloatArray(float_temp_pose);
         }
 
-        usleep(500000);
+        usleep(150000);
     }
 }
 
@@ -174,7 +174,7 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images_old1/*.png";
+    cv::String folder = "/home/cvia/yifei/images_old2/*.png";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
