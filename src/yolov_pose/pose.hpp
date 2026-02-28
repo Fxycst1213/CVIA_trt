@@ -10,6 +10,7 @@
 #include "../algorithms/TrajectoryKF.h"
 #include "../algorithms/PeriodEstimator.h"
 #include "../ZEDX/ZEDX.h"
+#include "../IRcamera/IRcamera.h"
 #include "../params/pose_params.hpp"
 #include "../algorithms/FrameLookbackEstimator.h"
 

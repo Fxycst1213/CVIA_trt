@@ -43,6 +43,7 @@ include_directories(
     ${PROJECT_SOURCE_DIR}/src/lock
     ${PROJECT_SOURCE_DIR}/src/worker
     ${PROJECT_SOURCE_DIR}/src/ZEDX
+    ${PROJECT_SOURCE_DIR}/src/IRcamera
     ${PROJECT_SOURCE_DIR}/src/communication
     ${PROJECT_SOURCE_DIR}/src/params
     ${PROJECT_SOURCE_DIR}/src/algorithms

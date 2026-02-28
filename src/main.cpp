@@ -10,7 +10,9 @@ int main(int argc, char const *argv[])
 {
     // pose
     // string onnxPath = "models/onnx/last_rebest_1203.onnx";
-    string onnxPath = "models/onnx/0128last.onnx";
+    // string onnxPath = "models/onnx/0128last.onnx";
+
+    string onnxPath = "models/onnx/qdy_last.onnx";
     auto level = logger::Level::VERB;
     auto params = model::Params();
     params.img = {640, 640, 3};
@@ -25,7 +27,8 @@ int main(int argc, char const *argv[])
     p_params.W = 1920;
     p_params.resolution = "HD1080";
     p_params.cameraID = 0;
-    p_params.ip = "192.168.31.101";
+    p_params.cameraframe = 30;
+    p_params.ip = "192.168.31.100";
     p_params.port = 1234;
     p_params.socket_mode = 0;
     p_params.rs485_port = "/dev/ttyUSB0";

@@ -22,6 +22,7 @@
 #include <opencv2/opencv.hpp>
 #include <thread>
 #include <queue>
+#include "IRcamera/IRcamera.h"
 
 using namespace std;
 
@@ -38,7 +39,8 @@ public:
 
 private:
     shared_ptr<thread::Worker> _worker;
-    ZEDX *_zed = nullptr;
+    // ZEDX *_zed = nullptr;
+    IRCamera *_ir_camera = nullptr;
     std::shared_ptr<timer::Timer> _timer;
     std::shared_ptr<timer::Timer> _timer_tcp;
 
@@ -48,7 +50,8 @@ private:
 
     std::function<void()> _func_rs485_send; // [新增] 线程绑定函数
 
-    ZEDframe *_writeframe = nullptr;
+    // ZEDframe *_writeframe = nullptr;
+    IRFrame *_writeframe = nullptr;
 
     queue<Resultframe> _resultframe_queue;
     std::mutex _queue_mtx;             // 保护队列的互斥锁

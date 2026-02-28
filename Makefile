@@ -129,6 +129,30 @@ trt/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/build
 .PHONY : trt/fast
 
+src/IRcamera/IRcamera.o: src/IRcamera/IRcamera.cpp.o
+.PHONY : src/IRcamera/IRcamera.o
+
+# target to build an object file
+src/IRcamera/IRcamera.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/IRcamera/IRcamera.cpp.o
+.PHONY : src/IRcamera/IRcamera.cpp.o
+
+src/IRcamera/IRcamera.i: src/IRcamera/IRcamera.cpp.i
+.PHONY : src/IRcamera/IRcamera.i
+
+# target to preprocess a source file
+src/IRcamera/IRcamera.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/IRcamera/IRcamera.cpp.i
+.PHONY : src/IRcamera/IRcamera.cpp.i
+
+src/IRcamera/IRcamera.s: src/IRcamera/IRcamera.cpp.s
+.PHONY : src/IRcamera/IRcamera.s
+
+# target to generate assembly for a file
+src/IRcamera/IRcamera.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/IRcamera/IRcamera.cpp.s
+.PHONY : src/IRcamera/IRcamera.cpp.s
+
 src/TensorRT/calibrator/calibrator.o: src/TensorRT/calibrator/calibrator.cpp.o
 .PHONY : src/TensorRT/calibrator/calibrator.o
 
@@ -666,6 +690,9 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... trt"
+	@echo "... src/IRcamera/IRcamera.o"
+	@echo "... src/IRcamera/IRcamera.i"
+	@echo "... src/IRcamera/IRcamera.s"
 	@echo "... src/TensorRT/calibrator/calibrator.o"
 	@echo "... src/TensorRT/calibrator/calibrator.i"
 	@echo "... src/TensorRT/calibrator/calibrator.s"

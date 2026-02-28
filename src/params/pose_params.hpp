@@ -10,7 +10,7 @@ namespace model
 {
     namespace pose
     {
-        const int NUM_KEYPOINTS = 7;
+        const int NUM_KEYPOINTS = 10;
 
         struct keypoint
         {

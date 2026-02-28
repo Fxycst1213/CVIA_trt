@@ -94,7 +94,11 @@ bool LSTMPredictor::build_engine()
     config->setMemoryPoolLimit(MemoryPoolType::kWORKSPACE, 1ULL << 28);
 
     // TRT 10 默认就是 FP32，如果没特殊需求先不开 FP16 保持稳定
-    // if (builder->platformHasFastFp16()) config->setFlag(BuilderFlag::kFP16);
+    if (builder->platformHasFastFp16())
+    {
+        std::cout << "yes" << std::endl;
+        config->setFlag(BuilderFlag::kFP16);
+    }
 
     auto parser = std::shared_ptr<IParser>(createParser(*network, *m_logger), TrtDeleter());
     if (!parser->parseFromFile(m_config.onnx_path.c_str(), static_cast<int>(ILogger::Severity::kWARNING)))
@@ -108,9 +112,10 @@ bool LSTMPredictor::build_engine()
     if (input->getDimensions().d[0] == -1)
     {
         auto profile = builder->createOptimizationProfile();
-        profile->setDimensions(input->getName(), OptProfileSelector::kMIN, Dims3(1, m_config.input_seq_len, m_config.input_dim));
-        profile->setDimensions(input->getName(), OptProfileSelector::kOPT, Dims3(1, m_config.input_seq_len, m_config.input_dim));
-        profile->setDimensions(input->getName(), OptProfileSelector::kMAX, Dims3(1, m_config.input_seq_len, m_config.input_dim));
+        Dims3 fixed_shape(1, m_config.input_seq_len, m_config.input_dim);
+        profile->setDimensions(input->getName(), OptProfileSelector::kMIN, fixed_shape);
+        profile->setDimensions(input->getName(), OptProfileSelector::kOPT, fixed_shape);
+        profile->setDimensions(input->getName(), OptProfileSelector::kMAX, fixed_shape);
         config->addOptimizationProfile(profile);
     }
 
@@ -170,6 +175,15 @@ bool LSTMPredictor::load_engine()
     CUDA_CHECK(cudaMalloc(&m_input_device, m_input_size_bytes));
     CUDA_CHECK(cudaMalloc(&m_output_device, m_output_size_bytes));
 
+    // 1. 锁死输入维度 (一次性设置，之后不再改)
+    // 告诉 TRT：虽然模型支持动态，但我永远只用这个尺寸
+    m_context->setInputShape(m_config.input_node_name.c_str(), Dims3(1, m_config.input_seq_len, m_config.input_dim));
+
+    // 2. 绑定显存地址 (一次性设置)
+    // 因为 m_input_device 是在类析构时才释放，中间不会变，所以这里绑一次就行
+    m_context->setTensorAddress(m_config.input_node_name.c_str(), m_input_device);
+    m_context->setTensorAddress(m_config.output_node_name.c_str(), m_output_device);
+
     return true;
 }
 
@@ -191,15 +205,6 @@ bool LSTMPredictor::update(float x, float y, float z)
 
     // 1. 拷贝数据到 GPU
     CUDA_CHECK(cudaMemcpyAsync(m_input_device, m_host_input, m_input_size_bytes, cudaMemcpyHostToDevice, m_stream));
-
-    // 2. 【关键修复】TRT 10 使用 setTensorAddress 和 enqueueV3
-    // 你必须确保 m_config.input_node_name 和 m_config.output_node_name 是正确的
-    // 比如 "images" 或 "input"
-    m_context->setTensorAddress(m_config.input_node_name.c_str(), m_input_device);
-    m_context->setTensorAddress(m_config.output_node_name.c_str(), m_output_device);
-
-    // 如果是动态维度，必须显式设置
-    m_context->setInputShape(m_config.input_node_name.c_str(), Dims3(1, m_config.input_seq_len, m_config.input_dim));
 
     // 3. 执行推理 (enqueueV3)
     bool status = m_context->enqueueV3(m_stream);
