@@ -12,7 +12,8 @@ int main(int argc, char const *argv[])
     // string onnxPath = "models/onnx/last_rebest_1203.onnx";
     // string onnxPath = "models/onnx/0128last.onnx";
 
-    string onnxPath = "models/onnx/qdy_last.onnx";
+    // string onnxPath = "models/onnx/qdy_last.onnx";
+    string onnxPath = "models/onnx/yifei_last.onnx";
     auto level = logger::Level::VERB;
     auto params = model::Params();
     params.img = {640, 640, 3};

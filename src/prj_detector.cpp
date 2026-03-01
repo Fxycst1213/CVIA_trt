@@ -71,23 +71,13 @@ void prj_v8detector::camera()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-
-        // 1. 获取 ZED 图像
-        // _zed->grab_frame(_writeframe);
         _ir_camera->grab_frame(_writeframe);
-        // ++cam_index;
-
-        // _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
         _timer->stop_cpu<timer::Timer::ms>("IR Camera Grab frame");
-
-        // 【关键修复1】：使用 clone() 进行深拷贝
-        // 这样 _resultframe 拥有一块独立的内存，不会被下一帧 grab_frame 覆盖
         _resultframe.rgb = _writeframe->rgb_ptr->clone(); 
         _resultframe.timestamp = _writeframe->timestamp;
 
         _timer->start_cpu();
-        
-        // 2. 推理 (使用独立内存的图片)
+
         _worker->inference(_resultframe);
         
         _timer->stop_cpu<timer::Timer::ms>("inference");
@@ -97,7 +87,6 @@ void prj_v8detector::camera()
         _resultframe.rs485_result = _worker->m_pose->uart_result;
         {
             std::lock_guard<std::mutex> lock(_rs485_mtx);
-            // 漏桶策略：如果串口发送太慢，丢弃旧数据，保证实时性
             while (_rs485_queue.size() > 2) 
             {
                 _rs485_queue.pop();
@@ -105,23 +94,14 @@ void prj_v8detector::camera()
             _rs485_queue.push(_resultframe.rs485_result);
             _rs485_cv.notify_one();
         }
-
-        // 4. TCP 队列处理
         _timer->start_cpu();
         {
             std::lock_guard<std::mutex> lock(_queue_mtx);
-            
-            // 【关键修复2】：实现“漏桶”策略，防止队列堆积
-            // 如果队列里堆积超过 2 帧，说明 TCP 发不过来了，直接把最老的帧扔掉
-            // 保持队列始终很短，确保发送的是较新的数据
-            while (_resultframe_queue.size() > 2) 
+            while (_resultframe_queue.size() > 2)
             {
-                // 注意：如果 Resultframe 很大，pop 可能会析构释放内存，这很好
-                _resultframe_queue.pop(); 
-                // 可选：打印个日志提示丢帧了
+                _resultframe_queue.pop();
                 LOGW("TCP queue full, dropping old frame!");
             }
-            
             _resultframe_queue.push(_resultframe);
             _queue_cv.notify_one();
         }
@@ -133,7 +113,7 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images_old2/*.png";
+    cv::String folder = "/home/cvia/yifei/yifei_results/*.jpg";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
@@ -145,7 +125,7 @@ void prj_v8detector::camera_foldimages()
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        // usleep(200000);
+        // usleep(1000000);
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         current_idx++;
