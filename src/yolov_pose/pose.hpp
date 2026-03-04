@@ -88,6 +88,10 @@ namespace model
             cv::Mat _R1_prev;
             cv::Mat _T1_prev;
 
+            cv::Mat R_mat;
+            Eigen::Matrix3d eR;
+            Eigen::Vector3d euler_angles;
+
             int _stale_frame_count = 0;
             double _candidate_z = 0.0;
             int _candidate_count = 0;

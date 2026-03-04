@@ -11,6 +11,9 @@
 #include "preprocess.hpp"
 #include "cudatools.hpp"
 #include "../lstm/lstm_predictor.hpp"
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <opencv2/core/eigen.hpp> // 必须包含这个才能在 cv::Mat 和 Eigen 之间转换
 
 using namespace std;
 using namespace nvinfer1;
@@ -182,12 +185,18 @@ namespace model
 
             m_result.resize(6, 0.0f);
             uart_result.resize(3, 0.0f);
-            //  一飞院
-            _K = (cv::Mat_<double>(3, 3) << 1073.357, 0.0, 972.622,
-                  0.0, 1072.1579, 497.2687,
+            //  15
+            // _K = (cv::Mat_<double>(3, 3) << 1073.357, 0.0, 972.622,
+            //       0.0, 1072.1579, 497.2687,
+            //       0.0, 0.0, 1.0);
+
+            // _diff = (cv::Mat_<float>(1, 5) << -0.0587, 0.1663, 0.0001541, 0.0026, -0.1357);
+
+            _K = (cv::Mat_<double>(3, 3) << 1067.695, 0.0, 972.357,
+                  0.0, 1068.264, 504.225,
                   0.0, 0.0, 1.0);
 
-            _diff = (cv::Mat_<float>(1, 5) << -0.0587, 0.1663, 0.0001541, 0.0026, -0.1357);
+            _diff = (cv::Mat_<float>(1, 5) << -0.0597, 0.1675, 0.0001342, 0.0027, -0.1367);
 
             // 0128
             _p3d = (cv::Mat_<double>(10, 3) << 0, 0, 0,
@@ -320,10 +329,10 @@ namespace model
             m_bboxes = final_bboxes;
 
             m_frame_counter++;
-            if (!m_bboxes.empty())
-            {
-                refine_keypoints(m_bboxes[0].keypoints);
-            }
+            // if (!m_bboxes.empty())
+            // {
+            //     refine_keypoints(m_bboxes[0].keypoints);
+            // }
             run_pnp_multi_stage();
             // run_filter_and_estimation(timestamp, m_frame_counter);
             // run_lstm_predictin();
@@ -706,14 +715,23 @@ namespace model
                         is_current_frame_good = true;
                         R1.copyTo(_R1_prev);
                         T1.copyTo(_T1_prev);
+
+                        cv::Rodrigues(R1, R_mat);
+                        cv::cv2eigen(R_mat, eR);
+                        euler_angles = eR.eulerAngles(0, 1, 2);
+                        euler_angles *= (180.0 / CV_PI);
                     }
                 }
             }
             if (is_current_frame_good && !T1.empty())
             {
-                m_result[0] = static_cast<float>(T1.at<double>(0, 0));
-                m_result[1] = static_cast<float>(T1.at<double>(1, 0));
-                m_result[2] = static_cast<float>(T1.at<double>(2, 0));
+                // m_result[3] = static_cast<float>(T1.at<double>(0, 0));
+                // m_result[4] = static_cast<float>(T1.at<double>(1, 0));
+                // m_result[5] = static_cast<float>(T1.at<double>(2, 0));
+
+                m_result[0] = static_cast<float>(euler_angles(0));
+                m_result[1] = static_cast<float>(euler_angles(1));
+                m_result[2] = static_cast<float>(euler_angles(2));
                 m_result[3] = static_cast<float>(T1.at<double>(0, 0));
                 m_result[4] = static_cast<float>(T1.at<double>(1, 0));
                 m_result[5] = static_cast<float>(T1.at<double>(2, 0));
