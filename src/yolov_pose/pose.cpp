@@ -183,11 +183,11 @@ namespace model
             m_result.resize(6, 0.0f);
             uart_result.resize(3, 0.0f);
             //  一飞院
-            _K = (cv::Mat_<double>(3, 3) << 1073.357, 0.0, 972.622,
-                  0.0, 1072.1579, 497.2687,
+            _K = (cv::Mat_<double>(3, 3) << 1067.695, 0.0, 972.357,
+                  0.0, 1068.264, 504.225,
                   0.0, 0.0, 1.0);
 
-            _diff = (cv::Mat_<float>(1, 5) << -0.0587, 0.1663, 0.0001541, 0.0026, -0.1357);
+            _diff = (cv::Mat_<float>(1, 5) << -0.0597, 0.1675, 0.0001342, 0.0027, -0.1367);
 
             // 0128
             _p3d = (cv::Mat_<double>(10, 3) << -430.6156, -7.47963, -14.7096,
@@ -343,154 +343,6 @@ namespace model
         {
             return make_shared<Pose>(onnx_path, level, params);
         }
-
-        // void Pose::refine_keypoints(std::vector<keypoint> &keypoints)
-        // {
-        //     // --- 核心调参区 ---
-        //     const int search_side = 120;          // ROI 搜索框大小
-        //     const double min_area = 60.0;         // 最小面积过滤 (防止微小噪点)
-        //     const double max_area = 2500.0;       // 最大面积过滤
-        //     const double dist_limit_pixel = 40.0; // 允许偏离 YOLO 初始点的最大像素距离
-        //     const int half_side = search_side / 2;
-
-        //     for (auto &kpt : keypoints)
-        //     {
-        //         // 1. 初步过滤低置信度的点
-        //         if (kpt.conf < 0.5f)
-        //         {
-        //             continue;
-        //         }
-
-        //         int cx = static_cast<int>(kpt.x);
-        //         int cy = static_cast<int>(kpt.y);
-
-        //         // 2. 定义并截取 ROI
-        //         int x1 = std::max(0, cx - half_side);
-        //         int y1 = std::max(0, cy - half_side);
-        //         int x2 = std::min(m_inputImage.cols, x1 + search_side);
-        //         int y2 = std::min(m_inputImage.rows, y1 + search_side);
-
-        //         // ROI 太小则跳过
-        //         if (x2 - x1 < 10 || y2 - y1 < 10)
-        //         {
-        //             continue;
-        //         }
-
-        //         cv::Rect roi_rect(x1, y1, x2 - x1, y2 - y1);
-        //         cv::Mat roi = m_inputImage(roi_rect);
-
-        //         // 3. 预处理
-        //         cv::Mat roi_gray;
-        //         if (roi.channels() == 3)
-        //         {
-        //             cv::cvtColor(roi, roi_gray, cv::COLOR_BGR2GRAY);
-        //         }
-        //         else
-        //         {
-        //             roi_gray = roi.clone();
-        //         }
-
-        //         // 3.1 [暗场防御] 过滤掉纯黑背景的误检
-        //         double min_val, max_val;
-        //         cv::minMaxLoc(roi_gray, &min_val, &max_val);
-        //         if (max_val < 40.0)
-        //         {
-        //             continue;
-        //         }
-
-        //         // 3.2 局部归一化 (抗曝光波动)
-        //         cv::Mat roi_norm;
-        //         cv::normalize(roi_gray, roi_norm, 0, 255, cv::NORM_MINMAX);
-
-        //         // 3.3 轻微高斯平滑 (消除毛刺边缘，提升拟合稳定性)
-        //         cv::GaussianBlur(roi_norm, roi_norm, cv::Size(3, 3), 0);
-
-        //         // 3.4 大津法 (Otsu) 自动寻找最优分界线
-        //         cv::Mat mask;
-        //         cv::threshold(roi_norm, mask, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
-
-        //         // 4. 查找轮廓
-        //         std::vector<std::vector<cv::Point>> contours;
-        //         cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
-
-        //         if (contours.empty())
-        //         {
-        //             continue;
-        //         }
-
-        //         cv::Point2f center_ref((float)(cx - x1), (float)(cy - y1));
-        //         int best_idx = -1;
-        //         double min_dist_to_center = std::numeric_limits<double>::max();
-
-        //         // 5. 遍历轮廓进行择优
-        //         for (size_t i = 0; i < contours.size(); ++i)
-        //         {
-        //             double area = cv::contourArea(contours[i]);
-        //             if (area < min_area || area > max_area)
-        //                 continue;
-
-        //             cv::Moments M = cv::moments(contours[i]);
-        //             if (M.m00 <= 0)
-        //                 continue;
-
-        //             float gx = static_cast<float>(M.m10 / M.m00);
-        //             float gy = static_cast<float>(M.m01 / M.m00);
-
-        //             double dx = gx - center_ref.x;
-        //             double dy = gy - center_ref.y;
-        //             double dist = std::sqrt(dx * dx + dy * dy);
-
-        //             // 距离过滤
-        //             if (dist > dist_limit_pixel)
-        //                 continue;
-
-        //             // 选择离 YOLO 初始点最近的高亮区域
-        //             if (dist < min_dist_to_center)
-        //             {
-        //                 min_dist_to_center = dist;
-        //                 best_idx = i;
-        //             }
-        //         }
-
-        //         // 6. 使用椭圆拟合更新 Keypoint 坐标 (亚像素精度)
-        //         if (best_idx != -1)
-        //         {
-        //             // fitEllipse 要求轮廓至少包含 5 个点
-        //             if (contours[best_idx].size() >= 5)
-        //             {
-        //                 cv::RotatedRect fitted_ellipse = cv::fitEllipse(contours[best_idx]);
-
-        //                 // 还原到全图坐标系 (自带亚像素浮点精度)
-        //                 float final_x = x1 + fitted_ellipse.center.x;
-        //                 float final_y = y1 + fitted_ellipse.center.y;
-
-        //                 double final_dist = std::sqrt(std::pow(final_x - kpt.x, 2) + std::pow(final_y - kpt.y, 2));
-
-        //                 if (final_dist <= dist_limit_pixel)
-        //                 {
-        //                     kpt.x = final_x;
-        //                     kpt.y = final_y;
-        //                 }
-        //             }
-        //             else
-        //             {
-        //                 // [兜底策略] 如果轮廓太小，退回使用图像矩 (Moments)
-        //                 cv::Moments M = cv::moments(contours[best_idx]);
-        //                 if (M.m00 > 0)
-        //                 {
-        //                     float final_x = x1 + static_cast<float>(M.m10 / M.m00) + 0.5f;
-        //                     float final_y = y1 + static_cast<float>(M.m01 / M.m00) + 0.5f;
-
-        //                     if (std::sqrt(std::pow(final_x - kpt.x, 2) + std::pow(final_y - kpt.y, 2)) <= dist_limit_pixel)
-        //                     {
-        //                         kpt.x = final_x;
-        //                         kpt.y = final_y;
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
 
         void Pose::refine_keypoints(std::vector<keypoint> &keypoints)
         {
