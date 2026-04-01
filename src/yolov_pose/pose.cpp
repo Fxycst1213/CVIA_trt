@@ -240,11 +240,10 @@ namespace model
             combined_inv = combined.inv();
 
             LSTMPredictor::Config lstm_cfg;
-            lstm_cfg.onnx_path = "models/onnx/model_multi_0123_01_12.onnx"; // 【注意】这里填你LSTM模型的路径
+            lstm_cfg.onnx_path = "models/onnx/all.onnx"; // 【注意】这里填你LSTM模型的路径
             lstm_cfg.input_seq_len = 61;
             lstm_cfg.output_seq_len = 27;
             lstm_cfg.target_frame_idx = 24; // 取第23帧
-
             m_lstm = std::make_shared<LSTMPredictor>(lstm_cfg, level);
             if (m_lstm->init())
             {
@@ -720,7 +719,8 @@ namespace model
                 // m_result[3] = kf_result.x;
                 // m_result[4] = kf_result.y;
                 // m_result[5] = kf_result.z;
-                double angle = -0.05;
+                //-0.13
+                double angle = -0.13;
                 cv::Mat vec = (cv::Mat_<float>(3, 1) << kf_result.x, kf_result.y, kf_result.z);
                 double rad = deg2rad(angle); // 转换为弧度
                 double cos_theta = cos(rad);
