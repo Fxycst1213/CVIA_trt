@@ -96,6 +96,15 @@ namespace model
             uint64_t m_frame_counter = -1;
             std::shared_ptr<LSTMPredictor> m_lstm;
             bool m_lstm_ready = false; // 标记 LSTM 是否已经加载成功
+
+            std::deque<cv::Point3f> m_history_trajectory;
+            const int KINEMATIC_BUFFER_SIZE = 30; // 积累满 300 帧开始预测
+            const int KINEMATIC_WINDOW_SIZE = 5;  // 提取最近 10 帧计算速度 (对应 Python 的 window_size=10)
+            const int PREDICT_FRAMES = 10;        // 预测未来 30 帧
+            const float PREDICT_DT = 0.033f;      // 帧间隔 dt (与你 KF 中的 0.033 保持一致)
+
+            // 将 run_lstm_predictin 改名或替换为运动学预测方法
+            void run_kinematic_prediction();
         };
 
         std::shared_ptr<Pose> make_pose(

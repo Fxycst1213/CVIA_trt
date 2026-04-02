@@ -357,7 +357,7 @@ namespace model
             }
             run_pnp_multi_stage();
             run_filter_and_estimation(timestamp, m_frame_counter);
-            run_lstm_predictin();
+            run_kinematic_prediction();
 
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
@@ -737,42 +737,69 @@ namespace model
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
             }
         }
-        void Pose::run_lstm_predictin()
+        void Pose::run_kinematic_prediction()
         {
-            // 3. === LSTM 推理 ===
-            // 逻辑：将 KF 滤波后的平滑数据喂给 LSTM
-            if (m_lstm_ready)
+            // 1. 获取当前 KF 滤波后的三维坐标，并压入历史轨迹窗口
+            cv::Point3f current_pos(m_result[3], m_result[4], m_result[5]);
+            m_history_trajectory.push_back(current_pos);
+
+            // 2. 维护滑动窗口大小，超过 300 帧则剔除最老的帧
+            if (m_history_trajectory.size() > KINEMATIC_BUFFER_SIZE)
             {
-                // 推入当前帧 KF 结果，尝试获取未来预测
-                // 只有当积累了 58 帧后，update 才会返回 true
-                if (m_lstm->update(m_result[3], m_result[4], m_result[5]))
-                {
-                    std::vector<float> lstm_out = m_lstm->get_prediction();
-
-                    // 【策略选择】
-                    m_result[0] = lstm_out[0];
-                    m_result[1] = lstm_out[1];
-                    m_result[2] = lstm_out[2];
-
-                    // LOGD("LSTM Active: x:%.2f, y:%.2f, z:%.2f", final_x, final_y, final_z);
-                }
-                else
-                {
-                    // m_result[0] = m_result[3];
-                    // m_result[1] = m_result[4];
-                    // m_result[2] = m_result[5];
-
-                    m_result[0] = 0.0f;
-                    m_result[1] = 0.0f;
-                    m_result[2] = 0.0f;
-                    // LOGV("LSTM warming up...");
-                }
+                m_history_trajectory.pop_front();
             }
 
+            // 3. === 运动学推理 ===
+            // 只有当积累满了 300 帧后，才开始预测
+            if (m_history_trajectory.size() == KINEMATIC_BUFFER_SIZE)
+            {
+                // 提取窗口大小计算平均速度 (对应 Python: mean_displacement = np.mean(diffs, axis=0))
+                cv::Point3f mean_disp(0.0f, 0.0f, 0.0f);
+                int start_idx = m_history_trajectory.size() - KINEMATIC_WINDOW_SIZE;
+
+                // 计算差分 (np.diff)
+                for (size_t i = start_idx + 1; i < m_history_trajectory.size(); ++i)
+                {
+                    mean_disp.x += (m_history_trajectory[i].x - m_history_trajectory[i - 1].x);
+                    mean_disp.y += (m_history_trajectory[i].y - m_history_trajectory[i - 1].y);
+                    mean_disp.z += (m_history_trajectory[i].z - m_history_trajectory[i - 1].z);
+                }
+
+                // 平均位移
+                int diff_count = KINEMATIC_WINDOW_SIZE - 1;
+                mean_disp.x /= diff_count;
+                mean_disp.y /= diff_count;
+                mean_disp.z /= diff_count;
+
+                // 计算速度向量 velocity = mean_displacement / dt
+                cv::Point3f velocity;
+                velocity.x = mean_disp.x / PREDICT_DT;
+                velocity.y = mean_disp.y / PREDICT_DT;
+                velocity.z = mean_disp.z / PREDICT_DT;
+
+                // 匀速直线运动预测第 30 帧：p(t) = p0 + v * t
+                // 其中 t = PREDICT_FRAMES * PREDICT_DT
+                float t_predict = PREDICT_FRAMES * PREDICT_DT;
+                cv::Point3f p0 = m_history_trajectory.back(); // 最后一次观测位置
+
+                m_result[0] = p0.x + velocity.x * t_predict;
+                m_result[1] = p0.y + velocity.y * t_predict;
+                m_result[2] = p0.z + velocity.z * t_predict;
+            }
+            else
+            {
+                // 数据未满 300 帧，处于 Warming up 阶段
+                m_result[0] = 0.0f;
+                m_result[1] = 0.0f;
+                m_result[2] = 0.0f;
+            }
+
+            // 4. === 坐标系转换与输出 (与原代码保持一致) ===
+            // 用 0, 1, 2 作为齐次坐标点进行变换发送
             cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[0],
                                          m_result[1],
                                          m_result[2],
-                                         1.0); // 现在是直接把观测值通过串口发出去，发预测值改0 1 2
+                                         1.0);
 
             cv::Mat transformed_point = combined * point_homogeneous;
 
@@ -780,15 +807,8 @@ namespace model
             uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
             uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
 
-            // uart_result[0] = m_result[3]; // 新的 X
-            // uart_result[1] = m_result[4]; // 新的 Y
-            // uart_result[2] = m_result[5]; // 新的 Z
-
             LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
                 uart_result[0], uart_result[1], uart_result[2]);
-
-            // LOG("\t [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
-            //     m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
         }
     };
 };
