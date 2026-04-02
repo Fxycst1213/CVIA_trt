@@ -10,6 +10,7 @@ int main(int argc, char const *argv[])
 {
     // pose
     // string onnxPath = "models/onnx/last_rebest_1203.onnx";
+    // sudo date -s "20260402 20:32:00"
     string onnxPath = "models/onnx/0128last.onnx";
     auto level = logger::Level::VERB;
     auto params = model::Params();
