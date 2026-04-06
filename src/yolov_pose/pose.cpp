@@ -240,7 +240,7 @@ namespace model
             combined_inv = combined.inv();
 
             LSTMPredictor::Config lstm_cfg;
-            lstm_cfg.onnx_path = "models/onnx/0408.onnx"; // 【注意】这里填你LSTM模型的路径
+            lstm_cfg.onnx_path = "models/onnx/0409.onnx"; // 【注意】这里填你LSTM模型的路径
             lstm_cfg.input_seq_len = 61;
             lstm_cfg.output_seq_len = 27;
             lstm_cfg.target_frame_idx = 25; // 取第23帧
@@ -252,7 +252,7 @@ namespace model
             }
             else
             {
-                LOGE("Failed to initialize LSTM Engine.");
+                LOGE("Failed to initialize LSTM Engine.");songrtui
                 m_lstm_ready = false;
             }
         }
@@ -720,7 +720,8 @@ namespace model
                 // m_result[4] = kf_result.y;
                 // m_result[5] = kf_result.z;
 
-                double angle = -0.18;
+                // double angle = -0.18;
+                double angle = 0;
                 cv::Mat vec = (cv::Mat_<float>(3, 1) << kf_result.x, kf_result.y, kf_result.z);
                 double rad = deg2rad(angle); // 转换为弧度
                 double cos_theta = cos(rad);
