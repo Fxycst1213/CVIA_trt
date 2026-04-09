@@ -719,8 +719,8 @@ namespace model
                 // m_result[3] = kf_result.x;
                 // m_result[4] = kf_result.y;
                 // m_result[5] = kf_result.z;
-                //-0.13
-                double angle = -0.13;
+                //-0.18
+                double angle = 0;
                 cv::Mat vec = (cv::Mat_<float>(3, 1) << kf_result.x, kf_result.y, kf_result.z);
                 double rad = deg2rad(angle); // 转换为弧度
                 double cos_theta = cos(rad);
