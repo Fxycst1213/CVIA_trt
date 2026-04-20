@@ -189,10 +189,12 @@ namespace model
         if (m_params->dev == CPU)
         {
             postprocess_cpu(resultframe.timestamp);
+            
         }
         else
         {
             postprocess_gpu(resultframe.timestamp);
+            std::cout << "运行到这里啦5" << std::endl;
         }
     }
 

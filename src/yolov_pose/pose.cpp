@@ -217,7 +217,7 @@ namespace model
             combined_inv = combined.inv();
 
             LSTMPredictor::Config lstm_cfg;
-            lstm_cfg.onnx_path = "models/onnx/model_multi_123.onnx"; // 【注意】这里填你LSTM模型的路径
+            lstm_cfg.onnx_path = "models/onnx/model_multi_0128.onnx"; // 【注意】这里填你LSTM模型的路径
             lstm_cfg.input_seq_len = 58;                             // 61
             lstm_cfg.output_seq_len = 25;                            // 27
             lstm_cfg.target_frame_idx = 23;                          // 取第24帧
@@ -299,8 +299,8 @@ namespace model
                 pose_box.keypoints = std::move(keypoints);
                 m_bboxes.emplace_back(std::move(pose_box));
             }
-            LOGD("the count of decoded bbox is %d", m_bboxes.size());
 
+            LOGD("the count of decoded bbox is %d", m_bboxes.size());
             vector<bbox> final_bboxes;
             final_bboxes.reserve(m_bboxes.size());
             std::sort(m_bboxes.begin(), m_bboxes.end(),
@@ -338,6 +338,7 @@ namespace model
             // run_lstm_predictin();
 
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
+
             m_timer->show();
             return true;
         }
