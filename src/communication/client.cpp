@@ -70,16 +70,38 @@ bool client::pack_and_send(const Resultframe &frame)
 
     if (_socket_mode == 0)
     {
+        static const cv::Size kSendSize(1280, 720);
         std::vector<uchar> encoded_img;
+        cv::Mat send_img;
         uint32_t img_len = 0;
+
+        float scale_x = 1.0f;
+        float scale_y = 1.0f;
+        
         auto start = std::chrono::high_resolution_clock::now();
-        if (!frame.rgb.empty() && frame.rgb.isContinuous())
+        if (!frame.rgb.empty())
+        {
+            if (frame.rgb.cols != kSendSize.width || frame.rgb.rows != kSendSize.height)
+            {
+                cv::resize(frame.rgb, send_img, kSendSize, 0, 0, cv::INTER_AREA);
+            }
+            else
+            {
+                send_img = frame.rgb;
+            }
+
+            scale_x = static_cast<float>(send_img.cols) / static_cast<float>(frame.rgb.cols);
+            scale_y = static_cast<float>(send_img.rows) / static_cast<float>(frame.rgb.rows);
+        }
+
+        
+        if (!send_img.empty() && send_img.isContinuous())
         {
             std::vector<int> params;
             params.push_back(cv::IMWRITE_JPEG_QUALITY);
-            params.push_back(50); // 质量设为 50
+            params.push_back(30); // 质量设为 50
 
-            cv::imencode(".jpg", frame.rgb, encoded_img, params);
+            cv::imencode(".jpg", send_img, encoded_img, params);
             img_len = static_cast<uint32_t>(encoded_img.size());
         }
         auto end = std::chrono::high_resolution_clock::now();
@@ -103,20 +125,20 @@ bool client::pack_and_send(const Resultframe &frame)
         memset(ptr_curr, 0, _kpt_size_bytes);
         if (!frame.bboxes.empty())
         {
-            float *tmp = new float[_keyPoint_box];
+            float *tmp = new float[_keyPoint_box]();
             int size = (frame.bboxes[0].keypoints).size();
             for (int j = 0; j < size; j++)
             {
                 auto &keypoint = frame.bboxes[0].keypoints[j];
-                tmp[3 * j] = keypoint.x;
-                tmp[3 * j + 1] = keypoint.y;
+                tmp[3 * j] = keypoint.x * scale_x;
+                tmp[3 * j + 1] = keypoint.y * scale_y;
                 tmp[3 * j + 2] = keypoint.conf;
             }
 
-            tmp[_keyPoint_box - 5] = frame.bboxes[0].x0;
-            tmp[_keyPoint_box - 4] = frame.bboxes[0].y0;
-            tmp[_keyPoint_box - 3] = frame.bboxes[0].x1;
-            tmp[_keyPoint_box - 2] = frame.bboxes[0].y1;
+            tmp[_keyPoint_box - 5] = frame.bboxes[0].x0 * scale_x;
+            tmp[_keyPoint_box - 4] = frame.bboxes[0].y0 * scale_y;
+            tmp[_keyPoint_box - 3] = frame.bboxes[0].x1 * scale_x;
+            tmp[_keyPoint_box - 2] = frame.bboxes[0].y1 * scale_y;
             tmp[_keyPoint_box - 1] = frame.bboxes[0].confidence;
 
             // copy data
