@@ -34,6 +34,8 @@ public:
     ~prj_v8detector();
     void run();
     void camera();
+    void detect_camera_loop();
+    void photo_camera_loop();
     void camera_foldimages();
     void tcp_loop();
     void rs485_loop(); // [新增] RS485 线程函数
@@ -45,8 +47,12 @@ private:
     std::unique_ptr<IRCamera> _ir_camera_photo;
     std::shared_ptr<timer::Timer> _timer;
     std::shared_ptr<timer::Timer> _timer_tcp;
+    std::shared_ptr<timer::Timer> _timer_detect_grab;
+    std::shared_ptr<timer::Timer> _timer_photo_grab;
 
     std::function<void()> _func_camera;
+    std::function<void()> _func_detect_camera;
+    std::function<void()> _func_photo_camera;
     std::function<void()> _func_camera_foldimages;
     std::function<void()> _func_pack_and_send;
 
@@ -55,6 +61,17 @@ private:
     // ZEDframe *_writeframe = nullptr;
     IRFrame *_detect_writeframe = nullptr;
     IRFrame *_photo_writeframe = nullptr;
+
+    cv::Mat _latest_detect_rgb;
+    cv::Mat _latest_photo_rgb;
+    uint64_t _latest_detect_timestamp = 0;
+    uint64_t _latest_photo_timestamp = 0;
+    uint64_t _latest_detect_sequence = 0;
+    bool _has_detect_frame = false;
+    bool _has_photo_frame = false;
+    std::mutex _detect_frame_mtx;
+    std::mutex _photo_frame_mtx;
+    std::condition_variable _detect_frame_cv;
 
     queue<Resultframe> _resultframe_queue;
     std::mutex _queue_mtx;             // 保护队列的互斥锁
