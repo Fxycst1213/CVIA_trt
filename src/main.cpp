@@ -25,13 +25,32 @@ int main(int argc, char const *argv[])
 
     p_params.H = 1080;
     p_params.W = 1920;
+    p_params.detect_camera.name = "Detect IR Camera";
     p_params.detect_camera.cameraID = 0;
     p_params.detect_camera.cameraframe = 30;
     p_params.detect_camera.resolution = "HD1080";
+    p_params.detect_camera.auto_exposure_mode = 1.0;
+    p_params.detect_camera.apply_exposure = true;
+    p_params.detect_camera.exposure = 78.0;
+    p_params.detect_camera.auto_white_balance = false;
+    p_params.detect_camera.apply_white_balance_temperature = true;
+    p_params.detect_camera.white_balance_temperature = 4600.0;
+    p_params.detect_camera.brightness = -64.0;
+    p_params.detect_camera.contrast = 100.0;
+    p_params.detect_camera.sharpness = 100.0;
 
+    p_params.photo_camera.name = "Photo IR Camera";
     p_params.photo_camera.cameraID = 2;
     p_params.photo_camera.cameraframe = 30;
     p_params.photo_camera.resolution = "HD1080";
+    // 这一路用于看清周遭环境，默认打开自动曝光和自动白平衡
+    p_params.photo_camera.auto_exposure_mode = 3.0;
+    p_params.photo_camera.apply_exposure = false;
+    p_params.photo_camera.auto_white_balance = true;
+    p_params.photo_camera.apply_white_balance_temperature = false;
+    p_params.photo_camera.brightness = 0.0;
+    p_params.photo_camera.contrast = 50.0;
+    p_params.photo_camera.sharpness = 50.0;
     p_params.ip = "192.168.31.56";
     p_params.port = 1234;
     p_params.socket_mode = 2;

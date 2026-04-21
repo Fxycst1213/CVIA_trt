@@ -4,6 +4,7 @@
 #include <opencv2/opencv.hpp>
 #include <string>
 #include <memory>
+#include "../params/params.hpp"
 // 引入你工程原有的工具类
 #include "logger.hpp"
 #include "time.hpp"
@@ -21,8 +22,7 @@ public:
     IRCamera() = default;
     ~IRCamera();
 
-    // 保持与 ZEDX 相同的接口传参方式，enable_fill_mode 这里保留作为兼容参数
-    void init(int ID, std::string resolution, int frame = 60);
+    void init(const camera_params &params);
     void grab_frame(IRFrame *frame);
 
     cv::VideoCapture _cap;

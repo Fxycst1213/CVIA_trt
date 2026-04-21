@@ -11,15 +11,9 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     // _zed = ZEDX::GetInstance();
     // _zed->init(p_params.cameraID, p_params.resolution);
     _ir_camera_detect = std::make_unique<IRCamera>();
-    _ir_camera_detect->init(
-        p_params.detect_camera.cameraID,
-        p_params.detect_camera.resolution,
-        p_params.detect_camera.cameraframe);
+    _ir_camera_detect->init(p_params.detect_camera);
     _ir_camera_photo = std::make_unique<IRCamera>();
-    _ir_camera_photo->init(
-        p_params.photo_camera.cameraID,
-        p_params.photo_camera.resolution,
-        p_params.photo_camera.cameraframe);
+    _ir_camera_photo->init(p_params.photo_camera);
 
     preprocess::init_process(p_params.H, p_params.W);
 

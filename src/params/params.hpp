@@ -19,9 +19,19 @@ struct Resultframe
 
 struct camera_params
 {
+    std::string name = "IR Camera";
     int cameraID = 0;
     int cameraframe = 30;
     std::string resolution = "HD1080";
+    double auto_exposure_mode = 1.0;
+    bool apply_exposure = true;
+    double exposure = 78.0;
+    bool auto_white_balance = false;
+    bool apply_white_balance_temperature = true;
+    double white_balance_temperature = 4600.0;
+    double brightness = -64.0;
+    double contrast = 100.0;
+    double sharpness = 100.0;
 };
 
 struct tcp_params

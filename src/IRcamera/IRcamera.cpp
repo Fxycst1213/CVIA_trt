@@ -2,13 +2,13 @@
 #include <chrono>
 #include "IRcamera.h"
 
-void IRCamera::init(int ID, std::string resolution, int frame)
+void IRCamera::init(const camera_params &params)
 {
     // 1. 强制使用 V4L2 后端打开相机
-    _cap.open(ID, cv::CAP_V4L2);
+    _cap.open(params.cameraID, cv::CAP_V4L2);
     if (!_cap.isOpened())
     {
-        LOGE("IR Camera INIT ERROR: Cannot open camera ID %d", ID);
+        LOGE("%s INIT ERROR: Cannot open camera ID %d", params.name.c_str(), params.cameraID);
         return;
     }
 
@@ -17,7 +17,7 @@ void IRCamera::init(int ID, std::string resolution, int frame)
     _cap.set(cv::CAP_PROP_FOURCC, fourcc);
 
     // 3. 解析并设置分辨率
-    if (resolution == "HD1080")
+    if (params.resolution == "HD1080")
     {
         _width = 1920;
         _height = 1080;
@@ -32,31 +32,44 @@ void IRCamera::init(int ID, std::string resolution, int frame)
     // v4l2-ctl -d /dev/video0 --list-ctrls  查看相机参数
     _cap.set(cv::CAP_PROP_FRAME_WIDTH, _width);
     _cap.set(cv::CAP_PROP_FRAME_HEIGHT, _height);
-    _cap.set(cv::CAP_PROP_FPS, frame);
+    _cap.set(cv::CAP_PROP_FPS, params.cameraframe);
 
-    // 4. 采用我们测试成功的自动曝光模式 (V4L2 中 3 代表自动)
-    _cap.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);
-    _cap.set(cv::CAP_PROP_EXPOSURE, 78);
+    // 4. 每路相机独立应用曝光/白平衡/成像参数
+    _cap.set(cv::CAP_PROP_AUTO_EXPOSURE, params.auto_exposure_mode);
+    if (params.apply_exposure)
+    {
+        _cap.set(cv::CAP_PROP_EXPOSURE, params.exposure);
+    }
 
-    _cap.set(cv::CAP_PROP_AUTO_WB, 0);
-    _cap.set(cv::CAP_PROP_WB_TEMPERATURE, 4600.0); // 锁定色温为 4600
+    _cap.set(cv::CAP_PROP_AUTO_WB, params.auto_white_balance ? 1.0 : 0.0);
+    if (params.apply_white_balance_temperature)
+    {
+        _cap.set(cv::CAP_PROP_WB_TEMPERATURE, params.white_balance_temperature);
+    }
 
-    _cap.set(cv::CAP_PROP_BRIGHTNESS, -64.0); // 亮度极暗 [-64, 64]
-    _cap.set(cv::CAP_PROP_CONTRAST, 100.0);   // 对比度拉满 [0, 100]
-    _cap.set(cv::CAP_PROP_SHARPNESS, 100.0);  // 清晰度拉满 [0, 100]
+    _cap.set(cv::CAP_PROP_BRIGHTNESS, params.brightness);
+    _cap.set(cv::CAP_PROP_CONTRAST, params.contrast);
+    _cap.set(cv::CAP_PROP_SHARPNESS, params.sharpness);
 
-    std::cout << "--- 硬件级参数锁定 ---" << std::endl;
+    std::cout << "--- " << params.name << " 硬件级参数锁定 ---" << std::endl;
     std::cout << "曝光模式: " << _cap.get(cv::CAP_PROP_AUTO_EXPOSURE) << " (期望: 1)" << std::endl;
-    std::cout << "曝光值:   " << _cap.get(cv::CAP_PROP_EXPOSURE) << " (期望: -6)" << std::endl;
-    std::cout << "亮度:     " << _cap.get(cv::CAP_PROP_BRIGHTNESS) << " (期望: -64)" << std::endl;
-    std::cout << "对比度:   " << _cap.get(cv::CAP_PROP_CONTRAST) << " (期望: 100)" << std::endl;
-    std::cout << "清晰度:   " << _cap.get(cv::CAP_PROP_SHARPNESS) << " (期望: 100)" << std::endl;
-    std::cout << "自动白平衡: " << _cap.get(cv::CAP_PROP_AUTO_WB) << " (期望: 0)" << std::endl;
+    if (params.apply_exposure)
+    {
+        std::cout << "曝光值:   " << _cap.get(cv::CAP_PROP_EXPOSURE) << " (期望: " << params.exposure << ")" << std::endl;
+    }
+    std::cout << "亮度:     " << _cap.get(cv::CAP_PROP_BRIGHTNESS) << " (期望: " << params.brightness << ")" << std::endl;
+    std::cout << "对比度:   " << _cap.get(cv::CAP_PROP_CONTRAST) << " (期望: " << params.contrast << ")" << std::endl;
+    std::cout << "清晰度:   " << _cap.get(cv::CAP_PROP_SHARPNESS) << " (期望: " << params.sharpness << ")" << std::endl;
+    std::cout << "自动白平衡: " << _cap.get(cv::CAP_PROP_AUTO_WB) << " (期望: " << (params.auto_white_balance ? 1 : 0) << ")" << std::endl;
+    if (params.apply_white_balance_temperature)
+    {
+        std::cout << "色温:     " << _cap.get(cv::CAP_PROP_WB_TEMPERATURE) << " (期望: " << params.white_balance_temperature << ")" << std::endl;
+    }
 
     // 5. 初始化内参矩阵和计时器
     _timer = std::make_shared<timer::Timer>(logger::Level::VERB);
 
-    std::cout << "--- IR Camera 初始化成功 ---" << std::endl;
+    std::cout << "--- " << params.name << " 初始化成功 ---" << std::endl;
     std::cout << "生效分辨率: " << _cap.get(cv::CAP_PROP_FRAME_WIDTH) << "x" << _cap.get(cv::CAP_PROP_FRAME_HEIGHT) << std::endl;
     std::cout << "生效 FPS: " << _cap.get(cv::CAP_PROP_FPS) << std::endl;
 }
