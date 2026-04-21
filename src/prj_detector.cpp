@@ -8,14 +8,24 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
 
     // _zed = ZEDX::GetInstance();
     // _zed->init(p_params.cameraID, p_params.resolution);
-    _ir_camera = IRCamera::GetInstance();
-    _ir_camera->init(p_params.cameraID, p_params.resolution, p_params.cameraframe);
+    _ir_camera_detect = std::make_unique<IRCamera>();
+    _ir_camera_detect->init(
+        p_params.detect_camera.cameraID,
+        p_params.detect_camera.resolution,
+        p_params.detect_camera.cameraframe);
+    _ir_camera_photo = std::make_unique<IRCamera>();
+    _ir_camera_photo->init(
+        p_params.photo_camera.cameraID,
+        p_params.photo_camera.resolution,
+        p_params.photo_camera.cameraframe);
 
     preprocess::init_process(p_params.H, p_params.W);
 
     // _writeframe = new ZEDframe;
-    _writeframe = new IRFrame;
-    _writeframe->rgb_ptr = new cv::Mat(p_params.H, p_params.W, CV_8UC3);
+    _detect_writeframe = new IRFrame;
+    _detect_writeframe->rgb_ptr = new cv::Mat(p_params.H, p_params.W, CV_8UC3, cv::Scalar(0, 0, 0));
+    _photo_writeframe = new IRFrame;
+    _photo_writeframe->rgb_ptr = new cv::Mat(p_params.H, p_params.W, CV_8UC3, cv::Scalar(0, 0, 0));
     _func_camera = std::bind(&prj_v8detector::camera, this);
     _func_camera_foldimages = std::bind(&prj_v8detector::camera_foldimages, this);
     _func_pack_and_send = std::bind(&prj_v8detector::tcp_loop, this);
@@ -72,18 +82,17 @@ void prj_v8detector::camera()
         _timer->init();
         _timer->start_cpu();
 
-        // 1. 获取 ZED 图像
-        // _zed->grab_frame(_writeframe);
-        _ir_camera->grab_frame(_writeframe);
-        // ++cam_index;
+        // 1. 同步获取双路红外图像
+        _ir_camera_photo->grab_frame(_photo_writeframe);
+        _ir_camera_detect->grab_frame(_detect_writeframe);
 
-        // _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
-        _timer->stop_cpu<timer::Timer::ms>("IR Camera Grab frame");
+        _timer->stop_cpu<timer::Timer::ms>("Dual IR Camera Grab frame");
 
-        // 【关键修复1】：使用 clone() 进行深拷贝
-        // 这样 _resultframe 拥有一块独立的内存，不会被下一帧 grab_frame 覆盖
-        _resultframe.rgb = _writeframe->rgb_ptr->clone(); 
-        _resultframe.timestamp = _writeframe->timestamp;
+        // 检测相机图像用于推理，辅助相机图像仅用于传输显示
+        _resultframe.rgb = _detect_writeframe->rgb_ptr->clone();
+        _resultframe.rgb_secondary = _photo_writeframe->rgb_ptr->clone();
+        _resultframe.timestamp = _detect_writeframe->timestamp;
+        _resultframe.secondary_timestamp = _photo_writeframe->timestamp;
 
         _timer->start_cpu();
         
@@ -141,22 +150,30 @@ void prj_v8detector::camera_foldimages()
     while (1)
     {
         auto now = std::chrono::system_clock::now();
-        auto mstart = std::chrono::high_resolution_clock::now();
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
         // usleep(200000);
-        *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
-        _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        *(_detect_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
+        if (_detect_writeframe->rgb_ptr->empty())
+        {
+            break;
+        }
+        _photo_writeframe->rgb_ptr->release();
+        _photo_writeframe->rgb_ptr->create(_detect_writeframe->rgb_ptr->rows, _detect_writeframe->rgb_ptr->cols, _detect_writeframe->rgb_ptr->type());
+        _detect_writeframe->rgb_ptr->copyTo(*(_photo_writeframe->rgb_ptr));
+        _detect_writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        _photo_writeframe->timestamp = _detect_writeframe->timestamp;
         current_idx++;
         if (current_idx >= filenames.size())
         {
             break;
         }
-        // _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
-        _timer->stop_cpu<timer::Timer::ms>("IR Camera Grab frame");
-        _resultframe.rgb = *(_writeframe->rgb_ptr);
-        _resultframe.timestamp = _writeframe->timestamp;
+        _timer->stop_cpu<timer::Timer::ms>("Dual IR Camera Grab frame");
+        _resultframe.rgb = _detect_writeframe->rgb_ptr->clone();
+        _resultframe.rgb_secondary = _photo_writeframe->rgb_ptr->clone();
+        _resultframe.timestamp = _detect_writeframe->timestamp;
+        _resultframe.secondary_timestamp = _photo_writeframe->timestamp;
         _timer->start_cpu();
         _worker->inference(_resultframe);
         _timer->stop_cpu<timer::Timer::ms>("inference");
@@ -248,7 +265,15 @@ prj_v8detector::~prj_v8detector()
     _is_running = false;
     _queue_cv.notify_all();
     _rs485_cv.notify_all();
-    delete _writeframe->rgb_ptr;
-    delete _writeframe;
+    if (_detect_writeframe)
+    {
+        delete _detect_writeframe->rgb_ptr;
+        delete _detect_writeframe;
+    }
+    if (_photo_writeframe)
+    {
+        delete _photo_writeframe->rgb_ptr;
+        delete _photo_writeframe;
+    }
     preprocess::destroy_process();
 }

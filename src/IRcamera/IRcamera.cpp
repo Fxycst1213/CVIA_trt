@@ -2,12 +2,6 @@
 #include <chrono>
 #include "IRcamera.h"
 
-IRCamera *IRCamera::GetInstance()
-{
-    static IRCamera instance;
-    return &instance;
-}
-
 void IRCamera::init(int ID, std::string resolution, int frame)
 {
     // 1. 强制使用 V4L2 后端打开相机

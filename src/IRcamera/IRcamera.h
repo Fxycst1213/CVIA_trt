@@ -18,15 +18,12 @@ struct IRFrame
 class IRCamera
 {
 public:
+    IRCamera() = default;
+    ~IRCamera();
+
     // 保持与 ZEDX 相同的接口传参方式，enable_fill_mode 这里保留作为兼容参数
     void init(int ID, std::string resolution, int frame = 60);
     void grab_frame(IRFrame *frame);
-
-    static IRCamera *GetInstance();
-
-private:
-    IRCamera() {};
-    ~IRCamera();
 
     cv::VideoCapture _cap;
     int _width = 1920;

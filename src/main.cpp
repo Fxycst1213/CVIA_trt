@@ -25,12 +25,16 @@ int main(int argc, char const *argv[])
 
     p_params.H = 1080;
     p_params.W = 1920;
-    p_params.resolution = "HD1080";
-    p_params.cameraID = 0;
-    p_params.cameraframe = 60;
+    p_params.detect_camera.cameraID = 0;
+    p_params.detect_camera.cameraframe = 30;
+    p_params.detect_camera.resolution = "HD1080";
+
+    p_params.photo_camera.cameraID = 2;
+    p_params.photo_camera.cameraframe = 30;
+    p_params.photo_camera.resolution = "HD1080";
     p_params.ip = "192.168.31.56";
     p_params.port = 1234;
-    p_params.socket_mode = 0;
+    p_params.socket_mode = 2;
     p_params.rs485_port = "/dev/ttyUSB0";
     p_params.rs485_baudrate = B57600;
 

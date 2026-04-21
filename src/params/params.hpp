@@ -9,10 +9,19 @@
 struct Resultframe
 {
     cv::Mat rgb;
+    cv::Mat rgb_secondary;
     std::vector<model::pose::bbox> bboxes;
     std::vector<float> pose_result;
     std::vector<float> rs485_result;
     uint64_t timestamp;
+    uint64_t secondary_timestamp = 0;
+};
+
+struct camera_params
+{
+    int cameraID = 0;
+    int cameraframe = 30;
+    std::string resolution = "HD1080";
 };
 
 struct tcp_params
@@ -24,6 +33,7 @@ struct tcp_params
     static constexpr int KEYPOINTS_BUFSIZE = KeyPoint_box * 4;
     static constexpr int POSE_BUFSIZE = 8 * 4;
     static constexpr int POSE_DATE_NUM = 7;
+    static constexpr int IMAGE_COUNT_DUAL = 2;
 
     // 这两个是变量，不加 const
     int IMG_SIZE = 1920 * 1080 * 3;
@@ -36,9 +46,8 @@ struct prj_params
     // 2. 给 int 类型赋默认值，防止随机数
     int H = 0;
     int W = 0;
-    std::string resolution = "HD1080"; // 3. 去掉 using namespace std，改为 std::string
-    int cameraID = 0;
-    int cameraframe = 30;
+    camera_params detect_camera;
+    camera_params photo_camera;
     std::string ip; // 默认为空字符串
     int port = 0;   // 赋默认值
     int socket_mode = 0;
