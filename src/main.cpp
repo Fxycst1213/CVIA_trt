@@ -28,7 +28,7 @@ int main(int argc, char const *argv[])
     p_params.resolution = "HD1080";
     p_params.cameraID = 0;
     p_params.cameraframe = 30;
-    p_params.ip = "192.168.31.100";
+    p_params.ip = "192.168.31.56";
     p_params.port = 1234;
     p_params.socket_mode = 0;
     p_params.rs485_port = "/dev/ttyUSB0";

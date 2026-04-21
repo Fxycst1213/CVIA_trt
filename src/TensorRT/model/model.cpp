@@ -194,7 +194,6 @@ namespace model
         else
         {
             postprocess_gpu(resultframe.timestamp);
-            std::cout << "运行到这里啦5" << std::endl;
         }
     }
 

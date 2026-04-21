@@ -329,10 +329,10 @@ namespace model
             m_bboxes = final_bboxes;
 
             m_frame_counter++;
-            // if (!m_bboxes.empty())
-            // {
-            //     refine_keypoints(m_bboxes[0].keypoints);
-            // }
+            if (!m_bboxes.empty())
+            {
+                refine_keypoints(m_bboxes[0].keypoints);
+            }
             run_pnp_multi_stage();
             // run_filter_and_estimation(timestamp, m_frame_counter);
             // run_lstm_predictin();
