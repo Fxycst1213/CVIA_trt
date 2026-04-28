@@ -252,7 +252,7 @@ namespace model
             }
             else
             {
-                LOGE("Failed to initialize LSTM Engine.");songrtui
+                LOGE("Failed to initialize LSTM Engine.");
                 m_lstm_ready = false;
             }
         }
