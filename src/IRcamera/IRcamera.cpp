@@ -78,15 +78,27 @@ void IRCamera::grab_frame(IRFrame *frame)
     {
         // 1. 获取最精确的时间戳
         double driver_timestamp_ms = _cap.get(cv::CAP_PROP_POS_MSEC);
+        static uint64_t debug_frame_count = 0;
         if (driver_timestamp_ms > 0)
         {
             frame->timestamp = static_cast<uint64_t>(driver_timestamp_ms);
+            if (debug_frame_count < 10 || debug_frame_count % 100 == 0)
+            {
+                LOG("IR timestamp source: CAP_PROP_POS_MSEC, driver_ms=%.3f, saved=%lu",
+                    driver_timestamp_ms, frame->timestamp);
+            }
         }
         else
         {
             auto now = std::chrono::system_clock::now();
             frame->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+            if (debug_frame_count < 10 || debug_frame_count % 100 == 0)
+            {
+                LOG("IR timestamp source: Orin system_clock, driver_ms=%.3f, saved=%lu",
+                    driver_timestamp_ms, frame->timestamp);
+            }
         }
+        debug_frame_count++;
         tmp.copyTo(*(frame->rgb_ptr));
     }
     else

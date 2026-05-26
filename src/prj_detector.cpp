@@ -197,19 +197,19 @@ void prj_v8detector::tcp_loop()
 void prj_v8detector::run()
 {
     _is_running = true;
-    // auto t1 = std::thread(_func_camera);
-    auto t2 = std::thread(_func_camera_foldimages);
+    auto t1 = std::thread(_func_camera);
+    // auto t2 = std::thread(_func_camera_foldimages);
     auto t_rs485 = std::thread(_func_rs485_send);
     auto t3 = std::thread(_func_pack_and_send);
-    // if (t1.joinable())
-    // {
-    //     t1.join();
-    // }
-
-    if (t2.joinable())
+    if (t1.joinable())
     {
-        t2.join();
+        t1.join();
     }
+
+    // if (t2.joinable())
+    // {
+    //     t2.join();
+    // }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
     _rs485_cv.notify_all(); // 唤醒 RS485
