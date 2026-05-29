@@ -183,12 +183,18 @@ namespace model
             m_result.resize(6, 0.0f);
             uart_result.resize(3, 0.0f);
             //  一飞院
-            _K = (cv::Mat_<double>(3, 3) << 1067.695, 0.0, 972.357,
-                  0.0, 1068.264, 504.225,
+            // _K = (cv::Mat_<double>(3, 3) << 1067.695, 0.0, 972.357,
+            //       0.0, 1068.264, 504.225,
+            //       0.0, 0.0, 1.0);
+
+            // _diff = (cv::Mat_<float>(1, 5) << -0.0597, 0.1675, 0.0001342, 0.0027, -0.1367);
+
+            //60Hz的相机
+            _K = (cv::Mat_<double>(3, 3) << 1064.8, 0.0, 952.7,
+                  0.0, 1077.3, 624.1,
                   0.0, 0.0, 1.0);
 
-            _diff = (cv::Mat_<float>(1, 5) << -0.0597, 0.1675, 0.0001342, 0.0027, -0.1367);
-
+            _diff = (cv::Mat_<float>(1, 5) << -0.0991, 0.3451, 0.0018, -0.0018, -0.4370);
             // 0128
             _p3d = (cv::Mat_<double>(10, 3) << -430.6156, -7.47963, -14.7096,
                     -337.591, -3.23044, -23.0676,
@@ -617,6 +623,7 @@ namespace model
                 m_result[5] = result.at<float>(2, 0);
                 LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
                     frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
+                // cout << m_result[3] << " " << m_result[4] << " " << m_result[5] <<endl;
             }
         }
         void Pose::run_lstm_predictin()
