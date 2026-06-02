@@ -19,45 +19,61 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _func_camera = std::bind(&prj_v8detector::camera, this);
     _func_camera_foldimages = std::bind(&prj_v8detector::camera_foldimages, this);
     _func_pack_and_send = std::bind(&prj_v8detector::tcp_loop, this);
-    _func_rs485_send = std::bind(&prj_v8detector::rs485_loop, this); // [新增]
+    _func_rs442_send = std::bind(&prj_v8detector::rs442_loop, this);
     _client.init(p_params);
-    _rs485.init(p_params);
+    _rs442.init(p_params);
     _is_running = true;
 }
 
-// [新增] RS485 独立线程循环
-void prj_v8detector::rs485_loop()
+void prj_v8detector::rs442_loop()
 {
     while (true)
     {
         std::vector<float> data_to_send;
         {
-            std::unique_lock<std::mutex> lock(_rs485_mtx);
+            std::unique_lock<std::mutex> lock(_rs442_mtx);
             // 等待数据或停止信号
-            _rs485_cv.wait(lock, [this] { 
-                return !_rs485_queue.empty() || !_is_running; 
+            _rs442_cv.wait(lock, [this] { 
+                return !_rs442_queue.empty() || !_is_running; 
             });
 
-            if (!_is_running && _rs485_queue.empty()) {
+            if (!_is_running && _rs442_queue.empty()) {
                 break;
             }
 
-            if (_rs485_queue.empty()) {
+            if (_rs442_queue.empty()) {
                 continue;
             }
 
-            data_to_send = _rs485_queue.front();
-            _rs485_queue.pop();
+            data_to_send = _rs442_queue.front();
+            _rs442_queue.pop();
         }
 
         // 发送数据 (移除了之前的 Timer 计时，如果需要可以加回)
-        if (data_to_send.size() >= 3)
+        if (data_to_send.size() >= 9)
         {
-            float float_temp_pose[3];
-            float_temp_pose[0] = data_to_send[0];
-            float_temp_pose[1] = data_to_send[1];
-            float_temp_pose[2] = data_to_send[2];
-            _rs485.sendFloatArray(float_temp_pose);
+            float float_temp_pose[9];
+            for (int i = 0; i < 9; ++i)
+            {
+                float_temp_pose[i] = data_to_send[i];
+            }
+
+            // RS442 fixed test frame. Uncomment this block to verify byte order,
+            // checksum and payload parsing with the receiver.
+            // Expected frame:
+            // EB 90 12 03 E8 FC 18 00 7B 01 C8 FE 38 03 15 00 7B FF 85 11 D7 8A
+            //
+            // float_temp_pose[0] = 1000.0f;  // absolute X, mm
+            // float_temp_pose[1] = -1000.0f; // absolute Y, mm
+            // float_temp_pose[2] = 123.0f;   // absolute Z, mm
+            // float_temp_pose[3] = 456.0f;   // relative X, mm
+            // float_temp_pose[4] = -456.0f;  // relative Y, mm
+            // float_temp_pose[5] = 789.0f;   // relative Z, mm
+            // float_temp_pose[6] = 1.23f;    // attitude X, degree
+            // float_temp_pose[7] = -1.23f;   // attitude Y, degree
+            // float_temp_pose[8] = 45.67f;   // attitude Z, degree
+
+            _rs442.sendFloatArray(float_temp_pose);
         }
 
         usleep(150000);
@@ -84,15 +100,15 @@ void prj_v8detector::camera()
         
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
-        _resultframe.rs485_result = _worker->m_pose->uart_result;
+        _resultframe.rs442_result = _worker->m_pose->uart_result;
         {
-            std::lock_guard<std::mutex> lock(_rs485_mtx);
-            while (_rs485_queue.size() > 2) 
+            std::lock_guard<std::mutex> lock(_rs442_mtx);
+            while (_rs442_queue.size() > 2) 
             {
-                _rs485_queue.pop();
+                _rs442_queue.pop();
             }
-            _rs485_queue.push(_resultframe.rs485_result);
-            _rs485_cv.notify_one();
+            _rs442_queue.push(_resultframe.rs442_result);
+            _rs442_cv.notify_one();
         }
         _timer->start_cpu();
         {
@@ -143,17 +159,17 @@ void prj_v8detector::camera_foldimages()
 
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
-        _resultframe.rs485_result = _worker->m_pose->uart_result;
+        _resultframe.rs442_result = _worker->m_pose->uart_result;
         {
-            std::lock_guard<std::mutex> lock(_rs485_mtx);
+            std::lock_guard<std::mutex> lock(_rs442_mtx);
             // 同样应用漏桶策略
-            while (_rs485_queue.size() > 2) 
+            while (_rs442_queue.size() > 2) 
             {
-                _rs485_queue.pop();
+                _rs442_queue.pop();
             }
-            if (_resultframe.rs485_result.size() >= 3) {
-                 _rs485_queue.push(_resultframe.rs485_result);
-                 _rs485_cv.notify_one();
+            if (_resultframe.rs442_result.size() >= 9) {
+                 _rs442_queue.push(_resultframe.rs442_result);
+                 _rs442_cv.notify_one();
             }
         }
 
@@ -197,25 +213,25 @@ void prj_v8detector::tcp_loop()
 void prj_v8detector::run()
 {
     _is_running = true;
-    auto t1 = std::thread(_func_camera);
-    // auto t2 = std::thread(_func_camera_foldimages);
-    auto t_rs485 = std::thread(_func_rs485_send);
+    // auto t1 = std::thread(_func_camera);
+    auto t2 = std::thread(_func_camera_foldimages);
+    auto t_rs442 = std::thread(_func_rs442_send);
     auto t3 = std::thread(_func_pack_and_send);
-    if (t1.joinable())
-    {
-        t1.join();
-    }
-
-    // if (t2.joinable())
+    // if (t1.joinable())
     // {
-    //     t2.join();
+    //     t1.join();
     // }
+
+    if (t2.joinable())
+    {
+        t2.join();
+    }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
-    _rs485_cv.notify_all(); // 唤醒 RS485
-    if (t_rs485.joinable())
+    _rs442_cv.notify_all();
+    if (t_rs442.joinable())
     {
-        t_rs485.join();
+        t_rs442.join();
     }
     if (t3.joinable())
     {
@@ -227,7 +243,7 @@ prj_v8detector::~prj_v8detector()
 {
     _is_running = false;
     _queue_cv.notify_all();
-    _rs485_cv.notify_all();
+    _rs442_cv.notify_all();
     delete _writeframe->rgb_ptr;
     delete _writeframe;
     preprocess::destroy_process();

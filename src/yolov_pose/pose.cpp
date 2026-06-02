@@ -18,6 +18,46 @@ double deg2rad(double deg)
 {
     return deg * CV_PI / 180.0;
 };
+
+static cv::Vec3f rotationVectorToEulerDeg(const cv::Mat &rvec)
+{
+    cv::Mat rotation_matrix;
+    cv::Rodrigues(rvec, rotation_matrix);
+
+    double r00 = rotation_matrix.at<double>(0, 0);
+    double r10 = rotation_matrix.at<double>(1, 0);
+    double r20 = rotation_matrix.at<double>(2, 0);
+    double r21 = rotation_matrix.at<double>(2, 1);
+    double r22 = rotation_matrix.at<double>(2, 2);
+    double r11 = rotation_matrix.at<double>(1, 1);
+    double r12 = rotation_matrix.at<double>(1, 2);
+
+    double sy = std::sqrt(r00 * r00 + r10 * r10);
+    bool singular = sy < 1e-6;
+
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+
+    if (!singular)
+    {
+        x = std::atan2(r21, r22);
+        y = std::atan2(-r20, sy);
+        z = std::atan2(r10, r00);
+    }
+    else
+    {
+        x = std::atan2(-r12, r11);
+        y = std::atan2(-r20, sy);
+        z = 0.0;
+    }
+
+    const double rad_to_deg = 180.0 / CV_PI;
+    return cv::Vec3f(static_cast<float>(x * rad_to_deg),
+                     static_cast<float>(y * rad_to_deg),
+                     static_cast<float>(z * rad_to_deg));
+}
+
 namespace model
 {
     namespace pose
@@ -181,7 +221,7 @@ namespace model
             m_use_red_mode = true;
 
             m_result.resize(6, 0.0f);
-            uart_result.resize(3, 0.0f);
+            uart_result.resize(9, 0.0f);
             //  一飞院
             // _K = (cv::Mat_<double>(3, 3) << 1067.695, 0.0, 972.357,
             //       0.0, 1068.264, 504.225,
@@ -575,6 +615,28 @@ namespace model
                 m_result[3] = static_cast<float>(T1.at<double>(0, 0));
                 m_result[4] = static_cast<float>(T1.at<double>(1, 0));
                 m_result[5] = static_cast<float>(T1.at<double>(2, 0));
+
+                cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[0],
+                                             m_result[1],
+                                             m_result[2],
+                                             1.0f);
+                cv::Mat transformed_point = combined * point_homogeneous;
+                cv::Vec3f euler_deg = rotationVectorToEulerDeg(R1);
+
+                uart_result[0] = transformed_point.at<float>(0, 0);
+                uart_result[1] = transformed_point.at<float>(1, 0);
+                uart_result[2] = transformed_point.at<float>(2, 0);
+                uart_result[3] = m_result[3];
+                uart_result[4] = m_result[4];
+                uart_result[5] = m_result[5];
+                uart_result[6] = euler_deg[0];
+                uart_result[7] = euler_deg[1];
+                uart_result[8] = euler_deg[2];
+
+                LOG("\t uart: abs[%.4f, %.4f, %.4f], rel[%.4f, %.4f, %.4f], att[%.4f, %.4f, %.4f]",
+                    uart_result[0], uart_result[1], uart_result[2],
+                    uart_result[3], uart_result[4], uart_result[5],
+                    uart_result[6], uart_result[7], uart_result[8]);
             }
         }
 
@@ -668,6 +730,16 @@ namespace model
             uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
             uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
             uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
+            uart_result[3] = m_result[3];
+            uart_result[4] = m_result[4];
+            uart_result[5] = m_result[5];
+            if (!R1.empty())
+            {
+                cv::Vec3f euler_deg = rotationVectorToEulerDeg(R1);
+                uart_result[6] = euler_deg[0];
+                uart_result[7] = euler_deg[1];
+                uart_result[8] = euler_deg[2];
+            }
 
             // uart_result[0] = m_result[3]; // 新的 X
             // uart_result[1] = m_result[4]; // 新的 Y

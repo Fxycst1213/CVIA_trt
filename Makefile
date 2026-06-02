@@ -369,6 +369,30 @@ src/algorithms/TrajectoryKF.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/algorithms/TrajectoryKF.cpp.s
 .PHONY : src/algorithms/TrajectoryKF.cpp.s
 
+src/communication/RS422.o: src/communication/RS422.cpp.o
+.PHONY : src/communication/RS422.o
+
+# target to build an object file
+src/communication/RS422.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/communication/RS422.cpp.o
+.PHONY : src/communication/RS422.cpp.o
+
+src/communication/RS422.i: src/communication/RS422.cpp.i
+.PHONY : src/communication/RS422.i
+
+# target to preprocess a source file
+src/communication/RS422.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/communication/RS422.cpp.i
+.PHONY : src/communication/RS422.cpp.i
+
+src/communication/RS422.s: src/communication/RS422.cpp.s
+.PHONY : src/communication/RS422.s
+
+# target to generate assembly for a file
+src/communication/RS422.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/communication/RS422.cpp.s
+.PHONY : src/communication/RS422.cpp.s
+
 src/communication/RS485.o: src/communication/RS485.cpp.o
 .PHONY : src/communication/RS485.o
 
@@ -720,6 +744,9 @@ help:
 	@echo "... src/algorithms/TrajectoryKF.o"
 	@echo "... src/algorithms/TrajectoryKF.i"
 	@echo "... src/algorithms/TrajectoryKF.s"
+	@echo "... src/communication/RS422.o"
+	@echo "... src/communication/RS422.i"
+	@echo "... src/communication/RS422.s"
 	@echo "... src/communication/RS485.o"
 	@echo "... src/communication/RS485.i"
 	@echo "... src/communication/RS485.s"

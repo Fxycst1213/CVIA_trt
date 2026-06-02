@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <string>
+#include <termios.h>
 #include <opencv2/opencv.hpp>
 #include "pose_params.hpp"
 
@@ -11,7 +12,7 @@ struct Resultframe
     cv::Mat rgb;
     std::vector<model::pose::bbox> bboxes;
     std::vector<float> pose_result;
-    std::vector<float> rs485_result;
+    std::vector<float> rs442_result;
     uint64_t timestamp;
 };
 
@@ -44,7 +45,10 @@ struct prj_params
     int socket_mode = 0;
     tcp_params t_params;
     std::string rs485_port = "/dev/ttyUSB0";
-    int rs485_baudrate = 57600;
+    int rs485_baudrate = B115200;
+
+    std::string rs442_port = "/dev/ttyUSB0";
+    int rs442_baudrate = B115200;
 };
 
 #endif // PARAMS_HPP
