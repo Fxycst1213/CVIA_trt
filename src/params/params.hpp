@@ -6,6 +6,13 @@
 #include <opencv2/opencv.hpp>
 #include "pose_params.hpp"
 
+enum class CommunicationMode
+{
+    NONE = 0,
+    RS485 = 1,
+    CAN = 2
+};
+
 struct Resultframe
 {
     cv::Mat rgb;
@@ -42,8 +49,12 @@ struct prj_params
     int port = 0;   // 赋默认值
     int socket_mode = 0;
     tcp_params t_params;
+    CommunicationMode communication_mode = CommunicationMode::CAN;
     std::string rs485_port = "/dev/ttyUSB0";
     int rs485_baudrate = 57600;
+    std::string can_interface = "can0";
+    int can_base_id = 0x120;
+    int communication_send_interval_us = 150000;
 };
 
 #endif // PARAMS_HPP

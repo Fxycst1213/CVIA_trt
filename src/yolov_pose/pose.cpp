@@ -240,7 +240,7 @@ namespace model
             combined_inv = combined.inv();
 
             LSTMPredictor::Config lstm_cfg;
-            lstm_cfg.onnx_path = "models/onnx/0409.onnx"; // 【注意】这里填你LSTM模型的路径
+            lstm_cfg.onnx_path = "models/onnx/0408.onnx"; // 【注意】这里填你LSTM模型的路径
             lstm_cfg.input_seq_len = 61;
             lstm_cfg.output_seq_len = 27;
             lstm_cfg.target_frame_idx = 25; // 取第23帧

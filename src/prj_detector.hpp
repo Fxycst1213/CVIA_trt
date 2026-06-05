@@ -15,6 +15,7 @@
 #include <chrono>
 #include <ratio>
 #include "communication/client.h"
+#include "communication/CAN.h"
 #include "communication/RS485.h"
 #include <chrono>
 #include "params/params.hpp"
@@ -34,7 +35,7 @@ public:
     void camera();
     void camera_foldimages();
     void tcp_loop();
-    void rs485_loop(); // [新增] RS485 线程函数
+    void communication_loop();
 
 private:
     shared_ptr<thread::Worker> _worker;
@@ -45,8 +46,7 @@ private:
     std::function<void()> _func_camera;
     std::function<void()> _func_camera_foldimages;
     std::function<void()> _func_pack_and_send;
-
-    std::function<void()> _func_rs485_send; // [新增] 线程绑定函数
+    std::function<void()> _func_communication_send;
 
     ZEDframe *_writeframe = nullptr;
 
@@ -54,14 +54,18 @@ private:
     std::mutex _queue_mtx;             // 保护队列的互斥锁
     std::condition_variable _queue_cv; // 用于通知"有新数据了"
 
-    // [新增] RS485 相关
-    queue<std::vector<float>> _rs485_queue; // 仅存储坐标数据，减少内存开销
-    std::mutex _rs485_mtx;                  // RS485 专用锁
-    std::condition_variable _rs485_cv;      // RS485 专用条件变量
+    queue<std::vector<float>> _communication_queue;
+    std::mutex _communication_mtx;
+    std::condition_variable _communication_cv;
+    CommunicationMode _communication_mode = CommunicationMode::NONE;
+    bool _can_enabled = false;
+    bool _rs485_enabled = false;
+    int _communication_send_interval_us = 150000;
 
     std::atomic<bool> _is_running;
 
     client _client;
+    CAN _can;
     RS485 _rs485;
     uint64_t m_time;
 };

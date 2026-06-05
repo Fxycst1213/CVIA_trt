@@ -1,0 +1,3 @@
+/home/wts/CVIA_trt/build/CMakeFiles/trt.dir
+/home/wts/CVIA_trt/build/CMakeFiles/edit_cache.dir
+/home/wts/CVIA_trt/build/CMakeFiles/rebuild_cache.dir
