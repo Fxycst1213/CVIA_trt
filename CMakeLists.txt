@@ -73,3 +73,14 @@ target_link_libraries(trt cudart curand)
 target_link_libraries(trt ${OpenCV_LIBS})
 target_link_libraries(trt ${ZED_LIBS})
 target_link_libraries(trt fftw3)
+
+install(
+    DIRECTORY config launch rviz scripts docs
+    DESTINATION share/${PROJECT_NAME}
+    USE_SOURCE_PERMISSIONS
+)
+
+install(
+    FILES README.md README_ZED_DISABLED.md
+    DESTINATION share/${PROJECT_NAME}
+)
