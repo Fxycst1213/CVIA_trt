@@ -6,8 +6,8 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _timer = make_shared<timer::Timer>(logger::Level::INFO);
     _timer_tcp = make_shared<timer::Timer>(logger::Level::INFO);
 
-    _zed = ZEDX::GetInstance();
-    _zed->init(p_params.cameraID, p_params.resolution);
+    // _zed = ZEDX::GetInstance();
+    // _zed->init(p_params.cameraID, p_params.resolution);
 
     preprocess::init_process(p_params.H, p_params.W);
 
