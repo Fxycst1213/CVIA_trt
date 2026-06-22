@@ -51,7 +51,7 @@ int main(int argc, char const *argv[])
     p_params.photo_camera.brightness = 0.0;
     p_params.photo_camera.contrast = 50.0;
     p_params.photo_camera.sharpness = 50.0;
-    p_params.ip = "192.168.31.56";
+    p_params.ip = "192.168.137.1";
     p_params.port = 1234;
     p_params.socket_mode = 2;
     p_params.rs485_port = "/dev/ttyUSB0";
