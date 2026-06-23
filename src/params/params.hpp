@@ -12,7 +12,7 @@ struct Resultframe
     cv::Mat rgb_secondary;
     std::vector<model::pose::bbox> bboxes;
     std::vector<float> pose_result;
-    std::vector<float> rs485_result;
+    std::vector<float> udp_result;
     uint64_t timestamp;
     uint64_t secondary_timestamp = 0;
 };
@@ -60,8 +60,12 @@ struct prj_params
     camera_params photo_camera;
     std::string ip; // 默认为空字符串
     int port = 0;   // 赋默认值
+    std::string udp_ip;
+    int udp_port = 0;
+    bool enable_udp = true;
     int socket_mode = 0;
     tcp_params t_params;
+    // 串口参数保留给 RS485 模块；当前主流程已停用串口发送，改用 UDP 上传结果。
     std::string rs485_port = "/dev/ttyUSB0";
     int rs485_baudrate = 57600;
 };

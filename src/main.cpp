@@ -27,7 +27,7 @@ int main(int argc, char const *argv[])
     p_params.W = 1920;
     p_params.detect_camera.name = "Detect IR Camera";
     p_params.detect_camera.cameraID = 0;
-    p_params.detect_camera.cameraframe = 30;
+    p_params.detect_camera.cameraframe = 60;
     p_params.detect_camera.resolution = "HD1080";
     p_params.detect_camera.auto_exposure_mode = 1.0;
     p_params.detect_camera.apply_exposure = true;
@@ -53,9 +53,12 @@ int main(int argc, char const *argv[])
     p_params.photo_camera.sharpness = 50.0;
     p_params.ip = "192.168.137.1";
     p_params.port = 1234;
+    p_params.udp_ip = p_params.ip;
+    p_params.udp_port = p_params.port;
+    p_params.enable_udp = true;
     p_params.socket_mode = 2;
-    p_params.rs485_port = "/dev/ttyUSB0";
-    p_params.rs485_baudrate = B57600;
+    // p_params.rs485_port = "/dev/ttyUSB0"; // 串口发送已停用，结果改用 UDP 上传。
+    // p_params.rs485_baudrate = B57600;
 
     // // 根据worker中的task类型进行推理
     prj_v8detector prj(onnxPath, level, params, p_params);

@@ -18,13 +18,16 @@ public:
 
     void init(const prj_params &p_params);
     bool pack_and_send(const Resultframe &frame);
+    bool send_udp_result(const std::vector<float> &result, uint64_t timestamp);
 
 private:
     // 内部使用的发送函数，设为 private 也可以，或者 public 也可以
     bool SendAll(char *buffer, int size);
 
     struct sockaddr_in _remoteAddress;
+    struct sockaddr_in _udpAddress;
     int _fd = -1;
+    int _udp_fd = -1;
     char *_buffer = nullptr;
 
     // --- 新增：记录每一部分的尺寸 ---
@@ -35,4 +38,5 @@ private:
     int _pose_size_bytes = 0;
     int _keyPoint_box = 0;
     std::string _resolution;
+    bool _udp_enabled = false;
 };

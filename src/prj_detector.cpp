@@ -27,9 +27,10 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _func_photo_camera = std::bind(&prj_v8detector::photo_camera_loop, this);
     _func_camera_foldimages = std::bind(&prj_v8detector::camera_foldimages, this);
     _func_pack_and_send = std::bind(&prj_v8detector::tcp_loop, this);
-    _func_rs485_send = std::bind(&prj_v8detector::rs485_loop, this); // [新增]
+    _func_udp_send = std::bind(&prj_v8detector::udp_loop, this);
+    // _func_rs485_send = std::bind(&prj_v8detector::rs485_loop, this); // 串口发送已停用。
     _client.init(p_params);
-    _rs485.init(p_params);
+    // _rs485.init(p_params); // 串口发送已停用。
     _is_running = true;
 }
 
@@ -83,42 +84,40 @@ void prj_v8detector::photo_camera_loop()
     }
 }
 
-// [新增] RS485 独立线程循环
-void prj_v8detector::rs485_loop()
+void prj_v8detector::udp_loop()
 {
     while (true)
     {
-        std::vector<float> data_to_send;
+        UdpPoseFrame data_to_send;
         {
-            std::unique_lock<std::mutex> lock(_rs485_mtx);
+            std::unique_lock<std::mutex> lock(_udp_mtx);
             // 等待数据或停止信号
-            _rs485_cv.wait(lock, [this] { 
-                return !_rs485_queue.empty() || !_is_running; 
+            _udp_cv.wait(lock, [this] { 
+                return !_udp_queue.empty() || !_is_running; 
             });
 
-            if (!_is_running && _rs485_queue.empty()) {
+            if (!_is_running && _udp_queue.empty()) {
                 break;
             }
 
-            if (_rs485_queue.empty()) {
+            if (_udp_queue.empty()) {
                 continue;
             }
 
-            data_to_send = _rs485_queue.front();
-            _rs485_queue.pop();
+            data_to_send = _udp_queue.front();
+            _udp_queue.pop();
         }
 
-        // 发送数据 (移除了之前的 Timer 计时，如果需要可以加回)
-        if (data_to_send.size() >= 3)
+        // UDP_TEST_DATA_BEGIN: 临时测试数据，测试完注释下面 2 行即可恢复真实 UDP 数据。
+        // data_to_send.pose_result = {1.0f, 2.0f, 3.0f, 100.0f, 200.0f, 300.0f};
+        // data_to_send.timestamp = 1234567890123ULL;
+        // UDP_TEST_DATA_END
+
+        // UDP 发送和 TCP 姿态段一致的数据: rx, ry, rz, x, y, z, timestamp。
+        if (data_to_send.pose_result.size() >= 6)
         {
-            float float_temp_pose[3];
-            float_temp_pose[0] = data_to_send[0];
-            float_temp_pose[1] = data_to_send[1];
-            float_temp_pose[2] = data_to_send[2];
-            _rs485.sendFloatArray(float_temp_pose);
+            _client.send_udp_result(data_to_send.pose_result, data_to_send.timestamp);
         }
-
-        usleep(150000);
     }
 }
 
@@ -164,16 +163,22 @@ void prj_v8detector::camera()
 
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
-        _resultframe.rs485_result = _worker->m_pose->uart_result;
+        _resultframe.udp_result = _resultframe.pose_result;
         {
-            std::lock_guard<std::mutex> lock(_rs485_mtx);
-            // 漏桶策略：如果串口发送太慢，丢弃旧数据，保证实时性
-            while (_rs485_queue.size() > 2) 
+            std::lock_guard<std::mutex> lock(_udp_mtx);
+            // 漏桶策略：如果 UDP 发送线程处理不过来，丢弃旧数据，保证实时性。
+            while (_udp_queue.size() > 2) 
             {
-                _rs485_queue.pop();
+                _udp_queue.pop();
             }
-            _rs485_queue.push(_resultframe.rs485_result);
-            _rs485_cv.notify_one();
+            if (_resultframe.udp_result.size() >= 6)
+            {
+                UdpPoseFrame udp_frame;
+                udp_frame.pose_result = _resultframe.udp_result;
+                udp_frame.timestamp = _resultframe.timestamp;
+                _udp_queue.push(udp_frame);
+                _udp_cv.notify_one();
+            }
         }
 
         // 4. TCP 队列处理
@@ -241,17 +246,20 @@ void prj_v8detector::camera_foldimages()
 
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
-        _resultframe.rs485_result = _worker->m_pose->uart_result;
+        _resultframe.udp_result = _resultframe.pose_result;
         {
-            std::lock_guard<std::mutex> lock(_rs485_mtx);
+            std::lock_guard<std::mutex> lock(_udp_mtx);
             // 同样应用漏桶策略
-            while (_rs485_queue.size() > 2) 
+            while (_udp_queue.size() > 2) 
             {
-                _rs485_queue.pop();
+                _udp_queue.pop();
             }
-            if (_resultframe.rs485_result.size() >= 3) {
-                 _rs485_queue.push(_resultframe.rs485_result);
-                 _rs485_cv.notify_one();
+            if (_resultframe.udp_result.size() >= 6) {
+                 UdpPoseFrame udp_frame;
+                 udp_frame.pose_result = _resultframe.udp_result;
+                 udp_frame.timestamp = _resultframe.timestamp;
+                 _udp_queue.push(udp_frame);
+                 _udp_cv.notify_one();
             }
         }
 
@@ -277,6 +285,10 @@ void prj_v8detector::tcp_loop()
             // 等待条件：有数据 或者 停止运行
             _queue_cv.wait(lock, [this]
                            { return !_resultframe_queue.empty() || !_is_running; });
+            if (!_is_running && _resultframe_queue.empty())
+            {
+                break;
+            }
             if (_resultframe_queue.empty())
             {
                 continue;
@@ -299,7 +311,8 @@ void prj_v8detector::run()
     auto t_photo = std::thread(_func_photo_camera);
     auto t1 = std::thread(_func_camera);
     // auto t2 = std::thread(_func_camera_foldimages);
-    auto t_rs485 = std::thread(_func_rs485_send);
+    auto t_udp = std::thread(_func_udp_send);
+    // auto t_rs485 = std::thread(_func_rs485_send); // 串口发送已停用。
     auto t3 = std::thread(_func_pack_and_send);
     if (t1.joinable())
     {
@@ -312,7 +325,8 @@ void prj_v8detector::run()
     // }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
-    _rs485_cv.notify_all(); // 唤醒 RS485
+    _udp_cv.notify_all();   // 唤醒 UDP
+    // _rs485_cv.notify_all(); // 串口发送已停用。
     _detect_frame_cv.notify_all();
     if (t_detect.joinable())
     {
@@ -322,9 +336,9 @@ void prj_v8detector::run()
     {
         t_photo.join();
     }
-    if (t_rs485.joinable())
+    if (t_udp.joinable())
     {
-        t_rs485.join();
+        t_udp.join();
     }
     if (t3.joinable())
     {
@@ -336,7 +350,7 @@ prj_v8detector::~prj_v8detector()
 {
     _is_running = false;
     _queue_cv.notify_all();
-    _rs485_cv.notify_all();
+    _udp_cv.notify_all();
     _detect_frame_cv.notify_all();
     if (_detect_writeframe)
     {

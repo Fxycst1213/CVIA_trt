@@ -1,6 +1,7 @@
 #include "NvInfer.h"
 #include "NvOnnxParser.h"
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include "utils.hpp"
 #include "opencv2/core/core.hpp"
@@ -11,9 +12,6 @@
 #include "preprocess.hpp"
 #include "cudatools.hpp"
 #include "../lstm/lstm_predictor.hpp"
-#include <Eigen/Core>
-#include <Eigen/Geometry>
-#include <opencv2/core/eigen.hpp> // 必须包含这个才能在 cv::Mat 和 Eigen 之间转换
 
 using namespace std;
 using namespace nvinfer1;
@@ -21,6 +19,50 @@ double deg2rad(double deg)
 {
     return deg * CV_PI / 180.0;
 };
+
+namespace
+{
+    cv::Vec3d rotationMatrixToEulerRxRyRzDegrees(const cv::Mat &rotation_matrix)
+    {
+        CV_Assert(rotation_matrix.rows == 3 && rotation_matrix.cols == 3);
+
+        cv::Mat R;
+        rotation_matrix.convertTo(R, CV_64F);
+
+        const double r00 = R.at<double>(0, 0);
+        const double r01 = R.at<double>(0, 1);
+        const double r10 = R.at<double>(1, 0);
+        const double r11 = R.at<double>(1, 1);
+        const double r20 = R.at<double>(2, 0);
+        const double r21 = R.at<double>(2, 1);
+        const double r22 = R.at<double>(2, 2);
+
+        // rx -> ry -> rz 顺序施加旋转，对列向量等价于 R = Rz * Ry * Rx。
+        const double sy = std::hypot(r00, r10);
+        const bool singular = sy < 1e-6;
+
+        double rx = 0.0;
+        double ry = 0.0;
+        double rz = 0.0;
+
+        if (!singular)
+        {
+            rx = std::atan2(r21, r22);
+            ry = std::atan2(-r20, sy);
+            rz = std::atan2(r10, r00);
+        }
+        else
+        {
+            rx = 0.0;
+            ry = std::atan2(-r20, sy);
+            rz = std::atan2(-r01, r11);
+        }
+
+        const double rad_to_deg = 180.0 / CV_PI;
+        return cv::Vec3d(rx * rad_to_deg, ry * rad_to_deg, rz * rad_to_deg);
+    }
+}
+
 namespace model
 {
     namespace pose
@@ -192,11 +234,14 @@ namespace model
 
             // _diff = (cv::Mat_<float>(1, 5) << -0.0587, 0.1663, 0.0001541, 0.0026, -0.1357);
 
-            _K = (cv::Mat_<double>(3, 3) << 1067.695, 0.0, 972.357,
-                  0.0, 1068.264, 504.225,
+            // _K = (cv::Mat_<double>(3, 3) << 1067.695, 0.0, 972.357,
+            //       0.0, 1068.264, 504.225,
+            //       0.0, 0.0, 1.0);
+            _K = (cv::Mat_<double>(3, 3) << 1064.8, 0.0, 952.7,
+                  0.0, 1077.3, 624.1,
                   0.0, 0.0, 1.0);
 
-            _diff = (cv::Mat_<float>(1, 5) << -0.0597, 0.1675, 0.0001342, 0.0027, -0.1367);
+            _diff = (cv::Mat_<float>(1, 5) << -0.0991, 0.3451, 0.0018, -0.0018, -0.4370);
 
             // 0128
             _p3d = (cv::Mat_<double>(10, 3) << 0, 0, 0,
@@ -718,24 +763,28 @@ namespace model
                         T1.copyTo(_T1_prev);
 
                         cv::Rodrigues(R1, R_mat);
-                        cv::cv2eigen(R_mat, eR);
-                        euler_angles = eR.eulerAngles(0, 1, 2);
-                        euler_angles *= (180.0 / CV_PI);
+
+                        cv::Mat pnp_transform = cv::Mat::eye(4, 4, CV_64F);
+                        cv::Mat R64;
+                        cv::Mat T64;
+                        R_mat.convertTo(R64, CV_64F);
+                        T1.convertTo(T64, CV_64F);
+                        T64 = T64.reshape(1, 3);
+
+                        R64.copyTo(pnp_transform(cv::Rect(0, 0, 3, 3)));
+                        T64.copyTo(pnp_transform(cv::Rect(3, 0, 1, 3)));
+
+                        cv::Vec3d euler_angles_deg =
+                            rotationMatrixToEulerRxRyRzDegrees(pnp_transform(cv::Rect(0, 0, 3, 3)));
+
+                        m_result[0] = static_cast<float>(euler_angles_deg[0]);
+                        m_result[1] = static_cast<float>(euler_angles_deg[1]);
+                        m_result[2] = static_cast<float>(euler_angles_deg[2]);
+                        m_result[3] = static_cast<float>(pnp_transform.at<double>(0, 3));
+                        m_result[4] = static_cast<float>(pnp_transform.at<double>(1, 3));
+                        m_result[5] = static_cast<float>(pnp_transform.at<double>(2, 3));
                     }
                 }
-            }
-            if (is_current_frame_good && !T1.empty())
-            {
-                // m_result[3] = static_cast<float>(T1.at<double>(0, 0));
-                // m_result[4] = static_cast<float>(T1.at<double>(1, 0));
-                // m_result[5] = static_cast<float>(T1.at<double>(2, 0));
-
-                m_result[0] = static_cast<float>(euler_angles(0));
-                m_result[1] = static_cast<float>(euler_angles(1));
-                m_result[2] = static_cast<float>(euler_angles(2));
-                m_result[3] = static_cast<float>(T1.at<double>(0, 0));
-                m_result[4] = static_cast<float>(T1.at<double>(1, 0));
-                m_result[5] = static_cast<float>(T1.at<double>(2, 0));
             }
         }
 

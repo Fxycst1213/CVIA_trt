@@ -71,12 +71,18 @@ void client::init(const prj_params &p_params)
     _pose_size_bytes = p_params.t_params.POSE_BUFSIZE;
     _resolution = p_params.detect_camera.resolution;
     _keyPoint_box = p_params.t_params.KeyPoint_box;
+    _udp_enabled = p_params.enable_udp;
 
     // 2. 清理旧内存
     if (_buffer)
     {
         delete[] _buffer;
         _buffer = nullptr;
+    }
+    if (_udp_fd != -1)
+    {
+        close(_udp_fd);
+        _udp_fd = -1;
     }
     char header[3];
     header[0] = 'I';
@@ -127,6 +133,35 @@ void client::init(const prj_params &p_params)
         LOGE("connect error");
     }
     SendAll(header, 3);
+
+    if (_udp_enabled)
+    {
+        const std::string udp_ip = p_params.udp_ip.empty() ? p_params.ip : p_params.udp_ip;
+        const int udp_port = p_params.udp_port > 0 ? p_params.udp_port : p_params.port;
+
+        if (udp_ip.empty() || udp_port <= 0)
+        {
+            LOGW("UDP result upload disabled: invalid target %s:%d", udp_ip.c_str(), udp_port);
+            _udp_enabled = false;
+        }
+        else
+        {
+            memset(&_udpAddress, 0, sizeof(_udpAddress));
+            _udpAddress.sin_family = AF_INET;
+            _udpAddress.sin_addr.s_addr = inet_addr(udp_ip.c_str());
+            _udpAddress.sin_port = htons(udp_port);
+
+            if ((_udp_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+            {
+                LOGW("create UDP socket error");
+                _udp_enabled = false;
+            }
+            else
+            {
+                LOG("UDP result upload target: %s:%d", udp_ip.c_str(), udp_port);
+            }
+        }
+    }
 }
 
 // --- 新增函数的实现 ---
@@ -264,6 +299,30 @@ bool client::pack_and_send(const Resultframe &frame)
     return SendAll(_buffer, current_packet_size);
 }
 
+bool client::send_udp_result(const std::vector<float> &result, uint64_t timestamp)
+{
+    static const size_t kPose6DCount = 6;
+    if (!_udp_enabled || _udp_fd == -1 || result.size() < kPose6DCount)
+    {
+        return false;
+    }
+
+    char buffer[tcp_params::POSE_BUFSIZE] = {0};
+    const size_t pose_bytes = kPose6DCount * sizeof(float);
+    memcpy(buffer, result.data(), pose_bytes);
+    memcpy(buffer + tcp_params::POSE_BUFSIZE - sizeof(uint64_t), &timestamp, sizeof(uint64_t));
+
+    const ssize_t bytes_sent = sendto(_udp_fd, buffer, sizeof(buffer), 0,
+                                      (struct sockaddr *)&_udpAddress,
+                                      sizeof(_udpAddress));
+    if (bytes_sent != static_cast<ssize_t>(sizeof(buffer)))
+    {
+        LOGW("UDP result send failed, expected %zu bytes, sent %zd bytes", sizeof(buffer), bytes_sent);
+        return false;
+    }
+    return true;
+}
+
 bool client::SendAll(char *buffer, int size)
 {
     while (size > 0)
@@ -289,5 +348,11 @@ client::~client()
     {
         close(_fd);
         _fd = -1;
+    }
+
+    if (_udp_fd != -1)
+    {
+        close(_udp_fd);
+        _udp_fd = -1;
     }
 }
