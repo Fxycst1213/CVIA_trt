@@ -6,8 +6,8 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _timer = make_shared<timer::Timer>(logger::Level::INFO);
     _timer_tcp = make_shared<timer::Timer>(logger::Level::INFO);
 
-    // _zed = ZEDX::GetInstance();
-    // _zed->init(p_params.cameraID, p_params.resolution);
+    _zed = ZEDX::GetInstance();
+    _zed->init(p_params.cameraID, p_params.resolution);
 
     preprocess::init_process(p_params.H, p_params.W);
 
@@ -17,9 +17,12 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _func_camera_foldimages = std::bind(&prj_v8detector::camera_foldimages, this);
     _func_pack_and_send = std::bind(&prj_v8detector::tcp_loop, this);
     _func_rs485_send = std::bind(&prj_v8detector::rs485_loop, this); // [新增]
+    _func_rs485_receive = std::bind(&prj_v8detector::rs485_receive_loop, this);
 
     _client.init(p_params);
     _rs485.init(p_params);
+    _rs485.setDebug(true);
+    _rs485.setSendIntervalUs(10000);
     _is_running = true;
 }
 
@@ -48,17 +51,23 @@ void prj_v8detector::rs485_loop()
             _rs485_queue.pop();
         }
 
-        // 发送数据 (移除了之前的 Timer 计时，如果需要可以加回)
-        if (data_to_send.size() >= 3)
+        // 发送 2026-4-7 协议二进制帧。
+        if (!data_to_send.empty())
         {
-            float float_temp_pose[3];
-            float_temp_pose[0] = data_to_send[0];
-            float_temp_pose[1] = data_to_send[1];
-            float_temp_pose[2] = data_to_send[2];
-            _rs485.sendFloatArray(float_temp_pose);
+            _rs485.sendVisionFrame(data_to_send);
         }
 
-        usleep(150000);
+    }
+}
+
+void prj_v8detector::rs485_receive_loop()
+{
+    while (_is_running)
+    {
+        if (!_rs485.receiveAndPrintAvailable(100))
+        {
+            usleep(10000);
+        }
     }
 }
 
@@ -256,6 +265,11 @@ void prj_v8detector::tcp_loop()
             // 等待条件：有数据 或者 停止运行
             _queue_cv.wait(lock, [this]
                            { return !_resultframe_queue.empty() || !_is_running; });
+            if (!_is_running && _resultframe_queue.empty())
+            {
+                break;
+            }
+
             if (_resultframe_queue.empty())
             {
                 continue;
@@ -274,25 +288,30 @@ void prj_v8detector::tcp_loop()
 void prj_v8detector::run()
 {
     _is_running = true;
-    // auto t1 = std::thread(_func_camera);
-    auto t2 = std::thread(_func_camera_foldimages);
+   auto t1 = std::thread(_func_camera);
+    // auto t2 = std::thread(_func_camera_foldimages);
     auto t_rs485 = std::thread(_func_rs485_send);
+    auto t_rs485_rx = std::thread(_func_rs485_receive);
     auto t3 = std::thread(_func_pack_and_send);
-    // if (t1.joinable())
-    // {
-    //     t1.join();
-    // }
+   if (t1.joinable())
+   {
+       t1.join();
+   }
     
-    if (t2.joinable())
-    {
-        t2.join();
-    }
+    //  if (t2.joinable())
+    //  {
+    //      t2.join();
+    //  }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
     _rs485_cv.notify_all(); // 唤醒 RS485
     if (t_rs485.joinable())
     {
         t_rs485.join();
+    }
+    if (t_rs485_rx.joinable())
+    {
+        t_rs485_rx.join();
     }
     if (t3.joinable())
     {

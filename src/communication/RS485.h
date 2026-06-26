@@ -1,14 +1,11 @@
 #ifndef TENSORRT_PRO_YOLOV8_MAIN_RS485_H
 #define TENSORRT_PRO_YOLOV8_MAIN_RS485_H
 
-#include <cstring>
-#include <unistd.h>
-#include <fcntl.h>
-#include <termios.h>
+#include <cstddef>
+#include <cstdint>
 #include <string>
-#include <cstdio> // 建议添加，用于标准的输入输出定义
+#include <vector>
 #include "../params/params.hpp"
-#include "../logger/logger.hpp"
 
 class RS485
 {
@@ -19,13 +16,21 @@ public:
     // 初始化RS485串口
     int init(const prj_params &p_params);
 
-    // 发送双精度浮点数数组
-    // 格式: "x.xxx,y.yyy,z.zzz\n" (文本模式)
-    bool sendDoubleArray(const double arr[3]);
+    // 按 2026-4-7 协议发送视觉数据:
+    // EB 90 12 + 9 个 Big-Endian Int16 + 1 Byte 累加和
+    // values[0..5] 单位 mm，values[6..8] 单位 deg，会转换为 0.01 deg。
+    // 如果调用方暂时只提供 3 个位移值，其余协议字段自动填 0。
+    bool sendVisionFrame(const std::vector<float> &values);
 
-    // 发送单精度浮点数数组
-    // 格式: "x.xxx,y.yyy,z.zzz\n" (文本模式)
+    // 旧接口兼容: 只发送前三个绝对位移字段，其余协议字段置 0。
+    bool sendDoubleArray(const double arr[3]);
     bool sendFloatArray(const float arr[3]);
+
+    // 读取串口收到的数据，打印原始字节；若收到 EB 91 协议帧，同时打印解析后的字段。
+    bool receiveAndPrintAvailable(int timeout_ms);
+
+    // 设置每次串口发送完成后的休眠时间，单位 us。
+    void setSendIntervalUs(unsigned int interval_us);
 
     // 关闭串口
     void closePort();
@@ -38,28 +43,26 @@ private:
     int _fd = -1;
     // 调试模式
     bool _debug = false;
+    unsigned int _send_interval_us = 0;
 
-    // ==========================================
-    // 旧协议保留字段 (Legacy)
-    // 注意：以下函数和变量在当前的文本发送逻辑中不再被调用
-    // 保留它们是为了匹配 .cpp 文件中未删除的旧函数定义，
-    // 如果你在 .cpp 中删除了旧函数，这里也可以删除。
-    // ==========================================
-    
-    // 双精度数据帧打包函数 (未使用)
-    void packDoubleDataFrame(const double arr[3], unsigned char *buffer, int *frame_size);
-    // 单精度数据帧打包函数 (未使用)
-    void packFloatDataFrame(const float arr[3], unsigned char *buffer, int *frame_size);
-    // CRC校验计算 (未使用)
-    unsigned char calculateCRC(const unsigned char *data, int length);
+    std::vector<unsigned char> _rx_buffer;
 
-    // 帧头帧尾定义 (未使用)
-    static const unsigned char FRAME_HEADER[2];
-    static const unsigned char FRAME_FOOTER[2];
-    
-    // 数据标识符 (未使用)
-    static const unsigned char DATA_TYPE_FLOAT = 0xF0;
-    static const unsigned char DATA_TYPE_DOUBLE = 0xD0;
+    static const unsigned char FRAME_HEAD_1 = 0xEB;
+    static const unsigned char TX_FRAME_HEAD_2 = 0x90;
+    static const unsigned char RX_FRAME_HEAD_2 = 0x91;
+    static const std::size_t TX_PAYLOAD_SIZE = 18;
+    static const std::size_t RX_PAYLOAD_SIZE = 14;
+    static const std::size_t TX_FIELD_COUNT = 9;
+
+    unsigned char calculateChecksum(const unsigned char *data, std::size_t length) const;
+    void appendInt16BE(std::vector<unsigned char> &buffer, int value) const;
+    int floatToProtocolInt16(float value, float scale) const;
+    bool writeAll(const unsigned char *data, std::size_t length);
+    void parseReceiveBuffer();
+    void printRawBytes(const unsigned char *data, std::size_t length) const;
+    void printReceiveFrame(const unsigned char *payload, unsigned char checksum) const;
+    int readInt32BE(const unsigned char *data) const;
+    unsigned int readUInt16BE(const unsigned char *data) const;
 };
 
 #endif // TENSORRT_PRO_YOLOV8_MAIN_RS485_H

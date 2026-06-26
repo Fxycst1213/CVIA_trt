@@ -35,6 +35,7 @@ public:
     void camera_foldimages();
     void tcp_loop();
     void rs485_loop(); // [新增] RS485 线程函数
+    void rs485_receive_loop();
 
 private:
     shared_ptr<thread::Worker> _worker;
@@ -47,6 +48,7 @@ private:
     std::function<void()> _func_pack_and_send;
 
     std::function<void()> _func_rs485_send; // [新增] 线程绑定函数
+    std::function<void()> _func_rs485_receive;
 
     ZEDframe *_writeframe = nullptr;
 

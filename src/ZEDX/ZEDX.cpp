@@ -64,6 +64,7 @@ void ZEDX::grab_frame(ZEDframe *frame)
         frame->timestamp = img.timestamp.getMilliseconds();// 毫秒
         cv::Mat tmp = ZEDX::slMat2cvMat(img);
         cv::cvtColor(tmp, *(frame->rgb_ptr), cv::COLOR_BGRA2BGR);
+        cv::rotate(*(frame->rgb_ptr), *(frame->rgb_ptr), cv::ROTATE_180);
         // _timer->show();
     }
     else

@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <string>
+#include <termios.h>
 #include <opencv2/opencv.hpp>
 #include "pose_params.hpp"
 
@@ -43,7 +44,7 @@ struct prj_params
     int socket_mode = 0;
     tcp_params t_params;
     std::string rs485_port = "/dev/ttyUSB0";
-    int rs485_baudrate = 57600;
+    speed_t rs485_baudrate = B115200;
 };
 
 #endif // PARAMS_HPP

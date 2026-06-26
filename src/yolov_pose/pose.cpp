@@ -188,6 +188,13 @@ namespace model
                   0.0, 0.0, 1.0);
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
+            
+            // _K = (cv::Mat_<double>(3, 3) << 1066.7700, 0.0, 1066.5699,
+            //       0.0, 1095.6300, 606.9410,
+            //       0.0, 0.0, 1.0);
+
+            // _diff = (cv::Mat_<float>(1, 5) << -1.4347, 2.8314, 0, 0, 0.0568);
+            
             // 凯里
             // _K = (cv::Mat_<double>(3, 3) << 1064.0, 0.0, 971.2,
             //       0.0, 1064.1, 544.3,
@@ -212,10 +219,16 @@ namespace model
             //                             -83.24,	-272.24389,	31.8423,
             //                             72.554,	-6.07653,	3.5579);
 
-            combined = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
-                        9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
-                        -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
-                        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
+            // combined = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
+            //             9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
+            //             -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
+            //             0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
+            combined = (cv::Mat_<float>(4, 4) <<
+                             1.0000,   0.0000,   0.0000,  0.0f,
+                             0.0000,   0.8290,   0.5592,  0.0f,
+                             0.0000,  -0.5592,   0.8290,  0.0f,
+                             0.0000000e+00,  0.0000000e+00,  0.0000000e+00,  1.0f
+                            );
             combined_inv = combined.inv();
 
             LSTMPredictor::Config lstm_cfg;
@@ -335,8 +348,8 @@ namespace model
                 refine_keypoints(m_bboxes[0].keypoints);
             }
             run_pnp_multi_stage();
-            // run_filter_and_estimation(timestamp, m_frame_counter);
-            // run_lstm_predictin();
+            run_filter_and_estimation(timestamp, m_frame_counter);
+            run_lstm_predictin();
 
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();
@@ -754,21 +767,25 @@ namespace model
                 }
             }
 
-            cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[0],
-                                         m_result[1],
-                                         m_result[2],
+            cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[3],
+                                         m_result[4],
+                                         m_result[5],
                                          1.0); // 现在是直接把观测值通过串口发出去，发预测值改0 1 2
 
             cv::Mat transformed_point = combined * point_homogeneous;
 
-            // uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
-            // uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
-            // uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
+            //  uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
+            //  uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
+            //  uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
+
+            uart_result[0] = transformed_point.at<float>(1, 0) + 220; // 新的 X
+            uart_result[1] = transformed_point.at<float>(0, 0) + 250; // 新的 Y
+            uart_result[2] = -transformed_point.at<float>(2, 0) + 90;  // 新的 Z
 
             
-            uart_result[0] = 1.0 ;// 新的 X
-            uart_result[1] = 2.0 ;// 新的 Y
-            uart_result[2] = 3.0 ;// 新的 Z
+//            uart_result[0] = 1.0 ;// 新的 X
+//            uart_result[1] = 2.0 ;// 新的 Y
+//            uart_result[2] = 3.0 ;// 新的 Z
 
             // uart_result[0] = m_result[3]; // 新的 X
             // uart_result[1] = m_result[4]; // 新的 Y
