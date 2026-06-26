@@ -761,9 +761,14 @@ namespace model
 
             cv::Mat transformed_point = combined * point_homogeneous;
 
-            uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
-            uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
-            uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
+            // uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
+            // uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
+            // uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
+
+            
+            uart_result[0] = 1.0 ;// 新的 X
+            uart_result[1] = 2.0 ;// 新的 Y
+            uart_result[2] = 3.0 ;// 新的 Z
 
             // uart_result[0] = m_result[3]; // 新的 X
             // uart_result[1] = m_result[4]; // 新的 Y
