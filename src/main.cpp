@@ -53,8 +53,8 @@ int main(int argc, char const *argv[])
     p_params.photo_camera.sharpness = 50.0;
     p_params.ip = "192.168.137.1";
     p_params.port = 1234;
-    p_params.udp_ip = p_params.ip;
-    p_params.udp_port = p_params.port;
+    p_params.udp_ip = "192.168.137.1";
+    p_params.udp_port = 1234;
     p_params.enable_udp = true;
     p_params.socket_mode = 2;
     // p_params.rs485_port = "/dev/ttyUSB0"; // 串口发送已停用，结果改用 UDP 上传。
