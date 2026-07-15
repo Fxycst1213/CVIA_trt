@@ -51,9 +51,9 @@ int main(int argc, char const *argv[])
     p_params.photo_camera.brightness = 0.0;
     p_params.photo_camera.contrast = 50.0;
     p_params.photo_camera.sharpness = 50.0;
-    p_params.ip = "192.168.137.1";
+    p_params.ip = "192.168.31.214";
     p_params.port = 1234;
-    p_params.udp_ip = "192.168.137.1";
+    p_params.udp_ip = "192.168.31.214";
     p_params.udp_port = 1234;
     p_params.enable_udp = true;
     p_params.socket_mode = 2;
