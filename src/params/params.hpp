@@ -42,7 +42,7 @@ struct tcp_params
     static constexpr int KeyPoint_box = (Point_num * 3 + 5);
     static constexpr int KEYPOINTS_BUFSIZE = KeyPoint_box * 4;
     static constexpr int POSE_BUFSIZE = 8 * 4;
-    static constexpr int POSE_DATE_NUM = 7;
+    static constexpr int POSE_DATE_NUM = 10;
     static constexpr int IMAGE_COUNT_DUAL = 2;
 
     // 这两个是变量，不加 const

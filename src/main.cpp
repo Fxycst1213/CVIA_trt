@@ -12,7 +12,7 @@ int main(int argc, char const *argv[])
     // string onnxPath = "models/onnx/last_rebest_1203.onnx";
     // string onnxPath = "models/onnx/0128last.onnx";
 
-    string onnxPath = "models/onnx/qdy_last.onnx";
+    string onnxPath = "models/onnx/qdy0721.onnx";
     auto level = logger::Level::VERB;
     auto params = model::Params();
     params.img = {640, 640, 3};
@@ -53,7 +53,7 @@ int main(int argc, char const *argv[])
     p_params.photo_camera.sharpness = 50.0;
     p_params.ip = "192.168.31.214";
     p_params.port = 1234;
-    p_params.udp_ip = "192.168.31.214";
+    p_params.udp_ip = "10.128.85.15";
     p_params.udp_port = 1234;
     p_params.enable_udp = true;
     p_params.socket_mode = 2;
