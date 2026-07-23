@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <opencv2/opencv.hpp>
+#include <array>
 #include "pose_params.hpp"
 
 struct Resultframe
@@ -13,6 +14,9 @@ struct Resultframe
     std::vector<model::pose::bbox> bboxes;
     std::vector<float> pose_result;
     std::vector<float> udp_result;
+    // 当前 PnP 使用的 7 个三维模型点在红外原图上的重投影像素坐标。
+    std::vector<cv::Point2d> reprojected_points;
+    bool pose_valid = false;
     uint64_t timestamp;
     uint64_t secondary_timestamp = 0;
 };
@@ -21,8 +25,10 @@ struct camera_params
 {
     std::string name = "IR Camera";
     int cameraID = 0;
-    int cameraframe = 30;
+    int cameraframe = 60;
     std::string resolution = "HD1080";
+    // false 时只设置采集格式、分辨率和 FPS，不写曝光/白平衡/画质控制。
+    bool apply_image_controls = true;
     double auto_exposure_mode = 1.0;
     bool apply_exposure = true;
     double exposure = 78.0;
@@ -65,6 +71,26 @@ struct prj_params
     bool enable_udp = true;
     int socket_mode = 0;
     tcp_params t_params;
+    // 输入源与网页预览。配置保存后在下次启动 trt 时生效。
+    std::string input_mode = "camera"; // camera | folder
+    std::string folder_path = "data/source";
+    bool folder_loop = true;
+    int folder_interval_ms = 17;
+    std::string preview_dir = "web_monitor/runtime";
+    int preview_fps = 30;
+    bool enable_tcp = false;
+    bool save_pnp_results = true;
+    std::string pnp_result_dir = "./PNP_result";
+
+    // PnP 相机标定参数，以及从相机坐标系到项目坐标系的 4x4 外参。
+    std::array<double, 9> camera_matrix = {{1064.8, 0.0, 952.7,
+                                            0.0, 1077.3, 624.1,
+                                            0.0, 0.0, 1.0}};
+    std::array<double, 5> distortion = {{-0.0991, 0.3451, 0.0018, -0.0018, -0.4370}};
+    std::array<double, 16> extrinsic = {{-4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
+                                         9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
+                                        -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
+                                         0.0, 0.0, 0.0, 1.0}};
     // 串口参数保留给 RS485 模块；当前主流程已停用串口发送，改用 UDP 上传结果。
     std::string rs485_port = "/dev/ttyUSB0";
     int rs485_baudrate = 57600;

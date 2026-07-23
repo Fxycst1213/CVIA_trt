@@ -127,8 +127,6 @@ namespace model
                 return false;
             }
 
-            m_timer->start_cpu();
-
             int input_w = m_inputImage.cols;
             int input_h = m_inputImage.rows;
             int target_w = m_params->img.w;
@@ -169,28 +167,21 @@ namespace model
 
             CUDA_CHECK(cudaMemcpyAsync(m_inputMemory[1], m_inputMemory[0], m_inputSize, cudaMemcpyKind::cudaMemcpyHostToDevice, m_stream));
 
-            m_timer->stop_cpu<timer::Timer::ms>("preprocess(CPU)");
             return true;
         }
 
         bool Pose::preprocess_gpu(const cv::Mat &img)
         {
-            m_timer->start_gpu();
             m_inputImage = img;
             if (m_inputImage.data == nullptr)
             {
                 LOGE("ERROR: file not founded! Program terminated");
                 return false;
             }
-            m_timer->stop_gpu("preprocess(clone)");
-
-            m_timer->start_gpu();
-
             preprocess::preprocess_resize_gpu(m_inputImage, m_inputMemory[1],
                                               m_params->img.h, m_params->img.w,
                                               preprocess::tactics::GPU_WARP_AFFINE, m_stream);
 
-            m_timer->stop_gpu("preprocess(GPU)");
             return true;
         }
 
@@ -243,8 +234,8 @@ namespace model
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0991, 0.3451, 0.0018, -0.0018, -0.4370);
 
-            // 0128
-            _p3d = (cv::Mat_<double>(10, 3) << 0, 0, 0,
+            // 0721
+            _p3d = (cv::Mat_<double>(7, 3) << 0, 0, 0,
                     -10.686994,	-17.808170,	2.328647,
                     -32.978067, -20.367124, 0.705424,
                     -56.310435, -17.604014, -3.684765,
@@ -252,35 +243,44 @@ namespace model
                     -44.441506, 2.412795, -3.280094,
                     -21.763430, 5.657619, 0.019250);
 
+            // 0721_1
+            _p3d = (cv::Mat_<double>(7, 3) << 0, 0, 0,
+                    -21.763430, 5.657619, 0.019250,
+                    -44.441506, 2.412795, -3.280094,
+                    -65.142842, 2.854420, -4.912121,
+                    -56.310435, -17.604014, -3.684765,
+                    -32.978067, -20.367124, 0.705424,
+                    -10.686994,	-17.808170,	2.328647
+                    );
+
             combined = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
                         9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
                         -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
                         0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
             combined_inv = combined.inv();
 
-            LSTMPredictor::Config lstm_cfg;
-            lstm_cfg.onnx_path = "models/onnx/model_multi_0128.onnx"; // 【注意】这里填你LSTM模型的路径
-            lstm_cfg.input_seq_len = 58;                             // 61
-            lstm_cfg.output_seq_len = 25;                            // 27
-            lstm_cfg.target_frame_idx = 23;                          // 取第24帧
+            // 当前后处理调用 run_pnp_multi_stage()，未调用 run_lstm_predictin()。
+            // 不再启动时加载/构建未使用的第二套 TensorRT LSTM engine。
+            m_lstm_ready = false;
+        }
 
-            m_lstm = std::make_shared<LSTMPredictor>(lstm_cfg, level);
-            if (m_lstm->init())
-            {
-                LOG("LSTM Engine initialized successfully.");
-                m_lstm_ready = true;
-            }
-            else
-            {
-                LOGE("Failed to initialize LSTM Engine.");
-                m_lstm_ready = false;
-            }
+        void Pose::set_calibration(const std::array<double, 9> &camera_matrix,
+                                   const std::array<double, 5> &distortion,
+                                   const std::array<double, 16> &extrinsic)
+        {
+            _K = cv::Mat(3, 3, CV_64F, const_cast<double *>(camera_matrix.data())).clone();
+            cv::Mat distortion64(1, 5, CV_64F, const_cast<double *>(distortion.data()));
+            distortion64.convertTo(_diff, CV_32F);
+            cv::Mat transform64(4, 4, CV_64F, const_cast<double *>(extrinsic.data()));
+            transform64.convertTo(combined, CV_32F);
+            combined_inv = combined.inv();
+            LOG("Web calibration loaded: fx=%.3f fy=%.3f cx=%.3f cy=%.3f",
+                camera_matrix[0], camera_matrix[4], camera_matrix[2], camera_matrix[5]);
         }
 
         bool Pose::postprocess_cpu(const uint64_t &timestamp)
         {
 
-            m_timer->start_cpu();
             int output_size = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
             CUDA_CHECK(cudaMemcpyAsync(m_outputMemory[0], m_outputMemory[1], output_size, cudaMemcpyKind::cudaMemcpyDeviceToHost, m_stream));
             CUDA_CHECK(cudaStreamSynchronize(m_stream));
@@ -379,9 +379,6 @@ namespace model
             // run_filter_and_estimation(timestamp, m_frame_counter);
             // run_lstm_predictin();
 
-            m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
-
-            m_timer->show();
             return true;
         }
 
@@ -727,6 +724,7 @@ namespace model
         void Pose::run_pnp_multi_stage()
         {
             is_current_frame_good = false; // 重置标记位
+            m_reprojected_points.clear();
             if (m_bboxes.size() >= 1)
             {
                 auto &target = m_bboxes[0];
@@ -751,13 +749,15 @@ namespace model
                     std::vector<int> inliers;
                     bool success = cv::solvePnPRansac(p3d_Mat, p2d_Mat, _K, _diff, R1, T1,
                                                       false, 100, 2.0, 0.99, inliers, cv::SOLVEPNP_SQPNP);
-
                     // 4. 验证解算质量
                     if (success && inliers.size() >= 4)
                     {
                         is_current_frame_good = true;
                         R1.copyTo(_R1_prev);
                         T1.copyTo(_T1_prev);
+
+                        // 使用与 solvePnP 完全一致的模型点、R/T、内参和畸变参数生成网页七点重投影。
+                        cv::projectPoints(_p3d, R1, T1, _K, _diff, m_reprojected_points);
 
                         cv::Rodrigues(R1, R_mat);
 

@@ -4,16 +4,36 @@
 #include "utils.hpp"
 #include "prj_detector.hpp"
 #include "params/params.hpp"
+#include "params/config.hpp"
+#include <atomic>
+#include <chrono>
+#include <csignal>
+#include <thread>
 using namespace std;
+
+namespace
+{
+volatile std::sig_atomic_t g_stop_requested = 0;
+
+void handle_stop_signal(int)
+{
+    g_stop_requested = 1;
+}
+}
 
 int main(int argc, char const *argv[])
 {
+    LOG("CVIA runtime revision: dual60-latest-frame-v3");
+    // 尽早接管停止信号；即使模型或相机仍在初始化，也会在构造完成后立即走优雅停止流程。
+    std::signal(SIGINT, handle_stop_signal);
+    std::signal(SIGTERM, handle_stop_signal);
     // pose
     // string onnxPath = "models/onnx/last_rebest_1203.onnx";
     // string onnxPath = "models/onnx/0128last.onnx";
 
     string onnxPath = "models/onnx/qdy0721.onnx";
-    auto level = logger::Level::VERB;
+    // INFO 会保留启动/告警日志，但关闭每帧 VERB 计时输出，避免终端 I/O 拖慢双 60 FPS。
+    auto level = logger::Level::INFO;
     auto params = model::Params();
     params.img = {640, 640, 3};
     params.task = model::task_type::POSE;
@@ -29,6 +49,7 @@ int main(int argc, char const *argv[])
     p_params.detect_camera.cameraID = 0;
     p_params.detect_camera.cameraframe = 60;
     p_params.detect_camera.resolution = "HD1080";
+    p_params.detect_camera.apply_image_controls = true;
     p_params.detect_camera.auto_exposure_mode = 1.0;
     p_params.detect_camera.apply_exposure = true;
     p_params.detect_camera.exposure = 78.0;
@@ -39,18 +60,12 @@ int main(int argc, char const *argv[])
     p_params.detect_camera.contrast = 100.0;
     p_params.detect_camera.sharpness = 100.0;
 
-    p_params.photo_camera.name = "Photo IR Camera";
+    p_params.photo_camera.name = "Visible Light Camera";
     p_params.photo_camera.cameraID = 2;
-    p_params.photo_camera.cameraframe = 30;
+    p_params.photo_camera.cameraframe = 60;
     p_params.photo_camera.resolution = "HD1080";
-    // 这一路用于看清周遭环境，默认打开自动曝光和自动白平衡
-    p_params.photo_camera.auto_exposure_mode = 3.0;
-    p_params.photo_camera.apply_exposure = false;
-    p_params.photo_camera.auto_white_balance = true;
-    p_params.photo_camera.apply_white_balance_temperature = false;
-    p_params.photo_camera.brightness = 0.0;
-    p_params.photo_camera.contrast = 50.0;
-    p_params.photo_camera.sharpness = 50.0;
+    // 可见光相机保持设备默认成像效果，不写曝光、白平衡、亮度、对比度和清晰度。
+    p_params.photo_camera.apply_image_controls = false;
     p_params.ip = "192.168.31.214";
     p_params.port = 1234;
     p_params.udp_ip = "10.128.85.15";
@@ -60,9 +75,28 @@ int main(int argc, char const *argv[])
     // p_params.rs485_port = "/dev/ttyUSB0"; // 串口发送已停用，结果改用 UDP 上传。
     // p_params.rs485_baudrate = B57600;
 
-    // // 根据worker中的task类型进行推理
+    const std::string config_path = argc > 1 ? argv[1] : "web_monitor/config.json";
+    std::string config_error;
+    if (load_project_config(config_path, p_params, config_error))
+        LOG("Loaded project config: %s", config_path.c_str());
+    else
+        LOGW("Using compiled defaults (%s)", config_error.c_str());
+
+    // 根据worker中的task类型进行推理
     prj_v8detector prj(onnxPath, level, params, p_params);
+    std::atomic<bool> run_finished{false};
+    std::thread stop_watcher([&]() {
+        while (!run_finished && !g_stop_requested)
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (g_stop_requested)
+        {
+            LOG("Stop requested; finalizing temporary PNP session...");
+            prj.request_stop();
+        }
+    });
     prj.run();
+    run_finished = true;
+    stop_watcher.join();
 
     return 0;
 }

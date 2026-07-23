@@ -3,6 +3,9 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <fstream>
+#include <experimental/filesystem>
+#include <iomanip>
 
 namespace
 {
@@ -60,6 +63,54 @@ namespace
             ptr_curr += img_len;
         }
     }
+
+    void publish_preview(const std::string &directory, const std::string &name,
+                         const std::vector<uchar> &bytes)
+    {
+        if (directory.empty() || bytes.empty()) return;
+        std::error_code error;
+        std::experimental::filesystem::create_directories(directory, error);
+        const std::string final_path = directory + "/" + name + ".jpg";
+        const std::string temporary_path = final_path + ".tmp";
+        std::ofstream output(temporary_path, std::ios::binary | std::ios::trunc);
+        if (!output) return;
+        output.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        output.close();
+        std::rename(temporary_path.c_str(), final_path.c_str());
+    }
+
+    void publish_reprojection(const std::string &directory, const Resultframe &frame)
+    {
+        if (directory.empty()) return;
+        std::error_code error;
+        std::experimental::filesystem::create_directories(directory, error);
+        const std::string final_path = directory + "/reprojection.json";
+        const std::string temporary_path = final_path + ".tmp";
+        std::ofstream output(temporary_path, std::ios::trunc);
+        if (!output) return;
+        const bool valid = frame.pose_valid && frame.pose_result.size() >= 6;
+        output << "{\"timestamp\":" << frame.timestamp
+               << ",\"valid\":" << (valid ? "true" : "false")
+               << ",\"pose\":[";
+        if (frame.pose_result.size() >= 6)
+        {
+            // 网页和 CSV 顺序统一为 x,y,z,rx,ry,rz。
+            output << std::setprecision(9)
+                   << frame.pose_result[3] << ',' << frame.pose_result[4] << ',' << frame.pose_result[5] << ','
+                   << frame.pose_result[0] << ',' << frame.pose_result[1] << ',' << frame.pose_result[2];
+        }
+        output << "],\"points\":[";
+        for (size_t index = 0; index < frame.reprojected_points.size(); ++index)
+        {
+            if (index > 0) output << ',';
+            output << '[' << frame.reprojected_points[index].x << ','
+                   << frame.reprojected_points[index].y << ']';
+        }
+        output << "]}\n";
+        output.close();
+        std::rename(temporary_path.c_str(), final_path.c_str());
+    }
+
 }
 
 void client::init(const prj_params &p_params)
@@ -72,8 +123,14 @@ void client::init(const prj_params &p_params)
     _resolution = p_params.detect_camera.resolution;
     _keyPoint_box = p_params.t_params.KeyPoint_box;
     _udp_enabled = p_params.enable_udp;
+    _tcp_enabled = p_params.enable_tcp;
+    _save_pnp_results = p_params.save_pnp_results;
+    _preview_dir = p_params.preview_dir;
+    // PnP 先记录到网页运行目录；停止推理后由浏览器另存到笔记本。
+    _pnp_result_dir = p_params.preview_dir;
+    _preview_interval = std::chrono::milliseconds(1000 / std::max(1, p_params.preview_fps));
 
-    // 2. 清理旧内存
+    // 2. 清理旧资源
     if (_buffer)
     {
         delete[] _buffer;
@@ -86,53 +143,70 @@ void client::init(const prj_params &p_params)
     }
     char header[3];
     header[0] = 'I';
-    // 3. 分配内存并计算总大小
-    if (_socket_mode == 0)
+    // TCP 默认关闭；位姿先写入网页运行目录中的临时会话，停止后再由浏览器保存。
+    if (_tcp_enabled)
     {
-        header[1] = 'H';
-        header[2] = 'V';
-        _total_send_size = sizeof(uint32_t) + _img_size_bytes + _kpt_size_bytes + _pose_size_bytes;
-        _buffer = new char[_total_send_size];
-        memset(_buffer, 0, _total_send_size);
-    }
-    else if (_socket_mode == 2)
-    {
-        header[1] = '2';
-        header[2] = 'V';
-        _total_send_size = sizeof(uint32_t) * 2 +
-                           (_img_size_bytes * tcp_params::IMAGE_COUNT_DUAL) +
-                           _kpt_size_bytes +
-                           _pose_size_bytes;
-        _buffer = new char[_total_send_size];
-        memset(_buffer, 0, _total_send_size);
-    }
-    else if (_socket_mode == 1)
-    {
-        header[1] = 'H';
-        header[2] = 'D';
-        _total_send_size = _pose_size_bytes;
-        _buffer = new char[_total_send_size];
-        memset(_buffer, 0, _total_send_size);
+        if (_socket_mode == 0)
+        {
+            header[1] = 'H'; header[2] = 'V';
+            _total_send_size = sizeof(uint32_t) + _img_size_bytes + _kpt_size_bytes + _pose_size_bytes;
+        }
+        else if (_socket_mode == 2)
+        {
+            header[1] = '2'; header[2] = 'V';
+            _total_send_size = sizeof(uint32_t) * 2 +
+                               (_img_size_bytes * tcp_params::IMAGE_COUNT_DUAL) +
+                               _kpt_size_bytes + _pose_size_bytes;
+        }
+        else if (_socket_mode == 1)
+        {
+            header[1] = 'H'; header[2] = 'D';
+            _total_send_size = _pose_size_bytes;
+        }
+        else
+        {
+            LOGE("socket_mode error");
+        }
+        _buffer = new char[_total_send_size]();
+
+        memset(&_remoteAddress, 0, sizeof(_remoteAddress));
+        _remoteAddress.sin_family = AF_INET;
+        _remoteAddress.sin_addr.s_addr = inet_addr(p_params.ip.c_str());
+        _remoteAddress.sin_port = htons(p_params.port);
+
+        if ((_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+            LOGE("create socket error");
+        if (_fd != -1 && connect(_fd, (struct sockaddr *)&_remoteAddress, sizeof(struct sockaddr)) < 0)
+        {
+            LOGW("TCP target unavailable; local PNP recording and web preview remain active");
+            close(_fd);
+            _fd = -1;
+        }
+        if (_fd != -1) SendAll(header, 3);
     }
     else
     {
-        LOGE("socket_mode error");
+        LOG("TCP disabled; temporary PNP session: %s/pnp_session.csv", _pnp_result_dir.c_str());
     }
-    // 4. 连接服务器 (保持原样)
-    memset(&_remoteAddress, 0, sizeof(_remoteAddress));
-    _remoteAddress.sin_family = AF_INET;
-    _remoteAddress.sin_addr.s_addr = inet_addr(p_params.ip.c_str());
-    _remoteAddress.sin_port = htons(p_params.port);
 
-    if ((_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+    if (!_pnp_result_dir.empty())
     {
-        LOGE("create socket error");
+        std::error_code error;
+        std::experimental::filesystem::create_directories(_pnp_result_dir, error);
+        const std::string csv_path = _pnp_result_dir + "/pnp_session.csv";
+        if (_save_pnp_results)
+        {
+            // 每次启动都是独立会话；旧临时会话会在新推理开始时被替换。
+            _pnp_csv.open(csv_path, std::ios::trunc);
+            if (_pnp_csv)
+            {
+                _pnp_csv << "timestamp,x,y,z,rx,ry,rz\n";
+                _pnp_csv.flush();
+            }
+        }
+        else
+            std::remove(csv_path.c_str());
     }
-    if (connect(_fd, (struct sockaddr *)&_remoteAddress, sizeof(struct sockaddr)) < 0)
-    {
-        LOGE("connect error");
-    }
-    SendAll(header, 3);
 
     if (_udp_enabled)
     {
@@ -164,22 +238,53 @@ void client::init(const prj_params &p_params)
     }
 }
 
+void client::save_pnp_pose(const Resultframe &frame)
+{
+    // 旧 TCP 位姿段的顺序是 rx, ry, rz, x, y, z；CSV 按用户要求重排为
+    // timestamp, x, y, z, rx, ry, rz。
+    if (!_save_pnp_results || _pnp_result_dir.empty() || !frame.pose_valid || frame.pose_result.size() < 6) return;
+
+    if (!_pnp_csv)
+    {
+        return;
+    }
+    _pnp_csv << frame.timestamp << ',' << std::setprecision(9)
+             << frame.pose_result[3] << ',' << frame.pose_result[4] << ',' << frame.pose_result[5] << ','
+             << frame.pose_result[0] << ',' << frame.pose_result[1] << ',' << frame.pose_result[2] << '\n';
+    // 每约半秒刷新一次，显著减少每帧 flush 的存储抖动；正常退出时析构函数会再次刷新。
+    if (++_csv_rows_since_flush >= 30)
+    {
+        _pnp_csv.flush();
+        _csv_rows_since_flush = 0;
+    }
+}
+
+void client::record_pose(const Resultframe &frame)
+{
+    save_pnp_pose(frame);
+}
+
 // --- 新增函数的实现 ---
 bool client::pack_and_send(const Resultframe &frame)
 {
-    if (!_buffer || _fd == -1)
-        return false;
+    const auto now = std::chrono::steady_clock::now();
+    const bool refresh_preview = _last_preview_at.time_since_epoch().count() == 0 ||
+                                 now - _last_preview_at >= _preview_interval;
+    if (refresh_preview) _last_preview_at = now;
+    if (!_tcp_enabled && !refresh_preview) return true;
 
     int current_packet_size = 0;
 
     if (_socket_mode == 0)
     {
-        auto start = std::chrono::high_resolution_clock::now();
         EncodedImage primary_image = encode_for_tcp(frame.rgb);
-        auto end = std::chrono::high_resolution_clock::now();
-        double duration = std::chrono::duration<double, std::milli>(end - start).count();
+        if (refresh_preview)
+        {
+            publish_preview(_preview_dir, "primary", primary_image.bytes);
+            publish_reprojection(_preview_dir, frame);
+        }
 
-        LOG("\tJPEG uses %.6lf ms", duration);
+        if (!_tcp_enabled || _fd == -1 || !_buffer) return true;
 
         char *ptr_curr = _buffer;
         write_image_packet(ptr_curr, primary_image.bytes);
@@ -227,13 +332,16 @@ bool client::pack_and_send(const Resultframe &frame)
     }
     else if (_socket_mode == 2)
     {
-        auto start = std::chrono::high_resolution_clock::now();
         EncodedImage primary_image = encode_for_tcp(frame.rgb);
         EncodedImage secondary_image = encode_for_tcp(frame.rgb_secondary);
-        auto end = std::chrono::high_resolution_clock::now();
-        double duration = std::chrono::duration<double, std::milli>(end - start).count();
+        if (refresh_preview)
+        {
+            publish_preview(_preview_dir, "primary", primary_image.bytes);
+            publish_preview(_preview_dir, "secondary", secondary_image.bytes);
+            publish_reprojection(_preview_dir, frame);
+        }
 
-        LOG("\tDual JPEG uses %.6lf ms", duration);
+        if (!_tcp_enabled || _fd == -1 || !_buffer) return true;
 
         char *ptr_curr = _buffer;
         write_image_packet(ptr_curr, primary_image.bytes);
@@ -281,6 +389,7 @@ bool client::pack_and_send(const Resultframe &frame)
     }
     else if (_socket_mode == 1)
     {
+        if (!_tcp_enabled || _fd == -1 || !_buffer) return true;
         // Mode 1 (纯数据模式) 保持不变，使用定长
         current_packet_size = _total_send_size;
         memset(_buffer, 0, _total_send_size);
@@ -327,7 +436,7 @@ bool client::SendAll(char *buffer, int size)
 {
     while (size > 0)
     {
-        int SendSize = send(_fd, buffer, size, 0);
+        int SendSize = send(_fd, buffer, size, MSG_NOSIGNAL);
         if (-1 == SendSize)
             return false;
         size = size - SendSize; // 用于循环发送且退出功能
@@ -338,6 +447,11 @@ bool client::SendAll(char *buffer, int size)
 
 client::~client()
 {
+    if (_pnp_csv.is_open())
+    {
+        _pnp_csv.flush();
+        _pnp_csv.close();
+    }
     if (_buffer)
     {
         delete[] _buffer;

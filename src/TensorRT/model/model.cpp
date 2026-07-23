@@ -110,7 +110,6 @@ namespace model
 
     bool Model::enqueue_bindings()
     {
-        m_timer->start_gpu();
         if (m_useCudaGraph && m_isGraphCaptured)
         {
             cudaError_t ret = cudaGraphLaunch(m_cudaGraphExec, m_stream);
@@ -144,7 +143,6 @@ namespace model
             }
         }
 
-        m_timer->stop_gpu("trt-inference(GPU)");
         return true;
     }
 
@@ -173,7 +171,6 @@ namespace model
 
     void Model::inference(const Resultframe &resultframe)
     {
-        m_timer->init();
         reset_task();
         if (m_params->dev == CPU)
         {

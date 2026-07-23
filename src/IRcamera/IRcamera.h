@@ -7,7 +7,6 @@
 #include "../params/params.hpp"
 // 引入你工程原有的工具类
 #include "logger.hpp"
-#include "time.hpp"
 
 // 定义红外相机的帧结构，与 ZEDframe 保持高度一致
 struct IRFrame
@@ -23,12 +22,12 @@ public:
     ~IRCamera();
 
     void init(const camera_params &params);
-    void grab_frame(IRFrame *frame);
+    bool grab_frame(IRFrame *frame);
 
     cv::VideoCapture _cap;
     int _width = 1920;
     int _height = 1080;
-    std::shared_ptr<timer::Timer> _timer;
+    uint64_t _failed_reads = 0;
 };
 
 #endif // IRCAMERA_H

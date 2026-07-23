@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <array>
 #include "NvInfer.h"
 #include "logger.hpp"
 #include "model.hpp"
@@ -64,9 +65,13 @@ namespace model
             void refine_keypoints(std::vector<keypoint> &kpt);
             std::vector<float> m_result;
             std::vector<float> uart_result;
+            std::vector<cv::Point2d> m_reprojected_points;
             float linear_map(float val, float in_min, float in_max, float out_min, float out_max);
             std::vector<bbox> m_bboxes;
             bool is_current_frame_good = false;
+            void set_calibration(const std::array<double, 9> &camera_matrix,
+                                 const std::array<double, 5> &distortion,
+                                 const std::array<double, 16> &extrinsic);
 
         private:
             // [修改] 新增标志位，记录当前颜色检测模式 (false=蓝色/近距离, true=红色/远距离)

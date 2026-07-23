@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>CVIA 光路控制台</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><div><strong>CVIA</strong><span>气动院</span></div></div>
+    <div class="system-status"><span id="systemDot" class="status-dot"></span><span id="systemText">正在连接图像流</span><button class="stop-inference" id="stopInferenceButton" type="button" disabled>停止推理并保存</button><span class="clock" id="clock">--:--:--</span></div>
+  </header>
+
+  <main class="workspace">
+    <section class="vision-panel" aria-label="实时图像">
+      <div class="panel-heading">
+        <div><p class="eyebrow">LIVE OPTICS</p><h1>实时观测</h1></div>
+        <div class="source-chip" id="sourceChip">读取模式 · --</div>
+      </div>
+
+      <div class="stage-grid">
+        <figure class="camera-stage camera-stage--primary">
+          <img id="primaryImage" alt="检测相机实时画面">
+          <canvas id="reprojectionCanvas" class="reprojection-canvas" aria-label="PnP 三维点重投影图层"></canvas>
+          <div class="projection-readout" id="projectionReadout">
+            <span>PNP REPROJECTION</span>
+            <strong id="projectionState">等待位姿</strong>
+            <code id="projectionPixel">u -- · v --</code>
+            <div class="projection-legend" aria-label="七点重投影颜色图例">
+              <i style="--point-color:#ef7b72">P0 位姿原点</i>
+              <i style="--point-color:#65d7e4">P1–P6 模型点</i>
+            </div>
+          </div>
+          <div class="reticle" aria-hidden="true"><i></i><i></i></div>
+          <figcaption><span><b>A</b> 检测相机 / PnP 主图</span><span id="primaryMeta">等待帧</span></figcaption>
+          <div class="empty-state" id="primaryEmpty"><span class="empty-icon">◎</span><strong>等待主图像</strong><small>启动 trt 后，这里会显示独立的网页预览帧</small></div>
+        </figure>
+        <figure class="camera-stage">
+          <img id="secondaryImage" alt="环境相机实时画面">
+          <figcaption><span><b>B</b> 环境相机 / PnP 副图</span><span id="secondaryMeta">等待帧</span></figcaption>
+          <div class="empty-state" id="secondaryEmpty"><span class="empty-icon">◉</span><strong>等待副图像</strong><small>双图模式下自动显示第二路画面</small></div>
+        </figure>
+      </div>
+
+      <div class="telemetry-strip">
+        <div><span>传输模式</span><strong id="socketModeReadout">--</strong></div>
+        <div><span>目标分辨率</span><strong id="resolutionReadout">--</strong></div>
+        <div><span>配置状态</span><strong id="saveReadout">已同步</strong></div>
+        <p>预览 JPEG 和 PnP 临时会话只存在 AGX 运行目录；停止后再把 CSV 保存到笔记本。</p>
+      </div>
+    </section>
+
+    <aside class="control-panel" aria-label="项目参数">
+      <div class="control-heading"><div><p class="eyebrow">PROJECT PARAMETERS</p><h2>项目参数</h2></div><button class="ghost-button" id="reloadButton" type="button">重新载入</button></div>
+      <nav class="section-nav" aria-label="参数分类">
+        <button class="nav-tab is-active" data-tab="source" type="button">输入</button>
+        <button class="nav-tab" data-tab="pose" type="button">位姿</button>
+        <button class="nav-tab" data-tab="cameras" type="button">相机</button>
+        <button class="nav-tab" data-tab="calibration" type="button">标定</button>
+        <button class="nav-tab" data-tab="network" type="button">网络</button>
+      </nav>
+
+      <form id="configForm" novalidate>
+        <section class="form-section is-active" data-panel="source">
+          <div class="section-intro"><h3>图像从哪里来</h3><p>切换后需要重启推理进程，当前网页不会断开。</p></div>
+          <div class="segmented" role="radiogroup" aria-label="图像读取模式">
+            <label><input type="radio" name="input-mode" value="camera" data-path="input.mode"><span><b>相机读取</b><small>使用 V4L2 双相机</small></span></label>
+            <label><input type="radio" name="input-mode" value="folder" data-path="input.mode"><span><b>文件夹读取</b><small>按文件名顺序循环</small></span></label>
+          </div>
+          <div id="folderOptions" class="field-cluster">
+            <label class="field field--wide"><span>图片文件夹</span><input type="text" data-path="input.folder_path" placeholder="data/source"><small>支持 JPG、JPEG、PNG、BMP；相对于项目根目录</small></label>
+            <div class="field-row"><label class="field"><span>帧间隔 / ms</span><input type="number" min="1" max="60000" step="1" data-path="input.interval_ms"><small id="folderRate">17 ms ≈ 58.8 Hz</small></label><label class="switch-field"><input type="checkbox" data-path="input.loop"><span class="switch"></span><span><b>循环读取</b><small>末帧后回到第一张</small></span></label></div>
+          </div>
+          <div class="field-row"><label class="field"><span>处理宽度</span><input type="number" min="1" data-path="runtime.frame_width"></label><label class="field"><span>处理高度</span><input type="number" min="1" data-path="runtime.frame_height"></label></div>
+          <label class="field"><span>网页预览帧率</span><input type="number" min="1" max="30" step="1" data-path="runtime.preview_fps"><small>范围 1–30；30 FPS 会增加 JPEG 编码、局域网与浏览器负载</small></label>
+          <div class="rule"></div>
+          <label class="switch-field switch-field--standalone"><input type="checkbox" data-path="runtime.save_pnp_results"><span class="switch"></span><span><b>临时记录 PnP 位姿</b><small>运行期间仅记录有效结果；停止推理后保存到笔记本</small></span></label>
+          <div class="session-note"><span>SESSION CSV</span><strong>网页运行目录 · 临时文件</strong><small>每次启动会替换上一会话。完成采集后使用顶部“停止推理并保存”。</small></div>
+        </section>
+
+        <section class="form-section pose-section" data-panel="pose">
+          <div class="section-intro pose-intro"><div><h3>六自由度位姿</h3><p>来自本次临时 PnP 会话；七个三维点按内参与畸变系数重投影到红外主图。</p></div><span id="poseState" class="pose-state">等待数据</span></div>
+          <div class="pose-grid">
+            <article class="pose-card" data-axis="x"><header><span>位置 X</span><strong id="poseValueX">--</strong><code>unit</code></header><canvas id="poseChartX" aria-label="X 坐标时序图"></canvas></article>
+            <article class="pose-card" data-axis="y"><header><span>位置 Y</span><strong id="poseValueY">--</strong><code>unit</code></header><canvas id="poseChartY" aria-label="Y 坐标时序图"></canvas></article>
+            <article class="pose-card" data-axis="z"><header><span>位置 Z</span><strong id="poseValueZ">--</strong><code>unit</code></header><canvas id="poseChartZ" aria-label="Z 坐标时序图"></canvas></article>
+            <article class="pose-card pose-card--angle" data-axis="rx"><header><span>角度 Rx</span><strong id="poseValueRx">--</strong><code>deg</code></header><canvas id="poseChartRx" aria-label="Rx 角度时序图"></canvas></article>
+            <article class="pose-card pose-card--angle" data-axis="ry"><header><span>角度 Ry</span><strong id="poseValueRy">--</strong><code>deg</code></header><canvas id="poseChartRy" aria-label="Ry 角度时序图"></canvas></article>
+            <article class="pose-card pose-card--angle" data-axis="rz"><header><span>角度 Rz</span><strong id="poseValueRz">--</strong><code>deg</code></header><canvas id="poseChartRz" aria-label="Rz 角度时序图"></canvas></article>
+          </div>
+          <div class="pose-legend"><span><i></i>位置坐标</span><span><i></i>旋转角度</span><small id="poseRange">时间窗口 --</small></div>
+        </section>
+
+        <section class="form-section" data-panel="cameras">
+          <div class="section-intro"><h3>双路相机</h3><p>红外相机负责推理；可见光相机保持设备默认成像参数，仅供网页预览。</p></div>
+          <div id="cameraEditors"></div>
+        </section>
+
+        <section class="form-section" data-panel="calibration">
+          <div class="section-intro"><h3>内参与外参</h3><p>内参进入 solvePnP，外参把相机坐标转换到项目坐标。</p></div>
+          <div class="calibration-history">
+            <div><span>CALIBRATION HISTORY</span><strong>历史标定版本</strong><small id="calibrationHistoryMeta">正在读取历史记录</small></div>
+            <select id="calibrationHistorySelect" aria-label="选择历史标定版本"><option value="">暂无历史记录</option></select>
+            <button class="history-load" id="loadCalibrationHistory" type="button" disabled>载入到表单</button>
+          </div>
+          <div class="matrix-block"><div class="matrix-title"><span>相机内参 K</span><code>3 × 3</code></div><div class="matrix matrix--3" id="cameraMatrix"></div></div>
+          <div class="matrix-block"><div class="matrix-title"><span>畸变系数</span><code>k₁ k₂ p₁ p₂ k₃</code></div><div class="matrix matrix--5" id="distortionMatrix"></div></div>
+          <div class="matrix-block"><div class="matrix-title"><span>相机 → 项目外参</span><code>4 × 4</code></div><div class="matrix matrix--4" id="extrinsicMatrix"></div></div>
+          <button class="text-button" id="resetCalibration" type="button">恢复当前已保存的标定值</button>
+        </section>
+
+        <section class="form-section" data-panel="network">
+          <div class="section-intro"><h3>网络与兼容模式</h3><p>TCP 默认停用；PnP 临时记录与 UDP 位姿上传相互独立。</p></div>
+          <label class="switch-field switch-field--standalone"><input type="checkbox" data-path="network.tcp_enabled"><span class="switch"></span><span><b>启用旧 TCP 兼容传输</b><small>通常保持关闭；打开后同时落盘和发送</small></span></label>
+          <div id="tcpOptions" class="field-cluster"><div class="field-row"><label class="field"><span>TCP 地址</span><input type="text" data-path="network.tcp_ip"></label><label class="field field--port"><span>端口</span><input type="number" min="1" max="65535" data-path="network.tcp_port"></label></div>
+          <label class="field"><span>TCP 载荷模式</span><select data-path="network.socket_mode"><option value="0">0 · 单图 + 位姿</option><option value="1">1 · 仅位姿</option><option value="2">2 · 双图 + 位姿</option></select></label></div>
+          <div class="rule"></div>
+          <label class="switch-field switch-field--standalone"><input type="checkbox" data-path="network.udp_enabled"><span class="switch"></span><span><b>上传 UDP 位姿</b><small>独立于 TCP 图像传输</small></span></label>
+          <div class="field-row"><label class="field"><span>UDP 地址</span><input type="text" data-path="network.udp_ip"></label><label class="field field--port"><span>端口</span><input type="number" min="1" max="65535" data-path="network.udp_port"></label></div>
+        </section>
+      </form>
+
+      <footer class="save-bar"><div><span id="dirtyDot" class="dirty-dot"></span><p><strong id="saveTitle">配置已同步</strong><small id="saveHint">修改参数后在这里保存</small></p></div><button class="save-button" id="saveButton" type="submit" form="configForm" disabled>保存配置</button></footer>
+    </aside>
+  </main>
+  <div class="session-modal" id="sessionModal" hidden role="dialog" aria-modal="true" aria-labelledby="sessionModalTitle">
+    <div class="session-dialog">
+      <p class="eyebrow">SESSION COMPLETE</p>
+      <h2 id="sessionModalTitle">推理已停止，保存本次 PnP</h2>
+      <p>临时 CSV 已完成刷新。选择笔记本上的保存位置后，本次会话才算归档。</p>
+      <div class="session-file"><span>CSV</span><div><strong id="sessionFilename">cvia_pnp.csv</strong><small id="sessionFileMeta">正在确认文件</small></div></div>
+      <div class="session-actions"><button class="ghost-button" id="saveSessionLater" type="button">稍后保存</button><button class="save-button" id="saveSessionButton" type="button">选择位置并保存</button></div>
+      <small class="session-browser-note" id="sessionBrowserNote">若浏览器不支持目录选择，将使用标准下载；请开启“下载前询问保存位置”。</small>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

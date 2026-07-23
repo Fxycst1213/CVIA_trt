@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "input": {
+    "mode": "folder",
+    "folder_path": "/home/cvia/qdy/extracted_frames",
+    "loop": true,
+    "interval_ms": 30
+  },
+  "detect_camera": {
+    "name": "Detect IR Camera",
+    "camera_id": 0,
+    "fps": 60,
+    "resolution": "HD1080",
+    "apply_image_controls": true,
+    "auto_exposure_mode": 1,
+    "apply_exposure": true,
+    "exposure": 78,
+    "auto_white_balance": false,
+    "apply_white_balance_temperature": true,
+    "white_balance_temperature": 4600,
+    "brightness": -64,
+    "contrast": 100,
+    "sharpness": 100
+  },
+  "photo_camera": {
+    "name": "Visible Light Camera",
+    "camera_id": 2,
+    "fps": 60,
+    "resolution": "HD1080",
+    "apply_image_controls": false,
+    "auto_exposure_mode": 3,
+    "apply_exposure": false,
+    "exposure": 78,
+    "auto_white_balance": true,
+    "apply_white_balance_temperature": false,
+    "white_balance_temperature": 4600,
+    "brightness": 0,
+    "contrast": 50,
+    "sharpness": 50
+  },
+  "calibration": {
+    "camera_matrix": [
+      1064.8,
+      0,
+      952.7,
+      0,
+      1077.3,
+      624.1,
+      0,
+      0,
+      1
+    ],
+    "distortion": [
+      -0.0991,
+      0.3451,
+      0.0018,
+      -0.0018,
+      -0.437
+    ],
+    "extrinsic": [
+      -0.047331553,
+      -0.64462757,
+      0.76303029,
+      1481.1254,
+      0.99347848,
+      0.048947793,
+      0.10297883,
+      -80.326591,
+      -0.10373164,
+      0.76292819,
+      0.63810676,
+      137.06354,
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "network": {
+    "tcp_enabled": false,
+    "tcp_ip": "192.168.31.214",
+    "tcp_port": 1234,
+    "socket_mode": 2,
+    "udp_enabled": true,
+    "udp_ip": "10.128.85.15",
+    "udp_port": 1234
+  },
+  "runtime": {
+    "frame_width": 1920,
+    "frame_height": 1080,
+    "preview_dir": "web_monitor/runtime",
+    "preview_fps": 15,
+    "save_pnp_results": true
+  }
+}
