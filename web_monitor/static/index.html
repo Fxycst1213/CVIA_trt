@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>CVIA 光路控制台</title>
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/app.css?v=20260724-pose-layout">
 </head>
 <body>
   <header class="topbar">
@@ -84,10 +84,10 @@
           <div class="section-intro pose-intro"><div><h3>六自由度位姿</h3><p>来自本次临时 PnP 会话；七个三维点按内参与畸变系数重投影到红外主图。</p></div><span id="poseState" class="pose-state">等待数据</span></div>
           <div class="pose-grid">
             <article class="pose-card" data-axis="x"><header><span>位置 X</span><strong id="poseValueX">--</strong><code>unit</code></header><canvas id="poseChartX" aria-label="X 坐标时序图"></canvas></article>
-            <article class="pose-card" data-axis="y"><header><span>位置 Y</span><strong id="poseValueY">--</strong><code>unit</code></header><canvas id="poseChartY" aria-label="Y 坐标时序图"></canvas></article>
-            <article class="pose-card" data-axis="z"><header><span>位置 Z</span><strong id="poseValueZ">--</strong><code>unit</code></header><canvas id="poseChartZ" aria-label="Z 坐标时序图"></canvas></article>
             <article class="pose-card pose-card--angle" data-axis="rx"><header><span>角度 Rx</span><strong id="poseValueRx">--</strong><code>deg</code></header><canvas id="poseChartRx" aria-label="Rx 角度时序图"></canvas></article>
+            <article class="pose-card" data-axis="y"><header><span>位置 Y</span><strong id="poseValueY">--</strong><code>unit</code></header><canvas id="poseChartY" aria-label="Y 坐标时序图"></canvas></article>
             <article class="pose-card pose-card--angle" data-axis="ry"><header><span>角度 Ry</span><strong id="poseValueRy">--</strong><code>deg</code></header><canvas id="poseChartRy" aria-label="Ry 角度时序图"></canvas></article>
+            <article class="pose-card" data-axis="z"><header><span>位置 Z</span><strong id="poseValueZ">--</strong><code>unit</code></header><canvas id="poseChartZ" aria-label="Z 坐标时序图"></canvas></article>
             <article class="pose-card pose-card--angle" data-axis="rz"><header><span>角度 Rz</span><strong id="poseValueRz">--</strong><code>deg</code></header><canvas id="poseChartRz" aria-label="Rz 角度时序图"></canvas></article>
           </div>
           <div class="pose-legend"><span><i></i>位置坐标</span><span><i></i>旋转角度</span><small id="poseRange">时间窗口 --</small></div>
@@ -136,6 +136,6 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js" defer></script>
+  <script src="/app.js?v=20260724-pose-performance" defer></script>
 </body>
 </html>

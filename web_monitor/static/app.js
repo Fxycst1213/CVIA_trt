@@ -5,7 +5,9 @@ let savedConfig = null;
 let toastTimer = null;
 let statusTimer = null;
 let previewTimer = null;
+let poseTimer = null;
 let isSaving = false;
+let poseRequestPending = false;
 let frameAvailability = {primary:false, secondary:false};
 let poseRows = [];
 let latestPoseRow = null;
@@ -20,8 +22,12 @@ let sessionModalDismissed = false;
 let sessionDownloadPending = false;
 let latestSessionStatus = null;
 
+// 网页刷新周期：位姿页打开时曲线 500 ms；其他页面跟随 1000 ms 状态周期。
+const POSE_REFRESH_MS = 500;
+const STATUS_REFRESH_MS = 1000;
+
 const poseAxes = [
-  {key:"X", index:1, color:"#65d7e4"}, {key:"Y", index:2, color:"#65d7e4"}, {key:"Z", index:3, color:"#65d7e4"},
+  {key:"X", index:1, color:"#7c65e4"}, {key:"Y", index:2, color:"#7c65e4"}, {key:"Z", index:3, color:"#7c65e4"},
   {key:"Rx", index:4, color:"#e8b76c"}, {key:"Ry", index:5, color:"#e8b76c"}, {key:"Rz", index:6, color:"#e8b76c"}
 ];
 const projectionColors = ["#ef7b72", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4"];
@@ -283,7 +289,7 @@ async function refreshStatus() {
 
 function scheduleStatusRefresh() {
   clearTimeout(statusTimer);
-  statusTimer = setTimeout(async () => { await refreshStatus(); scheduleStatusRefresh(); }, 1000);
+  statusTimer = setTimeout(async () => { await refreshStatus(); scheduleStatusRefresh(); }, STATUS_REFRESH_MS);
 }
 
 function refreshPreviewImages() {
@@ -460,6 +466,8 @@ function renderPose(rows) {
 }
 
 async function refreshPose() {
+  if (poseRequestPending) return;
+  poseRequestPending = true;
   const active = $('.nav-tab[data-tab="pose"]')?.classList.contains("is-active");
   try {
     const response = await fetch(`/api/pnp?limit=${active ? 240 : 10}`, {cache:"no-store"});
@@ -472,13 +480,25 @@ async function refreshPose() {
       latestPoseFileTime = result.mtime_ns ? result.mtime_ns / 1e6 : 0;
       projectionEmptyMessage = "等待 CSV 位姿";
     }
-    renderReprojection();
+    // C++ 已提供同帧七点投影时，图像预览循环负责绘制；这里只更新 CSV 回退投影。
+    if (!runtimeProjectionAvailable) renderReprojection();
     if (active) renderPose(rows);
     $("#poseState").textContent = result.rows?.length ? `实时 · ${result.rows.length} 点` : "等待 CSV";
     $("#poseState").classList.toggle("is-live", Boolean(result.rows?.length));
   } catch (error) {
     $("#poseState").textContent = "读取失败"; $("#poseState").classList.remove("is-live");
+  } finally {
+    poseRequestPending = false;
   }
+}
+
+function schedulePoseRefresh() {
+  clearTimeout(poseTimer);
+  const active = $('.nav-tab[data-tab="pose"]')?.classList.contains("is-active");
+  poseTimer = setTimeout(async () => {
+    await refreshPose();
+    schedulePoseRefresh();
+  }, active ? POSE_REFRESH_MS : STATUS_REFRESH_MS);
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -494,7 +514,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#saveSessionLater").addEventListener("click", () => { $("#sessionModal").hidden = true; sessionModalDismissed = true; });
   $$(".nav-tab").forEach(tab => tab.addEventListener("click", () => { $$(".nav-tab").forEach(item => item.classList.toggle("is-active", item === tab)); $$(".form-section").forEach(panel => panel.classList.toggle("is-active", panel.dataset.panel === tab.dataset.tab)); if (tab.dataset.tab === "pose") requestAnimationFrame(refreshPose); }));
   window.addEventListener("beforeunload", event => { if (JSON.stringify(config) !== JSON.stringify(savedConfig)) { event.preventDefault(); event.returnValue = ""; } });
-  await loadConfig(); await loadCalibrationHistory(); await refreshStatus(); refreshPreviewImages(); scheduleStatusRefresh(); schedulePreviewRefresh(); setInterval(refreshPose, 500); setInterval(() => $("#clock").textContent = new Date().toLocaleTimeString("zh-CN", {hour12:false}), 1000);
+  await loadConfig(); await loadCalibrationHistory(); await refreshStatus(); refreshPreviewImages(); scheduleStatusRefresh(); schedulePreviewRefresh(); schedulePoseRefresh(); setInterval(() => $("#clock").textContent = new Date().toLocaleTimeString("zh-CN", {hour12:false}), 1000);
   $("#primaryImage").addEventListener("load", renderReprojection);
   window.addEventListener("resize", () => { renderReprojection(); if ($('.nav-tab[data-tab="pose"]')?.classList.contains("is-active")) renderPose(poseRows); });
 });
