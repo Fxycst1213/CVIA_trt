@@ -16,10 +16,8 @@ namespace
         float scale_y = 1.0f;
     };
 
-    EncodedImage encode_for_tcp(const cv::Mat &src)
+    EncodedImage encode_image(const cv::Mat &src, const cv::Size &send_size, int jpeg_quality)
     {
-        static const cv::Size kSendSize(1280, 720);
-
         EncodedImage result;
         if (src.empty())
         {
@@ -27,9 +25,9 @@ namespace
         }
 
         cv::Mat send_img;
-        if (src.cols != kSendSize.width || src.rows != kSendSize.height)
+        if (src.cols != send_size.width || src.rows != send_size.height)
         {
-            cv::resize(src, send_img, kSendSize, 0, 0, cv::INTER_AREA);
+            cv::resize(src, send_img, send_size, 0, 0, cv::INTER_AREA);
         }
         else
         {
@@ -41,9 +39,7 @@ namespace
 
         if (send_img.isContinuous())
         {
-            std::vector<int> params;
-            params.push_back(cv::IMWRITE_JPEG_QUALITY);
-            params.push_back(30);
+            const std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, jpeg_quality};
             cv::imencode(".jpg", send_img, result.bytes, params);
         }
 
@@ -64,17 +60,27 @@ namespace
         }
     }
 
-    void publish_preview(const std::string &directory, const std::string &name,
-                         const std::vector<uchar> &bytes)
+    void publish_preview_pair(const std::string &directory,
+                              const std::vector<uchar> &primary,
+                              const std::vector<uchar> &secondary)
     {
-        if (directory.empty() || bytes.empty()) return;
-        std::error_code error;
-        std::experimental::filesystem::create_directories(directory, error);
-        const std::string final_path = directory + "/" + name + ".jpg";
+        if (directory.empty() || primary.empty() || secondary.empty()) return;
+        const std::string final_path = directory + "/preview_pair.bin";
         const std::string temporary_path = final_path + ".tmp";
         std::ofstream output(temporary_path, std::ios::binary | std::ios::trunc);
         if (!output) return;
-        output.write(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+
+        // 一个原子文件同时携带两张 JPEG，避免网页恰好读到“主图新帧、副图旧帧”。
+        // 格式：magic[4] + primary_len(u32, network order)
+        //      + secondary_len(u32, network order) + primary + secondary。
+        static const char kMagic[4] = {'C', 'V', 'P', '1'};
+        const uint32_t primary_length = htonl(static_cast<uint32_t>(primary.size()));
+        const uint32_t secondary_length = htonl(static_cast<uint32_t>(secondary.size()));
+        output.write(kMagic, sizeof(kMagic));
+        output.write(reinterpret_cast<const char *>(&primary_length), sizeof(primary_length));
+        output.write(reinterpret_cast<const char *>(&secondary_length), sizeof(secondary_length));
+        output.write(reinterpret_cast<const char *>(primary.data()), primary.size());
+        output.write(reinterpret_cast<const char *>(secondary.data()), secondary.size());
         output.close();
         std::rename(temporary_path.c_str(), final_path.c_str());
     }
@@ -82,8 +88,6 @@ namespace
     void publish_reprojection(const std::string &directory, const Resultframe &frame)
     {
         if (directory.empty()) return;
-        std::error_code error;
-        std::experimental::filesystem::create_directories(directory, error);
         const std::string final_path = directory + "/reprojection.json";
         const std::string temporary_path = final_path + ".tmp";
         std::ofstream output(temporary_path, std::ios::trunc);
@@ -267,25 +271,75 @@ void client::record_pose(const Resultframe &frame)
 // --- 新增函数的实现 ---
 bool client::pack_and_send(const Resultframe &frame)
 {
+    static const cv::Size kTcpImageSize(1280, 720);
+    static const cv::Size kPreviewImageSize(960, 540);
+    static const int kTcpJpegQuality = 30;
+    static const int kPreviewJpegQuality = 45;
+
     const auto now = std::chrono::steady_clock::now();
-    const bool refresh_preview = _last_preview_at.time_since_epoch().count() == 0 ||
-                                 now - _last_preview_at >= _preview_interval;
-    if (refresh_preview) _last_preview_at = now;
-    if (!_tcp_enabled && !refresh_preview) return true;
+    bool refresh_preview = false;
+    if (_last_preview_at.time_since_epoch().count() == 0)
+    {
+        refresh_preview = true;
+        _last_preview_at = now;
+    }
+    else if (now - _last_preview_at >= _preview_interval)
+    {
+        refresh_preview = true;
+        // 保留不足一个预览周期的余量。原先直接赋值 now，会把推理帧周期
+        // 向上取整：约 44 ms 的处理帧配 15 FPS 时会退化成约 11 FPS。
+        const auto elapsed_intervals = (now - _last_preview_at) / _preview_interval;
+        _last_preview_at += _preview_interval * elapsed_intervals;
+    }
+    const bool tcp_ready = _tcp_enabled && _fd != -1 && _buffer != nullptr;
+    if (!tcp_ready && !refresh_preview) return true;
+
+    const bool tcp_needs_primary = tcp_ready && (_socket_mode == 0 || _socket_mode == 2);
+    const bool tcp_needs_secondary = tcp_ready && _socket_mode == 2;
+    EncodedImage primary_image;
+    EncodedImage secondary_image;
+
+    if (refresh_preview || tcp_needs_primary)
+    {
+        primary_image = encode_image(
+            frame.rgb,
+            tcp_needs_primary ? kTcpImageSize : kPreviewImageSize,
+            tcp_needs_primary ? kTcpJpegQuality : kPreviewJpegQuality);
+    }
+
+    if (refresh_preview || tcp_needs_secondary)
+    {
+        const bool same_source = !frame.rgb.empty() && !frame.rgb_secondary.empty() &&
+                                 frame.rgb.data == frame.rgb_secondary.data &&
+                                 frame.rgb.size() == frame.rgb_secondary.size() &&
+                                 frame.rgb.type() == frame.rgb_secondary.type();
+        const bool same_encoding_profile = tcp_needs_primary == tcp_needs_secondary;
+        if (same_source && same_encoding_profile)
+        {
+            // 文件夹模式下副图就是主图，直接复用 JPEG，避免每帧重复编码。
+            secondary_image = primary_image;
+        }
+        else
+        {
+            secondary_image = encode_image(
+                frame.rgb_secondary,
+                tcp_needs_secondary ? kTcpImageSize : kPreviewImageSize,
+                tcp_needs_secondary ? kTcpJpegQuality : kPreviewJpegQuality);
+        }
+    }
+
+    if (refresh_preview)
+    {
+        publish_preview_pair(_preview_dir, primary_image.bytes, secondary_image.bytes);
+        publish_reprojection(_preview_dir, frame);
+    }
+
+    if (!tcp_ready) return true;
 
     int current_packet_size = 0;
 
     if (_socket_mode == 0)
     {
-        EncodedImage primary_image = encode_for_tcp(frame.rgb);
-        if (refresh_preview)
-        {
-            publish_preview(_preview_dir, "primary", primary_image.bytes);
-            publish_reprojection(_preview_dir, frame);
-        }
-
-        if (!_tcp_enabled || _fd == -1 || !_buffer) return true;
-
         char *ptr_curr = _buffer;
         write_image_packet(ptr_curr, primary_image.bytes);
 
@@ -332,17 +386,6 @@ bool client::pack_and_send(const Resultframe &frame)
     }
     else if (_socket_mode == 2)
     {
-        EncodedImage primary_image = encode_for_tcp(frame.rgb);
-        EncodedImage secondary_image = encode_for_tcp(frame.rgb_secondary);
-        if (refresh_preview)
-        {
-            publish_preview(_preview_dir, "primary", primary_image.bytes);
-            publish_preview(_preview_dir, "secondary", secondary_image.bytes);
-            publish_reprojection(_preview_dir, frame);
-        }
-
-        if (!_tcp_enabled || _fd == -1 || !_buffer) return true;
-
         char *ptr_curr = _buffer;
         write_image_packet(ptr_curr, primary_image.bytes);
         write_image_packet(ptr_curr, secondary_image.bytes);
@@ -389,7 +432,6 @@ bool client::pack_and_send(const Resultframe &frame)
     }
     else if (_socket_mode == 1)
     {
-        if (!_tcp_enabled || _fd == -1 || !_buffer) return true;
         // Mode 1 (纯数据模式) 保持不变，使用定长
         current_packet_size = _total_send_size;
         memset(_buffer, 0, _total_send_size);

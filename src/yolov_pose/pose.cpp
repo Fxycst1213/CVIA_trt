@@ -1,6 +1,7 @@
 #include "NvInfer.h"
 #include "NvOnnxParser.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <string>
 #include "utils.hpp"
@@ -11,7 +12,8 @@
 #include "pose.hpp"
 #include "preprocess.hpp"
 #include "cudatools.hpp"
-#include "../lstm/lstm_predictor.hpp"
+// 未来位置预测已停用；卡尔曼滤波仍由 TrajectoryKF 保留。
+// #include "../lstm/lstm_predictor.hpp"
 
 using namespace std;
 using namespace nvinfer1;
@@ -60,6 +62,29 @@ namespace
 
         const double rad_to_deg = 180.0 / CV_PI;
         return cv::Vec3d(rx * rad_to_deg, ry * rad_to_deg, rz * rad_to_deg);
+    }
+
+    cv::Mat transformCameraPoseToWorld(const cv::Mat &camera_to_world,
+                                       const cv::Mat &object_to_camera_rotation,
+                                       const cv::Vec3f &object_position_in_camera)
+    {
+        CV_Assert(camera_to_world.rows == 4 && camera_to_world.cols == 4);
+        CV_Assert(object_to_camera_rotation.rows == 3 && object_to_camera_rotation.cols == 3);
+
+        cv::Mat camera_to_world_64;
+        cv::Mat object_to_camera_rotation_64;
+        camera_to_world.convertTo(camera_to_world_64, CV_64F);
+        object_to_camera_rotation.convertTo(object_to_camera_rotation_64, CV_64F);
+
+        // solvePnP 给出 T_camera_object；combined 是 T_world_camera。
+        // 对完整位姿左乘，位置和姿态才能一起进入世界坐标系。
+        cv::Mat object_to_camera = cv::Mat::eye(4, 4, CV_64F);
+        object_to_camera_rotation_64.copyTo(object_to_camera(cv::Rect(0, 0, 3, 3)));
+        object_to_camera.at<double>(0, 3) = object_position_in_camera[0];
+        object_to_camera.at<double>(1, 3) = object_position_in_camera[1];
+        object_to_camera.at<double>(2, 3) = object_position_in_camera[2];
+
+        return camera_to_world_64 * object_to_camera;
     }
 }
 
@@ -253,15 +278,20 @@ namespace model
                     -10.686994,	-17.808170,	2.328647
                     );
 
-            combined = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
-                        9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
-                        -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
+            // combined = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
+            //             9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
+            //             -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
+            //             0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
+            // combined_inv = combined.inv();
+            combined = (cv::Mat_<float>(4, 4) << 
+                        -0.036791138,     0.480521384,     0.87621094,  -1908.919479898,
+                        0.999094004,     0.036455454,     0.021958388,  -388.940632775,
+                        -0.021391192313944075,0.8762249705686078,-0.48142727160333376,647.8513827001716,
                         0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
             combined_inv = combined.inv();
 
-            // 当前后处理调用 run_pnp_multi_stage()，未调用 run_lstm_predictin()。
-            // 不再启动时加载/构建未使用的第二套 TensorRT LSTM engine。
-            m_lstm_ready = false;
+            // 未来位置预测已停用，不加载/构建 LSTM TensorRT engine。
+            // m_lstm_ready = false;
         }
 
         void Pose::set_calibration(const std::array<double, 9> &camera_matrix,
@@ -376,7 +406,8 @@ namespace model
                 refine_keypoints(m_bboxes[0].keypoints);
             }
             run_pnp_multi_stage();
-            // run_filter_and_estimation(timestamp, m_frame_counter);
+            run_filter_and_estimation(timestamp, m_frame_counter);
+            // 未来位置预测已停用；如需恢复，还需恢复头文件中的 LSTM 声明和成员。
             // run_lstm_predictin();
 
             return true;
@@ -797,7 +828,6 @@ namespace model
             {
                 dt = 0.033;
             }
-            std::cout << "时间间隔 :" << dt << std::endl;
             cv::Point3f predicted_pos = m_kf.predict(dt); // 先验估计，预测值
             cv::Point3f kf_result;
             if (!_T1_prev.empty())
@@ -828,62 +858,83 @@ namespace model
                 m_result[3] = result.at<float>(0, 0);
                 m_result[4] = result.at<float>(1, 0);
                 m_result[5] = result.at<float>(2, 0);
-                LOG("\tId: %d, [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
-                    frame_id, m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
-            }
-        }
-        void Pose::run_lstm_predictin()
-        {
-            // 3. === LSTM 推理 ===
-            // 逻辑：将 KF 滤波后的平滑数据喂给 LSTM
-            if (m_lstm_ready)
-            {
-                // 推入当前帧 KF 结果，尝试获取未来预测
-                // 只有当积累了 58 帧后，update 才会返回 true
-                if (m_lstm->update(m_result[3], m_result[4], m_result[5]))
+
+                const cv::Mat world_pose = transformCameraPoseToWorld(
+                    combined, R_mat, cv::Vec3f(m_result[3], m_result[4], m_result[5]));
+                const cv::Vec3d world_euler_angles_deg =
+                    rotationMatrixToEulerRxRyRzDegrees(world_pose(cv::Rect(0, 0, 3, 3)));
+
+                // 所有发送/记录链路共用 m_result，顺序保持 rx, ry, rz, x, y, z。
+                m_result[0] = static_cast<float>(world_euler_angles_deg[0]);
+                m_result[1] = static_cast<float>(world_euler_angles_deg[1]);
+                m_result[2] = static_cast<float>(world_euler_angles_deg[2]);
+                m_result[3] = static_cast<float>(world_pose.at<double>(0, 3));
+                m_result[4] = static_cast<float>(world_pose.at<double>(1, 3));
+                m_result[5] = static_cast<float>(world_pose.at<double>(2, 3));
+
+                // 高频逐帧日志会阻塞终端并拖慢网页预览；每秒保留一条诊断信息。
+                static auto last_filter_log_at = std::chrono::steady_clock::time_point{};
+                const auto now = std::chrono::steady_clock::now();
+                if (last_filter_log_at.time_since_epoch().count() == 0 ||
+                    now - last_filter_log_at >= std::chrono::seconds(1))
                 {
-                    std::vector<float> lstm_out = m_lstm->get_prediction();
-
-                    // 【策略选择】
-                    m_result[0] = lstm_out[0];
-                    m_result[1] = lstm_out[1];
-                    m_result[2] = lstm_out[2];
-
-                    // LOGD("LSTM Active: x:%.2f, y:%.2f, z:%.2f", final_x, final_y, final_z);
-                }
-                else
-                {
-                    // m_result[0] = m_result[3];
-                    // m_result[1] = m_result[4];
-                    // m_result[2] = m_result[5];
-
-                    m_result[0] = 0.0f;
-                    m_result[1] = 0.0f;
-                    m_result[2] = 0.0f;
-                    // LOGV("LSTM warming up...");
+                    LOG("\tId: %d, dt:%.4f, [World pose] rx:%.4f, ry:%.4f, rz:%.4f | x:%.4f, y:%.4f, z:%.4f",
+                        frame_id, dt, m_result[0], m_result[1], m_result[2],
+                        m_result[3], m_result[4], m_result[5]);
+                    last_filter_log_at = now;
                 }
             }
-
-            cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[0],
-                                         m_result[1],
-                                         m_result[2],
-                                         1.0); // 现在是直接把观测值通过串口发出去，发预测值改0 1 2
-
-            cv::Mat transformed_point = combined * point_homogeneous;
-
-            uart_result[0] = transformed_point.at<float>(0, 0); // 新的 X
-            uart_result[1] = transformed_point.at<float>(1, 0); // 新的 Y
-            uart_result[2] = transformed_point.at<float>(2, 0); // 新的 Z
-
-            // uart_result[0] = m_result[3]; // 新的 X
-            // uart_result[1] = m_result[4]; // 新的 Y
-            // uart_result[2] = m_result[5]; // 新的 Z
-
-            LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
-                uart_result[0], uart_result[1], uart_result[2]);
-
-            // LOG("\t [Filter] Ref(Past): x:%.4f, y:%.4f, z:%.4f | Curr(KF): x:%.4f, y:%.4f, z:%.4f",
-            //     m_result[0], m_result[1], m_result[2], m_result[3], m_result[4], m_result[5]);
         }
+        /*
+         * 未来位置预测已停用。
+         * 注意：此处仅注释 LSTM 预测与预测结果输出，TrajectoryKF 卡尔曼滤波代码保持不变。
+         *
+         * void Pose::run_lstm_predictin()
+         * {
+         *     // 3. === LSTM 推理 ===
+         *     // 逻辑：将 KF 滤波后的平滑数据喂给 LSTM
+         *     if (m_lstm_ready)
+         *     {
+         *         // 推入当前帧 KF 结果，尝试获取未来预测
+         *         // 只有当积累了 58 帧后，update 才会返回 true
+         *         if (m_lstm->update(m_result[3], m_result[4], m_result[5]))
+         *         {
+         *             std::vector<float> lstm_out = m_lstm->get_prediction();
+         *
+         *             // 【策略选择】
+         *             m_result[0] = lstm_out[0];
+         *             m_result[1] = lstm_out[1];
+         *             m_result[2] = lstm_out[2];
+         *
+         *             // LOGD("LSTM Active: x:%.2f, y:%.2f, z:%.2f", final_x, final_y, final_z);
+         *         }
+         *         else
+         *         {
+         *             // m_result[0] = m_result[3];
+         *             // m_result[1] = m_result[4];
+         *             // m_result[2] = m_result[5];
+         *
+         *             m_result[0] = 0.0f;
+         *             m_result[1] = 0.0f;
+         *             m_result[2] = 0.0f;
+         *             // LOGV("LSTM warming up...");
+         *         }
+         *     }
+         *
+         *     cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[0],
+         *                                  m_result[1],
+         *                                  m_result[2],
+         *                                  1.0);
+         *
+         *     cv::Mat transformed_point = combined * point_homogeneous;
+         *
+         *     uart_result[0] = transformed_point.at<float>(0, 0);
+         *     uart_result[1] = transformed_point.at<float>(1, 0);
+         *     uart_result[2] = transformed_point.at<float>(2, 0);
+         *
+         *     LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
+         *         uart_result[0], uart_result[1], uart_result[2]);
+         * }
+         */
     };
 };

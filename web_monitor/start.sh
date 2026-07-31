@@ -8,9 +8,27 @@ TRT_BINARY="${TRT_BINARY:-${PROJECT_ROOT}/trt}"
 CONFIG_FILE="${CONFIG_FILE:-${SCRIPT_DIR}/config.json}"
 WEB_HOST="${WEB_HOST:-0.0.0.0}"
 WEB_PORT="${WEB_PORT:-8765}"
+WEB_PORT_MAX_TRIES="${WEB_PORT_MAX_TRIES:-20}"
 WEB_PID=""
 TRT_PID=""
 TRT_PID_FILE="${SCRIPT_DIR}/runtime/trt.pid"
+
+port_is_available() {
+    python3 - "${WEB_HOST}" "$1" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    sock.bind((host, port))
+except OSError:
+    raise SystemExit(1)
+finally:
+    sock.close()
+PY
+}
 
 cleanup() {
     local exit_code=$?
@@ -53,12 +71,44 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
     exit 1
 fi
 
+if [[ ! "${WEB_PORT}" =~ ^[0-9]+$ ]] || (( WEB_PORT < 1 || WEB_PORT > 65535 )); then
+    echo "[CVIA] WEB_PORT 必须是 1～65535 之间的整数，当前值：${WEB_PORT}" >&2
+    exit 1
+fi
+if [[ ! "${WEB_PORT_MAX_TRIES}" =~ ^[0-9]+$ ]] || (( WEB_PORT_MAX_TRIES < 1 )); then
+    echo "[CVIA] WEB_PORT_MAX_TRIES 必须是正整数，当前值：${WEB_PORT_MAX_TRIES}" >&2
+    exit 1
+fi
+
+REQUESTED_WEB_PORT="${WEB_PORT}"
+PORT_FOUND=false
+for ((PORT_ATTEMPT = 0; PORT_ATTEMPT < WEB_PORT_MAX_TRIES; PORT_ATTEMPT++)); do
+    if (( WEB_PORT > 65535 )); then
+        break
+    fi
+    if port_is_available "${WEB_PORT}"; then
+        PORT_FOUND=true
+        break
+    fi
+    WEB_PORT=$((WEB_PORT + 1))
+done
+
+if [[ "${PORT_FOUND}" != true ]]; then
+    LAST_WEB_PORT=$((WEB_PORT - 1))
+    echo "[CVIA] 无可用网页端口：已检查 ${REQUESTED_WEB_PORT}～${LAST_WEB_PORT}。" >&2
+    echo "[CVIA] 可通过 WEB_PORT 指定其他端口，例如：WEB_PORT=9000 web_monitor/start.sh" >&2
+    exit 1
+fi
+
 mkdir -p "${SCRIPT_DIR}/runtime"
 rm -f "${TRT_PID_FILE}"
 cd "${PROJECT_ROOT}"
 
 echo "[CVIA] 项目目录：${PROJECT_ROOT}"
 echo "[CVIA] 配置文件：${CONFIG_FILE}"
+if [[ "${WEB_PORT}" != "${REQUESTED_WEB_PORT}" ]]; then
+    echo "[CVIA] 端口 ${REQUESTED_WEB_PORT} 已被占用，自动改用 ${WEB_PORT}。"
+fi
 echo "[CVIA] 正在启动网页控制台 http://${WEB_HOST}:${WEB_PORT} ..."
 
 python3 -u "${SCRIPT_DIR}/server.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
@@ -68,7 +118,7 @@ WEB_PID=$!
 sleep 0.6
 if ! kill -0 "${WEB_PID}" 2>/dev/null; then
     wait "${WEB_PID}" || true
-    echo "[CVIA] 网页服务启动失败，请检查上方错误（常见原因：8765 端口已占用）。" >&2
+    echo "[CVIA] 网页服务启动失败，请检查上方错误（尝试端口：${WEB_PORT}）。" >&2
     exit 1
 fi
 

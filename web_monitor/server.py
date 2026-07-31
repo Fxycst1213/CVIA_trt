@@ -8,6 +8,7 @@ import csv
 import json
 import os
 import signal
+import struct
 import tempfile
 import threading
 import time
@@ -18,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
 RUNTIME_PATH = ROOT / "runtime"
+PREVIEW_PAIR_PATH = RUNTIME_PATH / "preview_pair.bin"
 PID_PATH = RUNTIME_PATH / "trt.pid"
 SESSION_CSV_PATH = RUNTIME_PATH / "pnp_session.csv"
 CALIBRATION_HISTORY_PATH = ROOT / "calibration_history.json"
@@ -25,11 +27,39 @@ MAX_BODY = 256 * 1024
 CALIBRATION_HISTORY_LIMIT = 50
 CALIBRATION_HISTORY_LOCK = threading.Lock()
 SERVER_STARTED_NS = time.time_ns()
+PREVIEW_PAIR_HEADER = struct.Struct("!4sII")
+PREVIEW_PAIR_MAGIC = b"CVP1"
 
 
 def load_config() -> dict:
     with CONFIG_PATH.open("r", encoding="utf-8") as stream:
         return json.load(stream)
+
+
+def read_preview_pair() -> tuple[bytes, bytes, bytes, os.stat_result]:
+    """Read one atomically published, generation-consistent dual-image frame."""
+    with PREVIEW_PAIR_PATH.open("rb") as stream:
+        payload = stream.read()
+        stat = os.fstat(stream.fileno())
+    if len(payload) < PREVIEW_PAIR_HEADER.size:
+        raise ValueError("预览帧包头不完整")
+    magic, primary_length, secondary_length = PREVIEW_PAIR_HEADER.unpack_from(payload)
+    expected_length = PREVIEW_PAIR_HEADER.size + primary_length + secondary_length
+    if (
+        magic != PREVIEW_PAIR_MAGIC
+        or primary_length == 0
+        or secondary_length == 0
+        or len(payload) != expected_length
+    ):
+        raise ValueError("预览帧包格式无效")
+    primary_start = PREVIEW_PAIR_HEADER.size
+    secondary_start = primary_start + primary_length
+    return (
+        payload,
+        payload[primary_start:secondary_start],
+        payload[secondary_start:],
+        stat,
+    )
 
 
 def tail_text_lines(path: Path, limit: int) -> list[str]:
@@ -194,12 +224,22 @@ def session_status() -> dict:
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
-    server_version = "CVIA-Dashboard/1.0"
+    server_version = "CVIA-Dashboard/1.1"
+    protocol_version = "HTTP/1.1"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT / "static"), **kwargs)
 
     def log_message(self, fmt, *args):
+        # 预览轮询属于正常高频流量。逐请求打印会在 15–30 FPS 双图模式下
+        # 产生每秒几十行终端 I/O，反过来拖慢网页与推理进程。
+        path = urlparse(self.path).path
+        status = str(args[1]) if len(args) > 1 else ""
+        hot_path = path.startswith("/preview/") or path in {
+            "/api/reprojection", "/api/pnp", "/api/status"
+        }
+        if hot_path and status.startswith(("2", "3")):
+            return
         print(f"[{time.strftime('%H:%M:%S')}] {self.address_string()} {fmt % args}")
 
     def send_json(self, payload, status=200):
@@ -224,13 +264,36 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/status":
             frames = {}
             now = time.time()
-            for name in ("primary", "secondary"):
-                image = RUNTIME_PATH / f"{name}.jpg"
-                if image.exists():
-                    stat = image.stat()
-                    frames[name] = {"available": True, "age_ms": round((now - stat.st_mtime) * 1000), "bytes": stat.st_size}
-                else:
-                    frames[name] = {"available": False, "age_ms": None, "bytes": 0}
+            try:
+                _, primary, secondary, stat = read_preview_pair()
+                age_ms = round((now - stat.st_mtime) * 1000)
+                frames["primary"] = {
+                    "available": True,
+                    "age_ms": age_ms,
+                    "bytes": len(primary),
+                }
+                frames["secondary"] = {
+                    "available": True,
+                    "age_ms": age_ms,
+                    "bytes": len(secondary),
+                }
+            except (OSError, ValueError):
+                # 兼容尚未更新的推理程序；新版本只写 preview_pair.bin。
+                for name in ("primary", "secondary"):
+                    image = RUNTIME_PATH / f"{name}.jpg"
+                    try:
+                        stat = image.stat()
+                        frames[name] = {
+                            "available": True,
+                            "age_ms": round((now - stat.st_mtime) * 1000),
+                            "bytes": stat.st_size,
+                        }
+                    except OSError:
+                        frames[name] = {
+                            "available": False,
+                            "age_ms": None,
+                            "bytes": 0,
+                        }
             inference_running, inference_pid = inference_process()
             self.send_json({"frames": frames, "config_mtime": CONFIG_PATH.stat().st_mtime_ns,
                             "inference": {"running": inference_running, "pid": inference_pid},
@@ -298,16 +361,42 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if path == "/preview/pair.bin":
+            try:
+                payload, _, _, stat = read_preview_pair()
+            except (OSError, ValueError) as exc:
+                self.send_error(404, f"等待推理程序输出双图帧: {exc}")
+                return
+            etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store, max-age=0")
+            self.send_header("ETag", etag)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if path.startswith("/preview/"):
             name = Path(path).name
             if name not in ("primary.jpg", "secondary.jpg"):
                 self.send_error(404)
                 return
-            image = RUNTIME_PATH / name
-            if not image.exists():
-                self.send_error(404, "等待推理程序输出图像")
-                return
-            data = image.read_bytes()
+            try:
+                _, primary, secondary, _ = read_preview_pair()
+                data = primary if name == "primary.jpg" else secondary
+            except (OSError, ValueError):
+                image = RUNTIME_PATH / name
+                if not image.exists():
+                    self.send_error(404, "等待推理程序输出图像")
+                    return
+                data = image.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
             self.send_header("Content-Length", str(len(data)))
@@ -355,6 +444,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_error(404)
 
 
+class DashboardServer(ThreadingHTTPServer):
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = 64
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CVIA AGX Orin web dashboard")
     parser.add_argument("--host", default="0.0.0.0", help="listen address; default exposes the dashboard to the local network")
@@ -363,7 +458,7 @@ def main() -> None:
     RUNTIME_PATH.mkdir(parents=True, exist_ok=True)
     config = validate(load_config())
     record_calibration_history(config["calibration"])
-    server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
+    server = DashboardServer((args.host, args.port), DashboardHandler)
     print(f"CVIA dashboard: http://{args.host}:{args.port}")
     print("Config changes are atomic and take effect after restarting trt.")
     try:

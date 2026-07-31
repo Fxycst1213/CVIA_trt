@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>CVIA 光路控制台</title>
-  <link rel="stylesheet" href="/app.css?v=20260724-pose-layout">
+  <link rel="stylesheet" href="/app.css?v=20260724-preview-pair">
 </head>
 <body>
   <header class="topbar">
@@ -22,7 +22,7 @@
 
       <div class="stage-grid">
         <figure class="camera-stage camera-stage--primary">
-          <img id="primaryImage" alt="检测相机实时画面">
+          <canvas id="primaryImage" class="preview-frame" aria-label="检测相机实时画面"></canvas>
           <canvas id="reprojectionCanvas" class="reprojection-canvas" aria-label="PnP 三维点重投影图层"></canvas>
           <div class="projection-readout" id="projectionReadout">
             <span>PNP REPROJECTION</span>
@@ -38,7 +38,7 @@
           <div class="empty-state" id="primaryEmpty"><span class="empty-icon">◎</span><strong>等待主图像</strong><small>启动 trt 后，这里会显示独立的网页预览帧</small></div>
         </figure>
         <figure class="camera-stage">
-          <img id="secondaryImage" alt="环境相机实时画面">
+          <canvas id="secondaryImage" class="preview-frame" aria-label="环境相机实时画面"></canvas>
           <figcaption><span><b>B</b> 环境相机 / PnP 副图</span><span id="secondaryMeta">等待帧</span></figcaption>
           <div class="empty-state" id="secondaryEmpty"><span class="empty-icon">◉</span><strong>等待副图像</strong><small>双图模式下自动显示第二路画面</small></div>
         </figure>
@@ -136,6 +136,6 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=20260724-pose-performance" defer></script>
+  <script src="/app.js?v=20260724-preview-pair" defer></script>
 </body>
 </html>

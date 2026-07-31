@@ -9,6 +9,13 @@ let poseTimer = null;
 let isSaving = false;
 let poseRequestPending = false;
 let frameAvailability = {primary:false, secondary:false};
+let previewLoadPending = false;
+let previewLoadStartedAt = 0;
+let previewRequestSequence = 0;
+let previewAbortController = null;
+let previewPairEtag = null;
+let previewBitmaps = {primary:null, secondary:null};
+let previewNaturalSize = {primary:{width:0,height:0}, secondary:{width:0,height:0}};
 let poseRows = [];
 let latestPoseRow = null;
 let latestPoseFileTime = 0;
@@ -23,8 +30,9 @@ let sessionDownloadPending = false;
 let latestSessionStatus = null;
 
 // 网页刷新周期：位姿页打开时曲线 500 ms；其他页面跟随 1000 ms 状态周期。
-const POSE_REFRESH_MS = 500;
+const POSE_REFRESH_MS = 200;
 const STATUS_REFRESH_MS = 1000;
+const PREVIEW_REQUEST_TIMEOUT_MS = 2000;
 
 const poseAxes = [
   {key:"X", index:1, color:"#7c65e4"}, {key:"Y", index:2, color:"#7c65e4"}, {key:"Z", index:3, color:"#7c65e4"},
@@ -149,11 +157,25 @@ function readControl(control) {
 }
 
 function setFrame(name, state) {
-  const image = $(`#${name}Image`), empty = $(`#${name}Empty`), meta = $(`#${name}Meta`);
+  const canvas = $(`#${name}Image`), empty = $(`#${name}Empty`), meta = $(`#${name}Meta`);
   const live = state.available && state.age_ms < 3000;
   frameAvailability[name] = state.available;
   if (state.available) { empty.classList.add("is-hidden"); meta.textContent = `${Math.max(0, state.age_ms)} ms · ${Math.round(state.bytes / 1024)} KB`; }
-  else { image.removeAttribute("src"); empty.classList.remove("is-hidden"); meta.textContent = "等待帧"; }
+  else {
+    previewAbortController?.abort();
+    previewAbortController = null;
+    previewRequestSequence++;
+    previewLoadPending = false;
+    previewLoadStartedAt = 0;
+    previewPairEtag = null;
+    previewBitmaps[name]?.close?.();
+    previewBitmaps[name] = null;
+    previewNaturalSize[name] = {width:0, height:0};
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    empty.classList.remove("is-hidden");
+    meta.textContent = "等待帧";
+  }
   return live;
 }
 
@@ -292,19 +314,137 @@ function scheduleStatusRefresh() {
   statusTimer = setTimeout(async () => { await refreshStatus(); scheduleStatusRefresh(); }, STATUS_REFRESH_MS);
 }
 
-function refreshPreviewImages() {
-  if (!isSaving) {
-    const stamp = Date.now();
-    if (frameAvailability.primary) $("#primaryImage").src = `/preview/primary.jpg?t=${stamp}`;
-    if (frameAvailability.secondary) $("#secondaryImage").src = `/preview/secondary.jpg?t=${stamp}`;
-    refreshReprojection();
+function requestPreviewPair(stamp) {
+  if (!frameAvailability.primary || !frameAvailability.secondary) return false;
+  const now = performance.now();
+  if (previewLoadPending && now - previewLoadStartedAt < PREVIEW_REQUEST_TIMEOUT_MS) return false;
+  previewAbortController?.abort();
+  const controller = new AbortController();
+  const sequence = ++previewRequestSequence;
+  previewAbortController = controller;
+  previewLoadPending = true;
+  previewLoadStartedAt = now;
+  loadPreviewPair(stamp, sequence, controller);
+  return true;
+}
+
+function parsePreviewPair(payload) {
+  const headerSize = 12;
+  if (payload.byteLength < headerSize) throw new Error("双图帧包头不完整");
+  const view = new DataView(payload);
+  const magic = String.fromCharCode(
+    view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3)
+  );
+  const primaryLength = view.getUint32(4, false);
+  const secondaryLength = view.getUint32(8, false);
+  if (magic !== "CVP1" || !primaryLength || !secondaryLength ||
+      headerSize + primaryLength + secondaryLength !== payload.byteLength) {
+    throw new Error("双图帧包格式无效");
   }
+  return {
+    primary:new Blob([payload.slice(headerSize, headerSize + primaryLength)], {type:"image/jpeg"}),
+    secondary:new Blob([payload.slice(headerSize + primaryLength)], {type:"image/jpeg"})
+  };
+}
+
+async function loadPreviewPair(stamp, sequence, controller) {
+  let decoded = [];
+  try {
+    const headers = previewPairEtag ? {"If-None-Match":previewPairEtag} : {};
+    const response = await fetch(`/preview/pair.bin?t=${stamp}`, {
+      cache:"no-store",
+      signal:controller.signal,
+      headers
+    });
+    if (response.status === 304) return;
+    if (!response.ok) throw new Error(`双图预览读取失败: ${response.status}`);
+    const pair = parsePreviewPair(await response.arrayBuffer());
+    const results = await Promise.allSettled([
+      createImageBitmap(pair.primary),
+      createImageBitmap(pair.secondary)
+    ]);
+    decoded = results
+      .filter(result => result.status === "fulfilled")
+      .map(result => result.value);
+    if (results.some(result => result.status === "rejected")) {
+      decoded.forEach(bitmap => bitmap.close?.());
+      decoded = [];
+      throw new Error("双图预览解码失败");
+    }
+    if (sequence !== previewRequestSequence) {
+      decoded.forEach(bitmap => bitmap.close?.());
+      decoded = [];
+      return;
+    }
+    const [primaryBitmap, secondaryBitmap] = decoded;
+    const previousPrimary = previewBitmaps.primary;
+    const previousSecondary = previewBitmaps.secondary;
+    previewBitmaps.primary = primaryBitmap;
+    previewBitmaps.secondary = secondaryBitmap;
+    previewNaturalSize.primary = {width:primaryBitmap.width, height:primaryBitmap.height};
+    previewNaturalSize.secondary = {width:secondaryBitmap.width, height:secondaryBitmap.height};
+    drawPreviewCanvas("primary");
+    drawPreviewCanvas("secondary");
+    previousPrimary?.close?.();
+    previousSecondary?.close?.();
+    decoded = [];
+    previewPairEtag = response.headers.get("ETag") || previewPairEtag;
+    renderReprojection();
+  } catch (error) {
+    decoded.forEach(bitmap => bitmap.close?.());
+    if (error.name !== "AbortError") {
+      // 必须等两张图都成功；瞬时网络或解码错误时整组保留上一帧。
+    }
+  } finally {
+    if (sequence === previewRequestSequence) {
+      previewLoadPending = false;
+      previewLoadStartedAt = 0;
+      previewAbortController = null;
+    }
+  }
+}
+
+function drawPreviewCanvas(name) {
+  const canvas = $(`#${name}Image`);
+  const bitmap = previewBitmaps[name];
+  if (!canvas || !bitmap) return;
+  const rect = canvas.getBoundingClientRect();
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.fillStyle = "#050a0c";
+  context.fillRect(0, 0, rect.width, rect.height);
+  const scale = Math.min(rect.width / bitmap.width, rect.height / bitmap.height);
+  const drawWidth = bitmap.width * scale;
+  const drawHeight = bitmap.height * scale;
+  context.drawImage(
+    bitmap,
+    (rect.width - drawWidth) / 2,
+    (rect.height - drawHeight) / 2,
+    drawWidth,
+    drawHeight
+  );
+}
+
+function refreshPreviewImages() {
+  if (isSaving || document.hidden) return;
+  const stamp = Date.now();
+  const pairRequested = requestPreviewPair(stamp);
+  // 重投影只跟随成功发起的主图请求，避免在图像拥塞时继续制造 JSON 请求。
+  if (pairRequested) refreshReprojection();
 }
 
 function schedulePreviewRefresh() {
   clearTimeout(previewTimer);
   const fps = Math.max(1, Math.min(30, Number(config?.runtime?.preview_fps || 10)));
-  previewTimer = setTimeout(() => { refreshPreviewImages(); schedulePreviewRefresh(); }, Math.round(1000 / fps));
+  const interval = document.hidden ? STATUS_REFRESH_MS : Math.round(1000 / fps);
+  previewTimer = setTimeout(() => { refreshPreviewImages(); schedulePreviewRefresh(); }, interval);
 }
 
 // Equivalent to cv2.projectPoints for one point with k1, k2, p1, p2, k3.
@@ -356,8 +496,8 @@ async function refreshReprojection() {
 }
 
 function renderReprojection() {
-  const canvas = $("#reprojectionCanvas"), image = $("#primaryImage"), readout = $("#projectionReadout");
-  if (!canvas || !image || !readout) return;
+  const canvas = $("#reprojectionCanvas"), readout = $("#projectionReadout");
+  if (!canvas || !readout) return;
   const rect = canvas.getBoundingClientRect(), ratio = Math.min(window.devicePixelRatio || 1, 2);
   const width = Math.max(1, Math.round(rect.width * ratio)), height = Math.max(1, Math.round(rect.height * ratio));
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
@@ -370,7 +510,8 @@ function renderReprojection() {
 
   const sourceWidth = Math.max(1, Number(config.runtime.frame_width));
   const sourceHeight = Math.max(1, Number(config.runtime.frame_height));
-  const imageWidth = image.naturalWidth || sourceWidth, imageHeight = image.naturalHeight || sourceHeight;
+  const imageWidth = previewNaturalSize.primary.width || sourceWidth;
+  const imageHeight = previewNaturalSize.primary.height || sourceHeight;
   // 新版 C++ 直接发布与 solvePnP 同一组 _p3d/R/T 得到的 7 点；旧版回退为仅投影 P0。
   const sourcePoints = latestProjectionPoints.length === 7 ? latestProjectionPoints : [[projectedOrigin.u, projectedOrigin.v]];
   const displayPoints = sourcePoints.map(([sourceU, sourceV], index) => {
@@ -383,7 +524,7 @@ function renderReprojection() {
   $("#projectionPixel").textContent = `P0 u ${origin.u.toFixed(1)} · v ${origin.v.toFixed(1)}`;
   $("#projectionState").textContent = stale ? "位姿已停止更新" : sourcePoints.length === 7 && insideCount === 7 ? "七点重投影有效" : `${insideCount}/${sourcePoints.length} 点在画面内`;
   readout.classList.toggle("is-outside", insideCount !== sourcePoints.length); readout.classList.toggle("is-stale", stale);
-  if (!insideCount || stale || !image.complete || !image.naturalWidth) return;
+  if (!insideCount || stale || !previewBitmaps.primary) return;
 
   const scale = Math.min(rect.width / imageWidth, rect.height / imageHeight);
   const drawWidth = imageWidth * scale, drawHeight = imageHeight * scale;
@@ -466,6 +607,7 @@ function renderPose(rows) {
 }
 
 async function refreshPose() {
+  if (document.hidden) return;
   if (poseRequestPending) return;
   poseRequestPending = true;
   const active = $('.nav-tab[data-tab="pose"]')?.classList.contains("is-active");
@@ -514,7 +656,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#saveSessionLater").addEventListener("click", () => { $("#sessionModal").hidden = true; sessionModalDismissed = true; });
   $$(".nav-tab").forEach(tab => tab.addEventListener("click", () => { $$(".nav-tab").forEach(item => item.classList.toggle("is-active", item === tab)); $$(".form-section").forEach(panel => panel.classList.toggle("is-active", panel.dataset.panel === tab.dataset.tab)); if (tab.dataset.tab === "pose") requestAnimationFrame(refreshPose); }));
   window.addEventListener("beforeunload", event => { if (JSON.stringify(config) !== JSON.stringify(savedConfig)) { event.preventDefault(); event.returnValue = ""; } });
+  document.addEventListener("visibilitychange", () => {
+    schedulePreviewRefresh();
+    schedulePoseRefresh();
+    if (!document.hidden) {
+      refreshStatus();
+      refreshPreviewImages();
+      refreshPose();
+    }
+  });
   await loadConfig(); await loadCalibrationHistory(); await refreshStatus(); refreshPreviewImages(); scheduleStatusRefresh(); schedulePreviewRefresh(); schedulePoseRefresh(); setInterval(() => $("#clock").textContent = new Date().toLocaleTimeString("zh-CN", {hour12:false}), 1000);
-  $("#primaryImage").addEventListener("load", renderReprojection);
-  window.addEventListener("resize", () => { renderReprojection(); if ($('.nav-tab[data-tab="pose"]')?.classList.contains("is-active")) renderPose(poseRows); });
+  window.addEventListener("resize", () => {
+    drawPreviewCanvas("primary");
+    drawPreviewCanvas("secondary");
+    renderReprojection();
+    if ($('.nav-tab[data-tab="pose"]')?.classList.contains("is-active")) renderPose(poseRows);
+  });
 });

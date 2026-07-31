@@ -9,13 +9,14 @@
 #include "logger.hpp"
 #include "model.hpp"
 #include "../algorithms/TrajectoryKF.h"
-#include "../algorithms/PeriodEstimator.h"
+// 周期/历史回溯预测已停用；TrajectoryKF 卡尔曼滤波保留。
+// #include "../algorithms/PeriodEstimator.h"
 #include "../ZEDX/ZEDX.h"
 #include "../IRcamera/IRcamera.h"
 #include "../params/pose_params.hpp"
-#include "../algorithms/FrameLookbackEstimator.h"
+// #include "../algorithms/FrameLookbackEstimator.h"
 
-class LSTMPredictor;
+// class LSTMPredictor;
 
 namespace model
 {
@@ -57,10 +58,10 @@ namespace model
             virtual bool postprocess_cpu(const uint64_t &timestamp) override;
             virtual bool postprocess_gpu(const uint64_t &timestamp) override;
             void run_pnp_multi_stage();
-            std::shared_ptr<FrameLookbackEstimator> m_lookback_estimator;
+            // std::shared_ptr<FrameLookbackEstimator> m_lookback_estimator;
             void run_filter_and_estimation(const uint64_t &timestamp, uint64_t m_frame_counter);
             void run_pnp_single_stage();
-            void run_lstm_predictin();
+            // void run_lstm_predictin();
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt);
             std::vector<float> m_result;
@@ -102,8 +103,8 @@ namespace model
             TrajectoryKF m_kf;
             uint64_t _last_timestamp = 0;
             uint64_t m_frame_counter = -1;
-            std::shared_ptr<LSTMPredictor> m_lstm;
-            bool m_lstm_ready = false; // 标记 LSTM 是否已经加载成功
+            // std::shared_ptr<LSTMPredictor> m_lstm;
+            // bool m_lstm_ready = false; // 标记 LSTM 是否已经加载成功
         };
 
         std::shared_ptr<Pose> make_pose(

@@ -229,6 +229,7 @@ void prj_v8detector::camera_foldimages()
     size_t current_idx = 0;
     while (_is_running)
     {
+        const auto frame_started_at = std::chrono::steady_clock::now();
         auto now = std::chrono::system_clock::now();
         Resultframe _resultframe;
         _resultframe.rgb = cv::imread(filenames[current_idx]);
@@ -272,7 +273,10 @@ void prj_v8detector::camera_foldimages()
             if (_project_params.folder_loop) current_idx = 0;
             else break;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(_project_params.folder_interval_ms));
+        // interval_ms 表示相邻输入帧的起始间隔。原先在推理结束后再完整
+        // sleep，会把解码和推理耗时额外叠加，造成文件夹播放节奏偏慢且抖动。
+        std::this_thread::sleep_until(
+            frame_started_at + std::chrono::milliseconds(_project_params.folder_interval_ms));
     }
     _is_running = false;
     _output_cv.notify_all();
