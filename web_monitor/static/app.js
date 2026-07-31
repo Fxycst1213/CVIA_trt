@@ -16,7 +16,6 @@ let previewAbortController = null;
 let previewPairEtag = null;
 let previewBitmaps = {primary:null, secondary:null};
 let previewNaturalSize = {primary:{width:0,height:0}, secondary:{width:0,height:0}};
-let poseRows = [];
 let latestPoseRow = null;
 let latestPoseFileTime = 0;
 let latestProjectionPoints = [];
@@ -28,6 +27,8 @@ let previousInferenceRunning = null;
 let sessionModalDismissed = false;
 let sessionDownloadPending = false;
 let latestSessionStatus = null;
+let mocapTargetApplying = false;
+let discoveredBodiesSignature = "";
 
 // 网页刷新周期：位姿页打开时曲线 500 ms；其他页面跟随 1000 ms 状态周期。
 const POSE_REFRESH_MS = 200;
@@ -35,8 +36,8 @@ const STATUS_REFRESH_MS = 1000;
 const PREVIEW_REQUEST_TIMEOUT_MS = 2000;
 
 const poseAxes = [
-  {key:"X", index:1, color:"#7c65e4"}, {key:"Y", index:2, color:"#7c65e4"}, {key:"Z", index:3, color:"#7c65e4"},
-  {key:"Rx", index:4, color:"#e8b76c"}, {key:"Ry", index:5, color:"#e8b76c"}, {key:"Rz", index:6, color:"#e8b76c"}
+  {key:"X", field:"x", group:"position"}, {key:"Y", field:"y", group:"position"}, {key:"Z", field:"z", group:"position"},
+  {key:"Rx", field:"rx", group:"euler_deg"}, {key:"Ry", field:"ry", group:"euler_deg"}, {key:"Rz", field:"rz", group:"euler_deg"}
 ];
 const projectionColors = ["#ef7b72", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4"];
 
@@ -54,6 +55,141 @@ function getPath(object, path) { return path.split(".").reduce((value, key) => v
 function setPath(object, path, value) { const keys = path.split("."); const last = keys.pop(); const parent = keys.reduce((item, key) => item[key], object); parent[last] = value; }
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function showToast(message, error = false) { const toast = $("#toast"); toast.textContent = message; toast.classList.toggle("is-error", error); toast.classList.add("is-visible"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 3200); }
+
+function parseMocapSelector(selector) {
+  const text = String(selector || "").trim();
+  if (text.startsWith("id:")) return {mode:"id", value:text.slice(3)};
+  if (text.startsWith("name:")) return {mode:"name", value:text.slice(5)};
+  return /^\d+$/.test(text) ? {mode:"id", value:text} : {mode:"name", value:text};
+}
+
+function selectedMocapMode() {
+  return $('input[name="mocap-target-mode"]:checked')?.value || "name";
+}
+
+function updateMocapTargetEditor(updateConfig = true) {
+  const mode = selectedMocapMode();
+  const input = $("#mocapTargetValue");
+  const value = input.value.trim();
+  const isId = mode === "id";
+  input.type = isId ? "number" : "text";
+  if (isId) {
+    input.min = "0"; input.step = "1"; input.removeAttribute("maxlength");
+    input.placeholder = "0";
+  } else {
+    input.removeAttribute("min"); input.removeAttribute("step"); input.maxLength = 200;
+    input.placeholder = "Tracker4";
+  }
+  $("#mocapTargetLabel").textContent = isId ? "刚体 SDK ID" : "刚体名称";
+  $("#mocapTargetHint").textContent = isId
+    ? "ID 以 SDK 的 DESC 输出为准，不等于名称末尾数字"
+    : "名称按现场 SDK 的 DESC 输出填写，可包含空格";
+
+  const valid = isId ? /^\d+$/.test(value) : Boolean(value);
+  const selector = valid ? `${mode}:${value}` : "";
+  $("#mocapSelectorPreview").textContent = selector || `${mode}:--`;
+  $("#applyMocapTarget").disabled = !valid || !config?.mocap?.enabled || mocapTargetApplying;
+  if (updateConfig && valid) {
+    config.mocap.tracker = selector;
+    updateDirty();
+  }
+  return {mode, value, valid, selector};
+}
+
+function bindMocapTargetEditor() {
+  const target = parseMocapSelector(config?.mocap?.tracker);
+  $$('input[name="mocap-target-mode"]').forEach(control => {
+    control.checked = control.value === target.mode;
+  });
+  $("#mocapTargetValue").value = target.value;
+  updateMocapTargetEditor(false);
+}
+
+function discoveredBodyForSelector(selector) {
+  const target = parseMocapSelector(selector);
+  return [...$("#mocapDiscoveredBodies").options].find(option =>
+    option.dataset.id && (
+      (target.mode === "id" && option.dataset.id === target.value) ||
+      (target.mode === "name" && option.dataset.name === target.value)
+    )
+  );
+}
+
+function changeMocapTargetMode(mode) {
+  const current = discoveredBodyForSelector(config?.mocap?.tracker);
+  $$('input[name="mocap-target-mode"]').forEach(control => {
+    control.checked = control.value === mode;
+  });
+  updateMocapTargetEditor(false);
+  $("#mocapTargetValue").value = current
+    ? (mode === "id" ? current.dataset.id : current.dataset.name)
+    : "";
+  updateMocapTargetEditor();
+}
+
+function selectDiscoveredMocapBody() {
+  const option = $("#mocapDiscoveredBodies").selectedOptions[0];
+  if (!option?.dataset.id) return;
+  $("#mocapTargetValue").value = selectedMocapMode() === "id"
+    ? option.dataset.id
+    : option.dataset.name;
+  updateMocapTargetEditor();
+}
+
+function updateDiscoveredMocapBodies(bodies) {
+  if (!Array.isArray(bodies) || !bodies.length) return;
+  const signature = JSON.stringify(bodies);
+  if (signature === discoveredBodiesSignature) return;
+  discoveredBodiesSignature = signature;
+  const select = $("#mocapDiscoveredBodies");
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "选择 SDK 已发现的刚体";
+  select.appendChild(placeholder);
+  for (const body of bodies) {
+    const option = document.createElement("option");
+    option.value = String(body.id);
+    option.dataset.id = String(body.id);
+    option.dataset.name = String(body.name || "");
+    option.textContent = `${body.name || "未命名刚体"} · SDK ID ${body.id}`;
+    select.appendChild(option);
+  }
+  const current = discoveredBodyForSelector(config?.mocap?.tracker);
+  select.value = current ? current.value : "";
+}
+
+async function applyMocapTarget() {
+  const target = updateMocapTargetEditor();
+  if (!target.valid || mocapTargetApplying) {
+    if (!target.valid) showToast(target.mode === "id" ? "请输入非负整数刚体 ID" : "请输入刚体名称", true);
+    return;
+  }
+  mocapTargetApplying = true;
+  const button = $("#applyMocapTarget");
+  button.disabled = true; button.textContent = "正在切换…";
+  try {
+    const response = await fetch("/api/mocap/target", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({mode:target.mode, value:target.value}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "目标刚体切换失败");
+    config.mocap.tracker = result.tracker;
+    savedConfig.mocap.tracker = result.tracker;
+    updateDirty();
+    updateMocapNetworkStatus(result.mocap);
+    showToast(result.message);
+    await refreshPose();
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    mocapTargetApplying = false;
+    button.textContent = "应用目标并连接";
+    updateMocapTargetEditor(false);
+  }
+}
 
 function cameraFieldHtml(key, fields) {
   return fields.map(([name, text, type]) => {
@@ -92,7 +228,7 @@ function bindConfig() {
     else if (control.type === "checkbox") control.checked = Boolean(value);
     else control.value = value;
   });
-  updateDependentUI(); updateDirty();
+  bindMocapTargetEditor(); updateDependentUI(); updateDirty();
 }
 
 function updateDependentUI() {
@@ -110,6 +246,11 @@ function updateDependentUI() {
     group.style.opacity = applyIrControls ? "1" : ".46";
     $$('[data-path]', group).forEach(control => control.disabled = !applyIrControls);
   });
+  const mocapEnabled = Boolean(config.mocap?.enabled);
+  $("#mocapOptions").style.opacity = mocapEnabled ? "1" : ".46";
+  $$('[data-path^="mocap."]', $("#mocapOptions")).forEach(control => control.disabled = !mocapEnabled);
+  $$('input[name="mocap-target-mode"], #mocapTargetValue, #mocapDiscoveredBodies').forEach(control => control.disabled = !mocapEnabled);
+  updateMocapTargetEditor(false);
   $("#socketModeReadout").textContent = tcpEnabled ? ({0:"单图 + 位姿",1:"仅位姿",2:"双图 + 位姿"})[Number(config.network.socket_mode)] : "TCP 关闭 · 本地落盘";
   $("#resolutionReadout").textContent = `${config.runtime.frame_width} × ${config.runtime.frame_height}`;
   $$('[data-camera-summary]').forEach(item => { const camera = config[item.dataset.cameraSummary]; item.textContent = `ID ${camera.camera_id} · ${camera.fps} FPS`; });
@@ -120,7 +261,7 @@ function updateDirty() {
   $("#saveButton").disabled = !dirty;
   $("#dirtyDot").classList.toggle("is-dirty", dirty);
   $("#saveTitle").textContent = dirty ? "有未保存的修改" : "配置已同步";
-  $("#saveHint").textContent = dirty ? "保存后重启推理进程生效" : "修改参数后在这里保存";
+  $("#saveHint").textContent = dirty ? "保存后重启控制台生效" : "修改参数后在这里保存";
   $("#saveReadout").textContent = dirty ? "待保存" : "已同步";
 }
 
@@ -304,9 +445,24 @@ async function refreshStatus() {
     const response = await fetch("/api/status", {cache:"no-store"}); if (!response.ok) throw new Error();
     const status = await response.json(); const liveA = setFrame("primary", status.frames.primary); const liveB = setFrame("secondary", status.frames.secondary);
     updateInferenceStatus(status);
+    updateMocapNetworkStatus(status.mocap);
     $("#systemDot").classList.toggle("is-live", Boolean(status.inference?.running));
     $("#systemText").textContent = status.inference?.running ? (liveA || liveB ? "推理运行中 · 图像流在线" : "推理运行中 · 等待图像") : "推理已停止 · 等待保存";
   } catch { $("#systemDot").classList.remove("is-live"); $("#systemText").textContent = "网页服务连接中断"; }
+}
+
+function updateMocapNetworkStatus(mocap) {
+  const target = $("#mocapNetworkState");
+  if (!target) return;
+  const labels = {
+    disabled:"接收已关闭", starting:"正在启动", missing:"桥接程序缺失",
+    connecting:"正在连接 SDK", ready:"SDK 已连接", waiting:"等待刚体",
+    live:"数据在线", stale:"数据已暂停", invalid:"刚体解算无效",
+    disconnected:"连接已断开", error:"启动失败", unavailable:"尚未初始化"
+  };
+  target.textContent = labels[mocap?.status] || labels[mocap?.connection] || "等待网页服务状态";
+  target.classList.toggle("is-live", mocap?.status === "live");
+  updateDiscoveredMocapBodies(mocap?.descriptions);
 }
 
 function scheduleStatusRefresh() {
@@ -556,77 +712,83 @@ function renderReprojection() {
   ctx.fillStyle = "#f3aaa4"; ctx.fillText(label, labelX, labelY);
 }
 
-function drawPoseChart(axis, rows) {
-  const canvas = $(`#poseChart${axis.key}`);
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const width = Math.max(1, Math.round(rect.width * ratio));
-  const height = Math.max(1, Math.round(rect.height * ratio));
-  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  const w = rect.width, h = rect.height, left = 35, right = 8, top = 8, bottom = 18;
-  ctx.clearRect(0, 0, w, h);
-  ctx.strokeStyle = "rgba(105,132,140,.16)"; ctx.lineWidth = 1;
-  for (let line = 0; line <= 3; line++) { const y = top + (h - top - bottom) * line / 3; ctx.beginPath(); ctx.moveTo(left, y + .5); ctx.lineTo(w - right, y + .5); ctx.stroke(); }
-  if (!rows.length) {
-    ctx.fillStyle = "#60747b"; ctx.font = "10px ui-monospace, monospace"; ctx.textAlign = "center"; ctx.fillText("暂无 PnP 数据", w / 2, h / 2); return;
-  }
-  const values = rows.map(row => row[axis.index]).filter(Number.isFinite);
-  if (!values.length) return;
-  let min = Math.min(...values), max = Math.max(...values);
-  const padding = Math.max((max - min) * .12, Math.abs(max) * .002, .001);
-  min -= padding; max += padding;
-  const plotW = w - left - right, plotH = h - top - bottom;
-  ctx.fillStyle = "#60747b"; ctx.font = "8px ui-monospace, monospace"; ctx.textAlign = "right";
-  ctx.fillText(max.toFixed(2), left - 4, top + 6); ctx.fillText(min.toFixed(2), left - 4, h - bottom);
-  ctx.strokeStyle = axis.color; ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.beginPath();
-  values.forEach((value, index) => {
-    const x = left + (values.length === 1 ? plotW : index * plotW / (values.length - 1));
-    const y = top + (max - value) * plotH / (max - min);
-    index ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-  });
-  ctx.stroke();
-  const last = values[values.length - 1];
-  const lastY = top + (max - last) * plotH / (max - min);
-  ctx.fillStyle = axis.color; ctx.beginPath(); ctx.arc(w - right, lastY, 2.5, 0, Math.PI * 2); ctx.fill();
+function formatPoseValue(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : "--";
 }
 
-function renderPose(rows) {
-  poseRows = rows;
+function setSourceState(dotSelector, live, warning = false) {
+  const dot = $(dotSelector);
+  dot.classList.toggle("is-live", live);
+  dot.classList.toggle("is-warning", warning);
+}
+
+function renderPoseComparison(result) {
+  const detection = result.detection || {};
+  const mocap = result.mocap || {};
+  const detectionPose = detection.pose || {};
+  const mocapPose = mocap.pose || {};
+
   for (const axis of poseAxes) {
-    const latest = rows.length ? rows[rows.length - 1][axis.index] : null;
-    $(`#poseValue${axis.key}`).textContent = Number.isFinite(latest) ? latest.toFixed(3) : "--";
-    drawPoseChart(axis, rows);
+    $(`#detectValue${axis.key}`).textContent = formatPoseValue(detectionPose[axis.field]);
+    const mocapGroup = mocapPose[axis.group] || {};
+    $(`#mocapValue${axis.key}`).textContent = formatPoseValue(mocapGroup[axis.field]);
   }
-  if (rows.length > 1) {
-    const duration = Math.max(0, rows[rows.length - 1][0] - rows[0][0]);
-    $("#poseRange").textContent = `时间窗口 ${(duration / 1000).toFixed(2)} s · ${rows.length} 点`;
-  } else $("#poseRange").textContent = rows.length ? "1 个检测点" : "时间窗口 --";
+
+  const detectionAge = Number(detection.age_ms);
+  const detectionLive = Boolean(detection.available) && Number.isFinite(detectionAge) && detectionAge <= 2500;
+  $("#detectionState").textContent = !detection.available ? "等待视觉位姿" : detectionLive ? "视觉检测在线" : "视觉位姿已暂停";
+  $("#detectionMeta").textContent = detection.available
+    ? `PnP ${detection.source === "reprojection" ? "当前帧" : "CSV 回退"} · ${Number.isFinite(detectionAge) ? `${detectionAge.toFixed(0)} ms 前更新` : "更新时间未知"}`
+    : "PnP 尚未输出";
+  setSourceState("#detectionDot", detectionLive, Boolean(detection.available) && !detectionLive);
+
+  const mocapLabels = {
+    disabled:"动捕接收已关闭", starting:"正在启动动捕", missing:"桥接程序缺失",
+    connecting:"正在连接 SDK", ready:"SDK 已连接", waiting:"等待目标刚体",
+    live:"NOKOV 动捕在线", stale:"动捕数据已暂停", invalid:"当前刚体解算无效",
+    disconnected:"SDK 连接已断开", error:"动捕启动失败", unavailable:"动捕尚未初始化"
+  };
+  $("#mocapState").textContent = mocapLabels[mocap.status] || "等待动捕数据";
+  const trackerName = mocapPose.tracker_name || mocap.selector || "RIGID BODY";
+  $("#mocapTrackerHeading").textContent = String(trackerName).toUpperCase();
+  $("#mocapMeta").textContent = mocapPose.frame !== undefined
+    ? `帧 ${mocapPose.frame} · ${Number(mocap.age_ms).toFixed(0)} ms 前接收 · SDK ${mocap.sdk_version || "--"}`
+    : (mocap.message || `${mocap.selector || "目标刚体"} · SDK ${mocap.sdk_version || "--"}`);
+  setSourceState("#mocapDot", mocap.status === "live", ["stale", "invalid", "waiting", "ready"].includes(mocap.status));
+  updateMocapNetworkStatus(mocap);
+
+  const bothLive = detectionLive && mocap.status === "live";
+  const eitherAvailable = Boolean(detection.available || mocapPose.frame !== undefined);
+  $("#poseState").textContent = bothLive ? "双源在线" : eitherAvailable ? "单源 / 待同步" : "等待双源";
+  $("#poseState").classList.toggle("is-live", bothLive);
+
+  const delta = Number(result.receive_delta_ms);
+  if (detectionLive && mocap.status === "live" && Number.isFinite(delta)) {
+    const relation = delta >= 0 ? "视觉更新晚于动捕" : "视觉更新早于动捕";
+    $("#comparisonDelta").textContent = `本机更新时差 · ${relation} ${Math.abs(delta).toFixed(1)} ms`;
+  } else {
+    $("#comparisonDelta").textContent = "双源同时在线后显示本机更新时差";
+  }
 }
 
 async function refreshPose() {
   if (document.hidden) return;
   if (poseRequestPending) return;
   poseRequestPending = true;
-  const active = $('.nav-tab[data-tab="pose"]')?.classList.contains("is-active");
   try {
-    const response = await fetch(`/api/pnp?limit=${active ? 240 : 10}`, {cache:"no-store"});
+    const response = await fetch("/api/pose-comparison", {cache:"no-store"});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "位姿读取失败");
-    const rows = result.rows || [];
-    if (!runtimeProjectionAvailable) {
-      latestPoseRow = rows.length ? rows[rows.length - 1] : null;
+    if (!runtimeProjectionAvailable && result.detection?.available) {
+      const pose = result.detection.pose;
+      latestPoseRow = [Number(result.detection.timestamp), pose.x, pose.y, pose.z, pose.rx, pose.ry, pose.rz];
       latestProjectionPoints = [];
-      latestPoseFileTime = result.mtime_ns ? result.mtime_ns / 1e6 : 0;
+      latestPoseFileTime = result.detection.updated_unix_ns ? result.detection.updated_unix_ns / 1e6 : 0;
       projectionEmptyMessage = "等待 CSV 位姿";
     }
     // C++ 已提供同帧七点投影时，图像预览循环负责绘制；这里只更新 CSV 回退投影。
     if (!runtimeProjectionAvailable) renderReprojection();
-    if (active) renderPose(rows);
-    $("#poseState").textContent = result.rows?.length ? `实时 · ${result.rows.length} 点` : "等待 CSV";
-    $("#poseState").classList.toggle("is-live", Boolean(result.rows?.length));
+    renderPoseComparison(result);
   } catch (error) {
     $("#poseState").textContent = "读取失败"; $("#poseState").classList.remove("is-live");
   } finally {
@@ -651,6 +813,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#reloadButton").addEventListener("click", () => loadConfig(true));
   $("#resetCalibration").addEventListener("click", () => { config.calibration = clone(savedConfig.calibration); bindConfig(); showToast("标定值已恢复到当前保存状态"); });
   $("#loadCalibrationHistory").addEventListener("click", applyCalibrationHistory);
+  $$('input[name="mocap-target-mode"]').forEach(control => control.addEventListener("change", () => changeMocapTargetMode(control.value)));
+  $("#mocapTargetValue").addEventListener("input", updateMocapTargetEditor);
+  $("#mocapDiscoveredBodies").addEventListener("change", selectDiscoveredMocapBody);
+  $("#applyMocapTarget").addEventListener("click", applyMocapTarget);
   $("#stopInferenceButton").addEventListener("click", stopInferenceOrSave);
   $("#saveSessionButton").addEventListener("click", savePnpSession);
   $("#saveSessionLater").addEventListener("click", () => { $("#sessionModal").hidden = true; sessionModalDismissed = true; });
@@ -670,6 +836,5 @@ document.addEventListener("DOMContentLoaded", async () => {
     drawPreviewCanvas("primary");
     drawPreviewCanvas("secondary");
     renderReprojection();
-    if ($('.nav-tab[data-tab="pose"]')?.classList.contains("is-active")) renderPose(poseRows);
   });
 });

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import signal
 import struct
@@ -16,7 +17,10 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from mocap_receiver import MocapReceiver
+
 ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ROOT.parent
 CONFIG_PATH = ROOT / "config.json"
 RUNTIME_PATH = ROOT / "runtime"
 PREVIEW_PAIR_PATH = RUNTIME_PATH / "preview_pair.bin"
@@ -29,6 +33,8 @@ CALIBRATION_HISTORY_LOCK = threading.Lock()
 SERVER_STARTED_NS = time.time_ns()
 PREVIEW_PAIR_HEADER = struct.Struct("!4sII")
 PREVIEW_PAIR_MAGIC = b"CVP1"
+MOCAP_RECEIVER: MocapReceiver | None = None
+MOCAP_APPLY_LOCK = threading.Lock()
 
 
 def load_config() -> dict:
@@ -90,7 +96,10 @@ def require_number(value, path: str, minimum=None, maximum=None) -> None:
 
 
 def validate(config: dict) -> dict:
-    required = {"input", "detect_camera", "photo_camera", "calibration", "network", "runtime"}
+    required = {
+        "input", "detect_camera", "photo_camera", "calibration", "network",
+        "runtime", "mocap",
+    }
     if not isinstance(config, dict) or not required.issubset(config):
         raise ValueError("配置结构不完整")
 
@@ -136,6 +145,15 @@ def validate(config: dict) -> dict:
     require_number(network.get("udp_port"), "network.udp_port", 1, 65535)
     if network.get("socket_mode") not in (0, 1, 2):
         raise ValueError("network.socket_mode 只能是 0、1 或 2")
+
+    mocap = config["mocap"]
+    if not isinstance(mocap.get("enabled"), bool):
+        raise ValueError("mocap.enabled 必须是布尔值")
+    for field in ("server", "tracker"):
+        if not isinstance(mocap.get(field), str) or not mocap[field].strip():
+            raise ValueError(f"mocap.{field} 不能为空")
+    require_number(mocap.get("stale_ms"), "mocap.stale_ms", 20, 10000)
+    require_number(mocap.get("retry_seconds"), "mocap.retry_seconds", 1, 60)
 
     runtime = config["runtime"]
     require_number(runtime.get("frame_width"), "runtime.frame_width", 1, 16384)
@@ -223,6 +241,122 @@ def session_status() -> dict:
             "current_run": stat.st_mtime_ns >= SERVER_STARTED_NS}
 
 
+def latest_detection_pose() -> dict:
+    """Read the newest visual PnP pose without retaining an open CSV handle."""
+    state_path = RUNTIME_PATH / "reprojection.json"
+    if state_path.exists():
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+            pose = payload.get("pose")
+            if payload.get("valid") and isinstance(pose, list) and len(pose) == 6:
+                values = [float(value) for value in pose]
+                if all(math.isfinite(value) for value in values):
+                    stat = state_path.stat()
+                    return {
+                        "available": True,
+                        "source": "reprojection",
+                        "timestamp": int(payload.get("timestamp", 0)),
+                        "updated_unix_ns": stat.st_mtime_ns,
+                        "age_ms": round(max(0, time.time_ns() - stat.st_mtime_ns) / 1_000_000, 3),
+                        "pose": dict(zip(("x", "y", "z", "rx", "ry", "rz"), values)),
+                    }
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+
+    if SESSION_CSV_PATH.exists():
+        try:
+            for line in reversed(tail_text_lines(SESSION_CSV_PATH, 10)):
+                row = next(csv.reader([line]))
+                if len(row) != 7 or row[0] == "timestamp":
+                    continue
+                values = [float(value) for value in row[1:]]
+                timestamp = int(row[0])
+                stat = SESSION_CSV_PATH.stat()
+                return {
+                    "available": True,
+                    "source": "csv",
+                    "timestamp": timestamp,
+                    "updated_unix_ns": stat.st_mtime_ns,
+                    "age_ms": round(max(0, time.time_ns() - stat.st_mtime_ns) / 1_000_000, 3),
+                    "pose": dict(zip(("x", "y", "z", "rx", "ry", "rz"), values)),
+                }
+        except (OSError, ValueError, StopIteration, csv.Error):
+            pass
+    return {"available": False, "pose": None}
+
+
+def comparison_snapshot() -> dict:
+    detection = latest_detection_pose()
+    mocap = (
+        MOCAP_RECEIVER.snapshot()
+        if MOCAP_RECEIVER is not None
+        else {
+            "enabled": False,
+            "connection": "unavailable",
+            "status": "unavailable",
+            "message": "动捕接收器尚未初始化",
+            "pose": None,
+        }
+    )
+    receive_delta_ms = None
+    mocap_receive_ns = (mocap.get("pose") or {}).get("receive_unix_ns")
+    detection_update_ns = detection.get("updated_unix_ns")
+    if isinstance(mocap_receive_ns, int) and isinstance(detection_update_ns, int):
+        receive_delta_ms = round(
+            (detection_update_ns - mocap_receive_ns) / 1_000_000, 3
+        )
+    return {
+        "server_unix_ns": time.time_ns(),
+        "detection": detection,
+        "mocap": mocap,
+        # 正值表示视觉状态文件晚于最新动捕回调到达本机。
+        "receive_delta_ms": receive_delta_ms,
+    }
+
+
+def tracker_selector(mode, value) -> str:
+    """Build an unambiguous bridge selector from the web form."""
+    if mode == "name":
+        if not isinstance(value, str):
+            raise ValueError("刚体名称必须是字符串")
+        name = value.strip()
+        if not name:
+            raise ValueError("刚体名称不能为空")
+        if len(name) > 200 or any(ord(character) < 32 for character in name):
+            raise ValueError("刚体名称不能超过 200 个字符或包含控制字符")
+        return f"name:{name}"
+    if mode == "id":
+        if isinstance(value, bool):
+            raise ValueError("刚体 ID 必须是非负整数")
+        try:
+            tracker_id = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("刚体 ID 必须是非负整数") from None
+        if str(value).strip() != str(tracker_id) or not 0 <= tracker_id <= 2_147_483_647:
+            raise ValueError("刚体 ID 必须是非负整数")
+        return f"id:{tracker_id}"
+    raise ValueError("目标选择方式只能是 name 或 id")
+
+
+def apply_mocap_target(mode, value) -> tuple[str, dict]:
+    """Persist one target selector and reconnect only the mocap receiver."""
+    global MOCAP_RECEIVER
+    selector = tracker_selector(mode, value)
+    with MOCAP_APPLY_LOCK:
+        config = load_config()
+        config["mocap"]["tracker"] = selector
+        config = validate(config)
+        atomic_save(config)
+
+        replacement = MocapReceiver(config["mocap"], PROJECT_ROOT)
+        previous = MOCAP_RECEIVER
+        MOCAP_RECEIVER = replacement
+        if previous is not None:
+            previous.stop()
+        replacement.start()
+        return selector, replacement.snapshot()
+
+
 class DashboardHandler(SimpleHTTPRequestHandler):
     server_version = "CVIA-Dashboard/1.1"
     protocol_version = "HTTP/1.1"
@@ -236,7 +370,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         status = str(args[1]) if len(args) > 1 else ""
         hot_path = path.startswith("/preview/") or path in {
-            "/api/reprojection", "/api/pnp", "/api/status"
+            "/api/reprojection", "/api/pnp", "/api/pose-comparison",
+            "/api/status",
         }
         if hot_path and status.startswith(("2", "3")):
             return
@@ -297,7 +432,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             inference_running, inference_pid = inference_process()
             self.send_json({"frames": frames, "config_mtime": CONFIG_PATH.stat().st_mtime_ns,
                             "inference": {"running": inference_running, "pid": inference_pid},
-                            "pnp_session": session_status()})
+                            "pnp_session": session_status(),
+                            "mocap": MOCAP_RECEIVER.snapshot() if MOCAP_RECEIVER else None})
+            return
+        if path == "/api/pose-comparison":
+            try:
+                self.send_json(comparison_snapshot())
+            except Exception as exc:
+                self.send_json({"error": f"读取检测/动捕位姿失败: {exc}"}, 500)
             return
         if path == "/api/calibration-history":
             try:
@@ -420,7 +562,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             current = load_config()
             record_calibration_history(current["calibration"], payload["calibration"])
             atomic_save(payload)
-            self.send_json({"ok": True, "message": "配置已保存；重启推理进程后生效"})
+            self.send_json({
+                "ok": True,
+                "message": "配置已保存；重启控制台后，推理与动捕设置生效",
+            })
         except (ValueError, json.JSONDecodeError) as exc:
             self.send_json({"error": str(exc)}, 400)
         except Exception as exc:
@@ -428,6 +573,30 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/mocap/target":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0 or length > MAX_BODY:
+                    raise ValueError("请求体大小无效")
+                payload = json.loads(
+                    self.rfile.read(length).decode("utf-8")
+                )
+                if not isinstance(payload, dict):
+                    raise ValueError("请求体必须是对象")
+                selector, mocap = apply_mocap_target(
+                    payload.get("mode"), payload.get("value")
+                )
+                self.send_json({
+                    "ok": True,
+                    "tracker": selector,
+                    "mocap": mocap,
+                    "message": f"目标已切换为 {selector}，正在重新连接动捕",
+                })
+            except (ValueError, json.JSONDecodeError) as exc:
+                self.send_json({"error": str(exc)}, 400)
+            except Exception as exc:
+                self.send_json({"error": f"应用目标刚体失败: {exc}"}, 500)
+            return
         if path == "/api/inference/stop":
             running, pid = inference_process()
             if not running or pid is None:
@@ -451,6 +620,7 @@ class DashboardServer(ThreadingHTTPServer):
 
 
 def main() -> None:
+    global MOCAP_RECEIVER
     parser = argparse.ArgumentParser(description="CVIA AGX Orin web dashboard")
     parser.add_argument("--host", default="0.0.0.0", help="listen address; default exposes the dashboard to the local network")
     parser.add_argument("--port", type=int, default=8765)
@@ -459,14 +629,25 @@ def main() -> None:
     config = validate(load_config())
     record_calibration_history(config["calibration"])
     server = DashboardServer((args.host, args.port), DashboardHandler)
+    MOCAP_RECEIVER = MocapReceiver(config["mocap"], PROJECT_ROOT)
+    MOCAP_RECEIVER.start()
     print(f"CVIA dashboard: http://{args.host}:{args.port}")
-    print("Config changes are atomic and take effect after restarting trt.")
+    if config["mocap"]["enabled"]:
+        print(
+            "NOKOV mocap: "
+            f"{config['mocap']['tracker']} @ {config['mocap']['server']}"
+        )
+    print(
+        "Config changes are atomic; restart the dashboard for inference and "
+        "mocap settings to take effect."
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        MOCAP_RECEIVER.stop()
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>CVIA 光路控制台</title>
-  <link rel="stylesheet" href="/app.css?v=20260724-preview-pair">
+  <link rel="stylesheet" href="/app.css?v=20260731-mocap-target">
 </head>
 <body>
   <header class="topbar">
@@ -81,16 +81,34 @@
         </section>
 
         <section class="form-section pose-section" data-panel="pose">
-          <div class="section-intro pose-intro"><div><h3>六自由度位姿</h3><p>来自本次临时 PnP 会话；七个三维点按内参与畸变系数重投影到红外主图。</p></div><span id="poseState" class="pose-state">等待数据</span></div>
-          <div class="pose-grid">
-            <article class="pose-card" data-axis="x"><header><span>位置 X</span><strong id="poseValueX">--</strong><code>unit</code></header><canvas id="poseChartX" aria-label="X 坐标时序图"></canvas></article>
-            <article class="pose-card pose-card--angle" data-axis="rx"><header><span>角度 Rx</span><strong id="poseValueRx">--</strong><code>deg</code></header><canvas id="poseChartRx" aria-label="Rx 角度时序图"></canvas></article>
-            <article class="pose-card" data-axis="y"><header><span>位置 Y</span><strong id="poseValueY">--</strong><code>unit</code></header><canvas id="poseChartY" aria-label="Y 坐标时序图"></canvas></article>
-            <article class="pose-card pose-card--angle" data-axis="ry"><header><span>角度 Ry</span><strong id="poseValueRy">--</strong><code>deg</code></header><canvas id="poseChartRy" aria-label="Ry 角度时序图"></canvas></article>
-            <article class="pose-card" data-axis="z"><header><span>位置 Z</span><strong id="poseValueZ">--</strong><code>unit</code></header><canvas id="poseChartZ" aria-label="Z 坐标时序图"></canvas></article>
-            <article class="pose-card pose-card--angle" data-axis="rz"><header><span>角度 Rz</span><strong id="poseValueRz">--</strong><code>deg</code></header><canvas id="poseChartRz" aria-label="Rz 角度时序图"></canvas></article>
+          <div class="section-intro pose-intro">
+            <div><h3>检测 / 动捕位姿对照</h3><p>六个轴按同一行排布。这里只并列原始结果；坐标系未完成配准前不计算差值。</p></div>
+            <span id="poseState" class="pose-state">等待双源</span>
           </div>
-          <div class="pose-legend"><span><i></i>位置坐标</span><span><i></i>旋转角度</span><small id="poseRange">时间窗口 --</small></div>
+          <div class="registration-board">
+            <div class="registration-head">
+              <span class="axis-heading">轴</span>
+              <div><i class="source-mark source-mark--vision"></i><span>视觉检测</span><strong>PNP / IR</strong></div>
+              <div><i class="source-mark source-mark--mocap"></i><span>NOKOV 动捕</span><strong id="mocapTrackerHeading">RIGID BODY</strong></div>
+            </div>
+            <div class="registration-group">
+              <p><span>POSITION</span><b>XYZ 位置</b></p>
+              <div class="registration-row"><code>X</code><div><strong id="detectValueX">--</strong><small>项目单位</small></div><div><strong id="mocapValueX">--</strong><small>mm</small></div></div>
+              <div class="registration-row"><code>Y</code><div><strong id="detectValueY">--</strong><small>项目单位</small></div><div><strong id="mocapValueY">--</strong><small>mm</small></div></div>
+              <div class="registration-row"><code>Z</code><div><strong id="detectValueZ">--</strong><small>项目单位</small></div><div><strong id="mocapValueZ">--</strong><small>mm</small></div></div>
+            </div>
+            <div class="registration-group registration-group--angle">
+              <p><span>ORIENTATION</span><b>XYZ 欧拉角</b></p>
+              <div class="registration-row"><code>Rx</code><div><strong id="detectValueRx">--</strong><small>deg</small></div><div><strong id="mocapValueRx">--</strong><small>deg</small></div></div>
+              <div class="registration-row"><code>Ry</code><div><strong id="detectValueRy">--</strong><small>deg</small></div><div><strong id="mocapValueRy">--</strong><small>deg</small></div></div>
+              <div class="registration-row"><code>Rz</code><div><strong id="detectValueRz">--</strong><small>deg</small></div><div><strong id="mocapValueRz">--</strong><small>deg</small></div></div>
+            </div>
+            <div class="registration-status">
+              <div><span id="detectionDot" class="source-status-dot"></span><p><b id="detectionState">等待视觉位姿</b><small id="detectionMeta">PnP 尚未输出</small></p></div>
+              <div><span id="mocapDot" class="source-status-dot"></span><p><b id="mocapState">正在连接 SDK</b><small id="mocapMeta">等待刚体数据</small></p></div>
+            </div>
+          </div>
+          <div class="comparison-foot"><span>欧拉角约定：四元数归一化后按 Roll-X / Pitch-Y / Yaw-Z 转换</span><code id="comparisonDelta">接收时差 --</code></div>
         </section>
 
         <section class="form-section" data-panel="cameras">
@@ -119,6 +137,23 @@
           <div class="rule"></div>
           <label class="switch-field switch-field--standalone"><input type="checkbox" data-path="network.udp_enabled"><span class="switch"></span><span><b>上传 UDP 位姿</b><small>独立于 TCP 图像传输</small></span></label>
           <div class="field-row"><label class="field"><span>UDP 地址</span><input type="text" data-path="network.udp_ip"></label><label class="field field--port"><span>端口</span><input type="number" min="1" max="65535" data-path="network.udp_port"></label></div>
+          <div class="rule"></div>
+          <div class="mocap-config-heading"><p class="eyebrow">NOKOV MOTION CAPTURE</p><span id="mocapNetworkState">等待网页服务状态</span></div>
+          <label class="switch-field switch-field--standalone"><input type="checkbox" data-path="mocap.enabled"><span class="switch"></span><span><b>接收 NOKOV 动捕</b><small>网页服务通过本机 SDK 桥接程序持续接收刚体位姿</small></span></label>
+          <div id="mocapOptions" class="field-cluster">
+            <div class="field-row mocap-connection-fields"><label class="field"><span>XING SDK 服务器</span><input type="text" data-path="mocap.server" placeholder="10.1.1.198"></label><label class="field"><span>数据过期阈值 / ms</span><input type="number" min="20" max="10000" step="10" data-path="mocap.stale_ms"></label></div>
+            <div class="mocap-target-panel">
+              <div class="mocap-target-title"><span>TARGET RIGID BODY</span><p><b>选择目标刚体</b><small>按名称或 SDK ID，只重启动捕连接</small></p></div>
+              <div class="mocap-target-mode" role="radiogroup" aria-label="目标刚体选择方式">
+                <label><input type="radio" name="mocap-target-mode" value="name"><span><code>NAME</code>按名称</span></label>
+                <label><input type="radio" name="mocap-target-mode" value="id"><span><code>ID</code>按 ID</span></label>
+              </div>
+              <label class="field mocap-target-value"><span id="mocapTargetLabel">刚体名称</span><input id="mocapTargetValue" type="text" maxlength="200" autocomplete="off" placeholder="Tracker4"><small id="mocapTargetHint">名称按现场 SDK 的 DESC 输出填写，区分空格</small></label>
+              <label class="field"><span>SDK 已发现刚体</span><select id="mocapDiscoveredBodies"><option value="">等待 SDK 返回刚体描述</option></select><small>选择一项会按上面的 NAME / ID 模式自动填入</small></label>
+              <div class="mocap-target-actions"><code id="mocapSelectorPreview">name:Tracker4</code><button id="applyMocapTarget" type="button">应用目标并连接</button></div>
+            </div>
+            <small class="mocap-restart-note">服务器地址和过期阈值随底部“保存配置”保存，重启控制台后生效；目标刚体可在上方立即切换。</small>
+          </div>
         </section>
       </form>
 
@@ -136,6 +171,6 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=20260724-preview-pair" defer></script>
+  <script src="/app.js?v=20260731-mocap-target" defer></script>
 </body>
 </html>

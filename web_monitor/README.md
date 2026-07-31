@@ -10,6 +10,27 @@
 ./web_monitor/start.sh
 ```
 
+网页服务会同时维护 NOKOV 动捕 SDK 连接。第一次使用或 SDK 桥接源码更新后，先单独编译桥接程序：
+
+```bash
+cmake \
+  -S web_monitor/mocap \
+  -B web_monitor/mocap/build \
+  -DCMAKE_BUILD_TYPE=Release
+
+cmake --build web_monitor/mocap/build \
+  --target MocapBridge \
+  -j4
+```
+
+生成文件为 `web_monitor/mocap/bin/MocapBridge`。工程已包含成套的 NOKOV ARM64
+头文件和 `lib/aarch64/libnokov_sdk.so`；它们来自
+`/home/wts/getViedo` 中 README 所述的 NOKOV 官方 SDK，不要混用其他版本的头文件或动态库。
+原始网络部署、SDK 校验和 `POSE` 协议说明已一并复制到
+[`mocap/README_NOKOV_SDK_ORIN.md`](mocap/README_NOKOV_SDK_ORIN.md)；其中
+`/home/wts/getViedo` 路径用于记录原始部署，当前工程运行路径以上述 `web_monitor/mocap`
+目录为准。
+
 脚本只启动网页与现有的 `./trt`，不会执行 CMake 或编译。网页先启动，随后推理开始。完成采集时，请在网页顶部点击“停止推理并保存”：
 
 1. 网页向 `trt` 发送优雅停止请求。
@@ -65,6 +86,38 @@ http://192.168.1.50:8765
 - “标定”页按时间倒序显示历史记录。选中版本并点击“载入到表单”后，还需点击底部“保存配置”才会成为下次推理使用的配置。
 - `web_monitor/config.json` 和标定历史均采用临时文件加原子替换，避免断电或并发读取产生半份 JSON。
 
+## NOKOV 动捕与位姿对照
+
+- SDK 文件是否位于当前工作区不影响接收；运行时只要求桥接程序能加载同架构、同版本的
+  `libnokov_sdk.so`，并且 Orin 到 XING SDK 服务器的网络可达。当前工程已经携带成套
+  ARM64 SDK，因此启动后不依赖 `/home/wts/getViedo`。接收器默认优先使用工程内的
+  `web_monitor/mocap/bin/MocapBridge`；若它不存在，会自动回退到
+  `/home/wts/getViedo/XING_Linux/bin/MocapBridge`。也可以在启动时显式指定外部桥接：
+
+  ```bash
+  CVIA_MOCAP_BRIDGE=/path/to/MocapBridge ./web_monitor/start.sh
+  ```
+
+  外部桥接必须能通过自身 RPATH 或 `LD_LIBRARY_PATH` 找到配套的 NOKOV 动态库。
+- 默认连接 XING/XINGYING SDK 服务器 `10.1.1.198`。本机联调时 SDK 的 `DESC`
+  输出为刚体 `Tracker4`（ID 0），因此当前默认选择器为 `name:Tracker4`。可在“网络”页
+  选择“按名称”或“按 ID”，也可以直接点选 SDK 已发现的刚体。点击“应用目标并连接”
+  会原子保存选择并只重启动捕接收器，不中断网页或视觉推理。服务器地址和数据过期
+  阈值仍随完整配置保存、重启控制台后生效。现场应始终以 API 状态中的刚体描述为准，
+  名称末尾数字不等于 SDK ID。
+- 网页服务启动 `MocapBridge` 并在连接退出后自动重试。XING/XINGYING 端需开启
+  `SDK Enabled`，且 Orin 到服务器的 `10.1.1.0/24` 路由必须可达。
+- SDK 的 XYZ 原样显示，默认单位为 mm。四元数先归一化，再转换成
+  Roll-X / Pitch-Y / Yaw-Z 欧拉角，网页统一显示为度。
+- `9999999` 哨兵值、非有限数值和零长度四元数会标记为无效。按照 NOKOV 部署说明，
+  `params=0` 不会单独导致一帧数据被删除。
+- “位姿”页按 X、Y、Z、Rx、Ry、Rz 六行并列显示视觉 PnP 与 NOKOV 动捕。
+  页面不画对比曲线，也不直接计算两列差值。只有在两套坐标系完成轴向、原点、尺度和
+  欧拉角约定的配准后，数值差才具有物理意义。
+- “本机更新时差”是视觉状态文件修改时间与最新动捕 SDK 回调到达 Orin 的时间之差，
+  用于判断两路数据的新鲜度，不等同于硬件同步误差。需要严格逐帧对齐时，应让相机、
+  Orin 与 XING 主机使用统一 NTP/PTP 或硬件触发。
+
 ## 图像、相机与重投影
 
 - 红外相机 ID 默认为 0，负责推理并允许配置曝光、白平衡和画质参数。
@@ -75,7 +128,7 @@ http://192.168.1.50:8765
 - 采集、推理和输出队列均采用最新帧优先，慢速网页编码不会积压历史帧。
 - 浏览器最多保留一个双图在途请求，并使用持久 Canvas 显示：后端把同批次两张 JPEG 原子发布为一个帧包，浏览器等两张都成功解码后才成组绘制；任意一张加载失败时，两块画布都继续保留上一批帧。切到后台标签页时暂停图像与位姿轮询；网页服务使用 HTTP/1.1，并忽略成功预览请求的逐条日志。
 - PnP 求解成功后，C++ 使用同一组 `_p3d`、旋转/平移、内参和畸变系数调用 `cv::projectPoints`。网页在红外主图绘制七点：P0 为红色，P1–P6 为统一青色。
-- 位姿页把 X、Y、Z、Rx、Ry、Rz 分别绘制在六个时序坐标系中。
+- 位姿页把 X、Y、Z、Rx、Ry、Rz 按轴并排显示检测与动捕的最新结果。
 
 若采集仍低于 60 FPS，请用 `v4l2-ctl --list-formats-ext` 确认相机支持 MJPEG 1920×1080@60，并检查两路相机是否共享 USB 2.0 控制器。暗环境下自动曝光也可能延长曝光时间并降低实际帧率。
 
@@ -93,5 +146,8 @@ TCP 默认关闭，不创建连接，因此不会产生旧接收端的 `connect 
 - `GET /api/pnp/download`：仅在推理停止后下载完整临时 CSV。
 - `GET /api/calibration-history`：读取最近 50 个去重标定版本。
 - `GET /api/reprojection`：读取当前帧的七点 PnP 重投影状态。
+- `GET /api/pose-comparison`：读取最新视觉 PnP、NOKOV XYZ/欧拉角、数据状态及本机更新时差。
+- `POST /api/mocap/target`：按 `{"mode":"name","value":"Tracker4"}` 或
+  `{"mode":"id","value":0}` 保存目标刚体并立即重启动捕接收器。
 - `GET /preview/pair.bin`：读取后端原子发布的同批次双图帧包（网页主路径）。
 - `GET /preview/primary.jpg`、`GET /preview/secondary.jpg`：读取单张预览的兼容接口；数据同样来自双图帧包。
