@@ -18,6 +18,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from mocap_receiver import MocapReceiver
+from offline_sync import (
+    estimate_time_offset,
+    generate_offline_reports,
+    load_detection_poses,
+    load_mocap_poses,
+)
 
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
@@ -26,6 +32,14 @@ RUNTIME_PATH = ROOT / "runtime"
 PREVIEW_PAIR_PATH = RUNTIME_PATH / "preview_pair.bin"
 PID_PATH = RUNTIME_PATH / "trt.pid"
 SESSION_CSV_PATH = RUNTIME_PATH / "pnp_session.csv"
+MOCAP_SESSION_CSV_PATH = RUNTIME_PATH / "mocap_session.csv"
+SYNCED_SESSION_CSV_PATH = RUNTIME_PATH / "synchronized_session.csv"
+# The historical report path remains the composite canvas for compatibility.
+OFFLINE_REPORT_PATH = RUNTIME_PATH / "synchronized_report.svg"
+OFFLINE_CAMERA_REPORT_PATH = RUNTIME_PATH / "synchronized_camera_report.svg"
+OFFLINE_MOCAP_REPORT_PATH = RUNTIME_PATH / "synchronized_mocap_report.svg"
+OFFLINE_SUMMARY_PATH = RUNTIME_PATH / "synchronized_summary.json"
+OFFSET_ESTIMATE_PATH = RUNTIME_PATH / "offset_estimate.json"
 CALIBRATION_HISTORY_PATH = ROOT / "calibration_history.json"
 MAX_BODY = 256 * 1024
 CALIBRATION_HISTORY_LIMIT = 50
@@ -35,6 +49,16 @@ PREVIEW_PAIR_HEADER = struct.Struct("!4sII")
 PREVIEW_PAIR_MAGIC = b"CVP1"
 MOCAP_RECEIVER: MocapReceiver | None = None
 MOCAP_APPLY_LOCK = threading.Lock()
+SYNC_REPORT_LOCK = threading.Lock()
+
+SYNC_DEFAULTS = {
+    "enabled": True,
+    "offset_ms": 0.0,
+    "max_error_ms": 12.0,
+    "history_ms": 5000,
+    "interpolate": True,
+    "auto_offset_search_ms": 1000,
+}
 
 
 def load_config() -> dict:
@@ -147,6 +171,10 @@ def validate(config: dict) -> dict:
         raise ValueError("network.socket_mode 只能是 0、1 或 2")
 
     mocap = config["mocap"]
+    mocap.setdefault("clock_mode", "sdk_affine")
+    mocap.setdefault("clock_fit_window_seconds", 60.0)
+    mocap.setdefault("clock_fit_min_seconds", 3.0)
+    mocap.setdefault("clock_max_rate_ppm", 5000.0)
     if not isinstance(mocap.get("enabled"), bool):
         raise ValueError("mocap.enabled 必须是布尔值")
     for field in ("server", "tracker"):
@@ -154,6 +182,41 @@ def validate(config: dict) -> dict:
             raise ValueError(f"mocap.{field} 不能为空")
     require_number(mocap.get("stale_ms"), "mocap.stale_ms", 20, 10000)
     require_number(mocap.get("retry_seconds"), "mocap.retry_seconds", 1, 60)
+    if mocap.get("clock_mode") not in ("sdk_affine", "receive"):
+        raise ValueError("mocap.clock_mode 只能是 sdk_affine 或 receive")
+    require_number(
+        mocap.get("clock_fit_window_seconds"),
+        "mocap.clock_fit_window_seconds",
+        5,
+        3600,
+    )
+    require_number(
+        mocap.get("clock_fit_min_seconds"),
+        "mocap.clock_fit_min_seconds",
+        1,
+        60,
+    )
+    require_number(
+        mocap.get("clock_max_rate_ppm"),
+        "mocap.clock_max_rate_ppm",
+        100,
+        100000,
+    )
+
+    sync = config.setdefault("sync", dict(SYNC_DEFAULTS))
+    sync.setdefault("auto_offset_search_ms", SYNC_DEFAULTS["auto_offset_search_ms"])
+    for field in ("enabled", "interpolate"):
+        if not isinstance(sync.get(field), bool):
+            raise ValueError(f"sync.{field} 必须是布尔值")
+    require_number(sync.get("offset_ms"), "sync.offset_ms", -5000, 5000)
+    require_number(sync.get("max_error_ms"), "sync.max_error_ms", 0.1, 1000)
+    require_number(sync.get("history_ms"), "sync.history_ms", 100, 60000)
+    require_number(
+        sync.get("auto_offset_search_ms"),
+        "sync.auto_offset_search_ms",
+        50,
+        5000,
+    )
 
     runtime = config["runtime"]
     require_number(runtime.get("frame_width"), "runtime.frame_width", 1, 16384)
@@ -174,6 +237,20 @@ def atomic_save_json(path: Path, payload, prefix: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(payload, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def atomic_save_text(path: Path, payload: str, prefix: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temp_path, path)
@@ -236,7 +313,7 @@ def session_status() -> dict:
     if not SESSION_CSV_PATH.exists():
         return {"available": False, "bytes": 0, "mtime_ns": None}
     stat = SESSION_CSV_PATH.stat()
-    has_rows = stat.st_size > len("timestamp,x,y,z,rx,ry,rz\n")
+    has_rows = len(tail_text_lines(SESSION_CSV_PATH, 2)) >= 2
     return {"available": has_rows, "bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns,
             "current_run": stat.st_mtime_ns >= SERVER_STARTED_NS}
 
@@ -252,10 +329,24 @@ def latest_detection_pose() -> dict:
                 values = [float(value) for value in pose]
                 if all(math.isfinite(value) for value in values):
                     stat = state_path.stat()
+                    capture_timestamp_ns = int(
+                        payload.get("capture_timestamp_ns")
+                        or int(payload.get("timestamp", 0)) * 1_000_000
+                    )
+                    publish_timestamp_ns = int(payload.get("publish_timestamp_ns") or 0)
                     return {
                         "available": True,
                         "source": "reprojection",
                         "timestamp": int(payload.get("timestamp", 0)),
+                        "capture_timestamp_ns": capture_timestamp_ns,
+                        "publish_timestamp_ns": publish_timestamp_ns,
+                        "pipeline_latency_ms": (
+                            round((publish_timestamp_ns - capture_timestamp_ns) / 1_000_000, 3)
+                            if publish_timestamp_ns >= capture_timestamp_ns else None
+                        ),
+                        "timestamp_source": payload.get("timestamp_source", "unknown"),
+                        "timestamp_point": payload.get("timestamp_point", "unknown"),
+                        "coordinate_frame": payload.get("coordinate_frame", "mocap"),
                         "updated_unix_ns": stat.st_mtime_ns,
                         "age_ms": round(max(0, time.time_ns() - stat.st_mtime_ns) / 1_000_000, 3),
                         "pose": dict(zip(("x", "y", "z", "rx", "ry", "rz"), values)),
@@ -265,22 +356,37 @@ def latest_detection_pose() -> dict:
 
     if SESSION_CSV_PATH.exists():
         try:
+            with SESSION_CSV_PATH.open("r", encoding="utf-8", newline="") as stream:
+                header = next(csv.reader(stream))
             for line in reversed(tail_text_lines(SESSION_CSV_PATH, 10)):
                 row = next(csv.reader([line]))
-                if len(row) != 7 or row[0] == "timestamp":
+                if row == header or len(row) != len(header):
                     continue
-                values = [float(value) for value in row[1:]]
-                timestamp = int(row[0])
+                record = dict(zip(header, row))
+                values = [float(record[field]) for field in ("x", "y", "z", "rx", "ry", "rz")]
+                timestamp = int(record["timestamp"])
+                capture_timestamp_ns = int(
+                    record.get("capture_timestamp_ns") or timestamp * 1_000_000
+                )
+                publish_timestamp_ns = int(record.get("publish_timestamp_ns") or 0)
                 stat = SESSION_CSV_PATH.stat()
                 return {
                     "available": True,
                     "source": "csv",
                     "timestamp": timestamp,
+                    "capture_timestamp_ns": capture_timestamp_ns,
+                    "publish_timestamp_ns": publish_timestamp_ns,
+                    "pipeline_latency_ms": (
+                        round((publish_timestamp_ns - capture_timestamp_ns) / 1_000_000, 3)
+                        if publish_timestamp_ns >= capture_timestamp_ns else None
+                    ),
+                    "timestamp_source": "csv",
+                    "coordinate_frame": record.get("coordinate_frame") or "mocap",
                     "updated_unix_ns": stat.st_mtime_ns,
                     "age_ms": round(max(0, time.time_ns() - stat.st_mtime_ns) / 1_000_000, 3),
                     "pose": dict(zip(("x", "y", "z", "rx", "ry", "rz"), values)),
                 }
-        except (OSError, ValueError, StopIteration, csv.Error):
+        except (KeyError, OSError, ValueError, StopIteration, csv.Error):
             pass
     return {"available": False, "pose": None}
 
@@ -305,13 +411,170 @@ def comparison_snapshot() -> dict:
         receive_delta_ms = round(
             (detection_update_ns - mocap_receive_ns) / 1_000_000, 3
         )
+    sync_config = load_config().get("sync", SYNC_DEFAULTS)
+    synchronization = {
+        "status": "disabled",
+        "message": "实时软件同步已关闭",
+        "pose": None,
+        "enabled": bool(sync_config.get("enabled", True)),
+    }
+    if synchronization["enabled"]:
+        if MOCAP_RECEIVER is None:
+            synchronization.update(status="waiting", message="动捕接收器尚未初始化")
+        elif not detection.get("available"):
+            synchronization.update(status="waiting", message="等待视觉 PnP 结果")
+        elif detection.get("source") != "reprojection":
+            synchronization.update(status="waiting", message="当前视觉结果来自 CSV 回退，不参与实时配对")
+        else:
+            synchronization = MOCAP_RECEIVER.match_at_unix_ns(
+                int(detection.get("capture_timestamp_ns")
+                    or int(detection["timestamp"]) * 1_000_000),
+                offset_ms=float(sync_config.get("offset_ms", 0.0)),
+                max_error_ms=float(sync_config.get("max_error_ms", 12.0)),
+                interpolate=bool(sync_config.get("interpolate", True)),
+            )
+            synchronization["enabled"] = True
+    synchronization["visual_timestamp_ms"] = detection.get("timestamp")
+    synchronization["visual_capture_timestamp_ns"] = detection.get("capture_timestamp_ns")
     return {
         "server_unix_ns": time.time_ns(),
         "detection": detection,
         "mocap": mocap,
         # 正值表示视觉状态文件晚于最新动捕回调到达本机。
         "receive_delta_ms": receive_delta_ms,
+        "synchronization": synchronization,
     }
+
+
+def offline_report_status() -> dict:
+    offset_estimation = None
+    if OFFSET_ESTIMATE_PATH.exists():
+        try:
+            offset_estimation = json.loads(
+                OFFSET_ESTIMATE_PATH.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            offset_estimation = None
+    if not OFFLINE_SUMMARY_PATH.exists():
+        return {
+            "available": False,
+            "detection_available": SESSION_CSV_PATH.exists(),
+            "mocap_available": MOCAP_SESSION_CSV_PATH.exists(),
+            "offset_estimation": offset_estimation,
+        }
+    try:
+        summary = json.loads(OFFLINE_SUMMARY_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {
+            "available": False,
+            "message": "离线同步摘要无法读取",
+            "offset_estimation": offset_estimation,
+        }
+    report_paths = {
+        "camera": OFFLINE_CAMERA_REPORT_PATH,
+        "mocap": OFFLINE_MOCAP_REPORT_PATH,
+        "composite": OFFLINE_REPORT_PATH,
+    }
+    report_urls = {
+        "camera": "/api/sync/offline/report/camera.svg",
+        "mocap": "/api/sync/offline/report/mocap.svg",
+        "composite": "/api/sync/offline/report/composite.svg",
+    }
+    return {
+        "available": (
+            SYNCED_SESSION_CSV_PATH.exists()
+            and all(path.exists() for path in report_paths.values())
+        ),
+        "summary": summary,
+        "offset_estimation": offset_estimation,
+        "csv_url": "/api/sync/offline/download.csv",
+        "report_urls": report_urls,
+        # Older dashboard clients continue to open the composite report.
+        "report_url": "/api/sync/offline/report.svg",
+    }
+
+
+def estimate_offline_offset() -> dict:
+    running, _ = inference_process()
+    if running:
+        raise RuntimeError("请先停止推理，确保两路会话完成刷新")
+    if not SESSION_CSV_PATH.exists():
+        raise FileNotFoundError("本次运行没有视觉 PnP CSV")
+    if MOCAP_RECEIVER is not None:
+        MOCAP_RECEIVER.finish_recording()
+    if not MOCAP_SESSION_CSV_PATH.exists():
+        raise FileNotFoundError("本次运行没有动捕会话 CSV")
+    with SYNC_REPORT_LOCK:
+        config = validate(load_config())
+        estimation = estimate_time_offset(
+            load_detection_poses(SESSION_CSV_PATH),
+            load_mocap_poses(MOCAP_SESSION_CSV_PATH),
+            max_offset_ms=float(config["sync"]["auto_offset_search_ms"]),
+        )
+        estimation["estimated_unix_ns"] = time.time_ns()
+        estimation["estimated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        estimation["applied"] = bool(estimation["reliable"])
+        if estimation["applied"]:
+            config["sync"]["offset_ms"] = estimation["offset_ms"]
+            atomic_save(config)
+            for stale_report in (
+                SYNCED_SESSION_CSV_PATH,
+                OFFLINE_CAMERA_REPORT_PATH,
+                OFFLINE_MOCAP_REPORT_PATH,
+                OFFLINE_REPORT_PATH,
+                OFFLINE_SUMMARY_PATH,
+            ):
+                stale_report.unlink(missing_ok=True)
+        atomic_save_json(OFFSET_ESTIMATE_PATH, estimation, "offset-estimate-")
+    return {
+        "ok": True,
+        "offset_estimation": estimation,
+        "config_offset_ms": config["sync"]["offset_ms"],
+    }
+
+
+def build_offline_report() -> dict:
+    running, _ = inference_process()
+    if running:
+        raise RuntimeError("请先停止推理，确保视觉 CSV 完成刷新")
+    if not SESSION_CSV_PATH.exists():
+        raise FileNotFoundError("本次运行没有视觉 PnP CSV")
+    if MOCAP_RECEIVER is not None:
+        MOCAP_RECEIVER.finish_recording()
+    if not MOCAP_SESSION_CSV_PATH.exists():
+        raise FileNotFoundError("本次运行没有动捕会话 CSV")
+    sync_config = load_config().get("sync", SYNC_DEFAULTS)
+    with SYNC_REPORT_LOCK:
+        offset_estimation = None
+        if OFFSET_ESTIMATE_PATH.exists():
+            try:
+                offset_estimation = json.loads(
+                    OFFSET_ESTIMATE_PATH.read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
+        summary, csv_payload, reports = generate_offline_reports(
+            SESSION_CSV_PATH,
+            MOCAP_SESSION_CSV_PATH,
+            offset_ms=float(sync_config.get("offset_ms", 0.0)),
+            max_error_ms=float(sync_config.get("max_error_ms", 12.0)),
+            interpolate=bool(sync_config.get("interpolate", True)),
+            offset_estimation=offset_estimation,
+        )
+        summary["generated_unix_ns"] = time.time_ns()
+        summary["generated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        atomic_save_text(SYNCED_SESSION_CSV_PATH, csv_payload, "sync-csv-")
+        atomic_save_text(
+            OFFLINE_CAMERA_REPORT_PATH, reports["camera"], "sync-camera-svg-"
+        )
+        atomic_save_text(
+            OFFLINE_MOCAP_REPORT_PATH, reports["mocap"], "sync-mocap-svg-"
+        )
+        atomic_save_text(
+            OFFLINE_REPORT_PATH, reports["composite"], "sync-composite-svg-"
+        )
+        atomic_save_json(OFFLINE_SUMMARY_PATH, summary, "sync-summary-")
+    return offline_report_status()
 
 
 def tracker_selector(mode, value) -> str:
@@ -348,7 +611,12 @@ def apply_mocap_target(mode, value) -> tuple[str, dict]:
         config = validate(config)
         atomic_save(config)
 
-        replacement = MocapReceiver(config["mocap"], PROJECT_ROOT)
+        replacement = MocapReceiver(
+            config["mocap"],
+            PROJECT_ROOT,
+            history_ms=config["sync"]["history_ms"],
+            session_csv_path=MOCAP_SESSION_CSV_PATH,
+        )
         previous = MOCAP_RECEIVER
         MOCAP_RECEIVER = replacement
         if previous is not None:
@@ -358,11 +626,31 @@ def apply_mocap_target(mode, value) -> tuple[str, dict]:
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
-    server_version = "CVIA-Dashboard/1.1"
+    server_version = "CVIA-Dashboard/1.2"
     protocol_version = "HTTP/1.1"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT / "static"), **kwargs)
+
+    def guess_type(self, path):
+        """Declare UTF-8 explicitly for static text on legacy Windows browsers."""
+        content_type = super().guess_type(path)
+        media_type = content_type.split(";", 1)[0].lower()
+        if media_type in {
+            "text/html", "text/css", "text/javascript", "application/javascript",
+            "application/json", "image/svg+xml",
+        }:
+            return f"{media_type}; charset=utf-8"
+        return content_type
+
+    def end_headers(self):
+        # Win7 上的旧版 Chromium/兼容配置不能总是可靠推断外部 CSS/JS 编码。
+        self.send_header("Content-Language", "zh-CN")
+        self.send_header("X-UA-Compatible", "IE=edge")
+        static_path = urlparse(self.path).path
+        if static_path == "/" or Path(static_path).suffix.lower() in {".html", ".css", ".js"}:
+            self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def log_message(self, fmt, *args):
         # 预览轮询属于正常高频流量。逐请求打印会在 15–30 FPS 双图模式下
@@ -441,6 +729,44 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"error": f"读取检测/动捕位姿失败: {exc}"}, 500)
             return
+        if path == "/api/sync/offline":
+            self.send_json(offline_report_status())
+            return
+        report_routes = {
+            "/api/sync/offline/report.svg": OFFLINE_REPORT_PATH,
+            "/api/sync/offline/report/camera.svg": OFFLINE_CAMERA_REPORT_PATH,
+            "/api/sync/offline/report/mocap.svg": OFFLINE_MOCAP_REPORT_PATH,
+            "/api/sync/offline/report/composite.svg": OFFLINE_REPORT_PATH,
+        }
+        if path in report_routes:
+            report_path = report_routes[path]
+            if not report_path.exists():
+                self.send_error(404, "尚未生成对应的离线同步图")
+                return
+            data = report_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if path == "/api/sync/offline/download.csv":
+            if not SYNCED_SESSION_CSV_PATH.exists():
+                self.send_json({"error": "尚未生成离线同步 CSV"}, 404)
+                return
+            data = SYNCED_SESSION_CSV_PATH.read_bytes()
+            filename = time.strftime("cvia_synchronized_%Y%m%d_%H%M%S.csv")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api/calibration-history":
             try:
                 history = load_calibration_history()
@@ -470,12 +796,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     self.send_json({"available": False, "columns": ["timestamp", "x", "y", "z", "rx", "ry", "rz"], "rows": []})
                     return
                 rows = []
+                with csv_path.open("r", encoding="utf-8", newline="") as stream:
+                    header = next(csv.reader(stream))
                 for row in csv.reader(tail_text_lines(csv_path, limit + 1)):
-                    if len(row) != 7 or row[0] == "timestamp":
+                    if row == header or len(row) != len(header):
                         continue
                     try:
-                        rows.append([int(row[0]), *[float(value) for value in row[1:]]])
-                    except ValueError:
+                        record = dict(zip(header, row))
+                        rows.append([
+                            int(record["timestamp"]),
+                            *[float(record[field]) for field in ("x", "y", "z", "rx", "ry", "rz")],
+                        ])
+                    except (KeyError, ValueError):
                         # 跳过程序正在追加但尚未完整刷新的末行。
                         continue
                 rows = rows[-limit:]
@@ -610,6 +942,28 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"error": f"停止推理失败: {exc}"}, 500)
             return
+        if path == "/api/sync/offline/generate":
+            try:
+                self.send_json({"ok": True, **build_offline_report()})
+            except RuntimeError as exc:
+                self.send_json({"error": str(exc)}, 409)
+            except FileNotFoundError as exc:
+                self.send_json({"error": str(exc)}, 404)
+            except Exception as exc:
+                self.send_json({"error": f"生成离线同步报告失败: {exc}"}, 500)
+            return
+        if path == "/api/sync/offline/estimate-offset":
+            try:
+                self.send_json(estimate_offline_offset())
+            except RuntimeError as exc:
+                self.send_json({"error": str(exc)}, 409)
+            except FileNotFoundError as exc:
+                self.send_json({"error": str(exc)}, 404)
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, 422)
+            except Exception as exc:
+                self.send_json({"error": f"自动估计时间补偿失败: {exc}"}, 500)
+            return
         self.send_error(404)
 
 
@@ -627,9 +981,24 @@ def main() -> None:
     args = parser.parse_args()
     RUNTIME_PATH.mkdir(parents=True, exist_ok=True)
     config = validate(load_config())
+    for session_path in (
+        MOCAP_SESSION_CSV_PATH,
+        SYNCED_SESSION_CSV_PATH,
+        OFFLINE_CAMERA_REPORT_PATH,
+        OFFLINE_MOCAP_REPORT_PATH,
+        OFFLINE_REPORT_PATH,
+        OFFLINE_SUMMARY_PATH,
+        OFFSET_ESTIMATE_PATH,
+    ):
+        session_path.unlink(missing_ok=True)
     record_calibration_history(config["calibration"])
     server = DashboardServer((args.host, args.port), DashboardHandler)
-    MOCAP_RECEIVER = MocapReceiver(config["mocap"], PROJECT_ROOT)
+    MOCAP_RECEIVER = MocapReceiver(
+        config["mocap"],
+        PROJECT_ROOT,
+        history_ms=config["sync"]["history_ms"],
+        session_csv_path=MOCAP_SESSION_CSV_PATH,
+    )
     MOCAP_RECEIVER.start()
     print(f"CVIA dashboard: http://{args.host}:{args.port}")
     if config["mocap"]["enabled"]:

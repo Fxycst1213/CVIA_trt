@@ -1,10 +1,10 @@
 {
   "version": 1,
   "input": {
-    "mode": "camera",
-    "folder_path": "/home/cvia/qdy/extracted_frames",
+    "mode": "folder",
+    "folder_path": "/home/wts/getViedo/0814/ir_19700101_091001/",
     "loop": true,
-    "interval_ms": 17
+    "interval_ms": 1000
   },
   "detect_camera": {
     "name": "Detect IR Camera",
@@ -40,22 +40,22 @@
   },
   "calibration": {
     "camera_matrix": [
-      1064.8,
+      1078.39302318049,
       0,
-      952.7,
+      939.772377680377,
       0,
-      1077.3,
-      624.1,
+      1078.53917414318,
+      595.175265662463,
       0,
       0,
       1
     ],
     "distortion": [
-      -0.0991,
-      0.3451,
-      0.0018,
-      -0.0018,
-      -0.437
+      -0.063033600308992,
+      0.18734565229903,
+      0,
+      0,
+      -0.163375015304349
     ],
     "extrinsic": [
       0.9902000448760891,
@@ -77,20 +77,32 @@
     ]
   },
   "network": {
-    "tcp_enabled": false,
+    "tcp_enabled": true,
     "tcp_ip": "192.168.31.214",
     "tcp_port": 1234,
     "socket_mode": 2,
-    "udp_enabled": true,
+    "udp_enabled": false,
     "udp_ip": "10.128.85.15",
     "udp_port": 1234
   },
   "mocap": {
-    "enabled": true,
+    "enabled": false,
     "server": "10.1.1.198",
     "tracker": "name:Tracker0",
     "stale_ms": 500,
-    "retry_seconds": 5
+    "retry_seconds": 5,
+    "clock_mode": "sdk_affine",
+    "clock_fit_window_seconds": 60,
+    "clock_fit_min_seconds": 3,
+    "clock_max_rate_ppm": 5000
+  },
+  "sync": {
+    "enabled": true,
+    "offset_ms": 0,
+    "max_error_ms": 10,
+    "history_ms": 5000,
+    "interpolate": true,
+    "auto_offset_search_ms": 1000
   },
   "runtime": {
     "frame_width": 1920,

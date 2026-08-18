@@ -93,7 +93,17 @@ namespace
         std::ofstream output(temporary_path, std::ios::trunc);
         if (!output) return;
         const bool valid = frame.pose_valid && frame.pose_result.size() >= 6;
+        const uint64_t capture_timestamp_ns = frame.capture_timestamp_ns != 0
+            ? frame.capture_timestamp_ns : frame.timestamp * 1000000ULL;
         output << "{\"timestamp\":" << frame.timestamp
+               << ",\"capture_timestamp_ns\":" << capture_timestamp_ns
+               << ",\"dequeue_timestamp_ns\":" << frame.dequeue_timestamp_ns
+               << ",\"publish_timestamp_ns\":" << frame.publish_timestamp_ns
+               << ",\"timestamp_source\":\""
+               << (frame.driver_timestamp ? "v4l2_driver" : "software_receive") << "\""
+               << ",\"timestamp_point\":\""
+               << (frame.timestamp_start_of_exposure ? "start_of_exposure" : "end_of_frame_or_unknown") << "\""
+               << ",\"coordinate_frame\":\"mocap\""
                << ",\"valid\":" << (valid ? "true" : "false")
                << ",\"pose\":[";
         if (frame.pose_result.size() >= 6)
@@ -102,6 +112,11 @@ namespace
             output << std::setprecision(9)
                    << frame.pose_result[3] << ',' << frame.pose_result[4] << ',' << frame.pose_result[5] << ','
                    << frame.pose_result[0] << ',' << frame.pose_result[1] << ',' << frame.pose_result[2];
+        }
+        output << "],\"origin\":[";
+        if (valid && frame.reprojected_origin_valid)
+        {
+            output << frame.reprojected_origin.x << ',' << frame.reprojected_origin.y;
         }
         output << "],\"points\":[";
         for (size_t index = 0; index < frame.reprojected_points.size(); ++index)
@@ -204,7 +219,7 @@ void client::init(const prj_params &p_params)
             _pnp_csv.open(csv_path, std::ios::trunc);
             if (_pnp_csv)
             {
-                _pnp_csv << "timestamp,x,y,z,rx,ry,rz\n";
+                _pnp_csv << "timestamp,capture_timestamp_ns,publish_timestamp_ns,x,y,z,rx,ry,rz,coordinate_frame\n";
                 _pnp_csv.flush();
             }
         }
@@ -245,16 +260,20 @@ void client::init(const prj_params &p_params)
 void client::save_pnp_pose(const Resultframe &frame)
 {
     // 旧 TCP 位姿段的顺序是 rx, ry, rz, x, y, z；CSV 按用户要求重排为
-    // timestamp, x, y, z, rx, ry, rz。
+    // timestamp 保持旧毫秒协议；capture_timestamp_ns 用于 PTP 时间域同步。
     if (!_save_pnp_results || _pnp_result_dir.empty() || !frame.pose_valid || frame.pose_result.size() < 6) return;
 
     if (!_pnp_csv)
     {
         return;
     }
-    _pnp_csv << frame.timestamp << ',' << std::setprecision(9)
+    const uint64_t capture_timestamp_ns = frame.capture_timestamp_ns != 0
+        ? frame.capture_timestamp_ns : frame.timestamp * 1000000ULL;
+    _pnp_csv << frame.timestamp << ',' << capture_timestamp_ns << ','
+             << frame.publish_timestamp_ns << ',' << std::setprecision(9)
              << frame.pose_result[3] << ',' << frame.pose_result[4] << ',' << frame.pose_result[5] << ','
-             << frame.pose_result[0] << ',' << frame.pose_result[1] << ',' << frame.pose_result[2] << '\n';
+             << frame.pose_result[0] << ',' << frame.pose_result[1] << ',' << frame.pose_result[2]
+             << ",mocap\n";
     // 每约半秒刷新一次，显著减少每帧 flush 的存储抖动；正常退出时析构函数会再次刷新。
     if (++_csv_rows_since_flush >= 30)
     {

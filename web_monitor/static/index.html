@@ -2,15 +2,33 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>CVIA 光路控制台</title>
-  <link rel="stylesheet" href="/app.css?v=20260731-mocap-target">
+  <script>
+    (function () {
+      var key = "cvia.compat.mode";
+      var mode = "auto";
+      var query = location.search.match(/[?&]compat=(auto|win7|win11)(?:&|$)/i);
+      try { mode = query ? query[1].toLowerCase() : (localStorage.getItem(key) || "auto"); } catch (error) {}
+      if (mode !== "win7" && mode !== "win11") mode = "auto";
+      var resolved = mode === "auto"
+        ? (/Windows NT 6\.1/i.test(navigator.userAgent) ? "win7" : "win11")
+        : mode;
+      document.documentElement.className += " compat-" + resolved;
+      document.documentElement.setAttribute("data-compat-preference", mode);
+      document.documentElement.setAttribute("data-compat-resolved", resolved);
+      try { localStorage.setItem(key, mode); } catch (error) {}
+    }());
+  </script>
+  <link rel="stylesheet" href="/app.css?v=20260817-six-orders">
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><div><strong>CVIA</strong><span>气动院</span></div></div>
-    <div class="system-status"><span id="systemDot" class="status-dot"></span><span id="systemText">正在连接图像流</span><button class="stop-inference" id="stopInferenceButton" type="button" disabled>停止推理并保存</button><span class="clock" id="clock">--:--:--</span></div>
+    <div class="system-status"><span id="systemDot" class="status-dot"></span><span id="systemText">正在连接图像流</span><label class="compat-control"><span>显示模式</span><select id="compatMode" aria-label="Windows 显示兼容模式"><option value="auto">自动</option><option value="win11">Windows 11</option><option value="win7">Windows 7 兼容</option></select><small id="compatModeState">自动识别</small></label><button class="stop-inference" id="stopInferenceButton" type="button" disabled>停止推理并保存</button><span class="clock" id="clock">--:--:--</span></div>
   </header>
 
   <main class="workspace">
@@ -28,9 +46,9 @@
             <span>PNP REPROJECTION</span>
             <strong id="projectionState">等待位姿</strong>
             <code id="projectionPixel">u -- · v --</code>
-            <div class="projection-legend" aria-label="七点重投影颜色图例">
-              <i style="--point-color:#ef7b72">P0 位姿原点</i>
-              <i style="--point-color:#65d7e4">P1–P6 模型点</i>
+            <div class="projection-legend" aria-label="刚体中心和模型特征点重投影颜色图例">
+              <i style="--point-color:#ef7b72">刚体几何中心</i>
+              <i style="--point-color:#65d7e4">模型特征点（数量自动）</i>
             </div>
           </div>
           <div class="reticle" aria-hidden="true"><i></i><i></i></div>
@@ -82,20 +100,25 @@
 
         <section class="form-section pose-section" data-panel="pose">
           <div class="section-intro pose-intro">
-            <div><h3>检测 / 动捕位姿对照</h3><p>六个轴按同一行排布。这里只并列原始结果；坐标系未完成配准前不计算差值。</p></div>
+            <div><h3>检测 / 动捕时间配对</h3><p>视觉 PnP 已经由 T_M_C 转到动捕坐标系；以视觉采集时间回查动捕历史，不等待、不阻塞主检测。</p></div>
             <span id="poseState" class="pose-state">等待双源</span>
+          </div>
+          <div class="sync-rail" id="syncRail" data-state="waiting">
+            <div class="sync-rail-source"><span>VISION</span><strong id="syncVisionStamp">等待视觉帧</strong><small>采集时间</small></div>
+            <div class="sync-rail-track"><i></i><div><strong id="syncDeltaValue">-- ms</strong><span id="syncMethod">等待时间配对</span></div><i></i></div>
+            <div class="sync-rail-source sync-rail-source--mocap"><span>NOKOV</span><strong id="syncMocapFrames">等待动捕帧</strong><small id="syncBufferMeta">历史缓存 --</small></div>
           </div>
           <div class="registration-board">
             <div class="registration-head">
               <span class="axis-heading">轴</span>
-              <div><i class="source-mark source-mark--vision"></i><span>视觉检测</span><strong>PNP / IR</strong></div>
+              <div><i class="source-mark source-mark--vision"></i><span>视觉检测</span><strong>PNP · T_M_C</strong></div>
               <div><i class="source-mark source-mark--mocap"></i><span>NOKOV 动捕</span><strong id="mocapTrackerHeading">RIGID BODY</strong></div>
             </div>
             <div class="registration-group">
               <p><span>POSITION</span><b>XYZ 位置</b></p>
-              <div class="registration-row"><code>X</code><div><strong id="detectValueX">--</strong><small>项目单位</small></div><div><strong id="mocapValueX">--</strong><small>mm</small></div></div>
-              <div class="registration-row"><code>Y</code><div><strong id="detectValueY">--</strong><small>项目单位</small></div><div><strong id="mocapValueY">--</strong><small>mm</small></div></div>
-              <div class="registration-row"><code>Z</code><div><strong id="detectValueZ">--</strong><small>项目单位</small></div><div><strong id="mocapValueZ">--</strong><small>mm</small></div></div>
+              <div class="registration-row"><code>X</code><div><strong id="detectValueX">--</strong><small>动捕系 / mm</small></div><div><strong id="mocapValueX">--</strong><small>动捕系 / mm</small></div></div>
+              <div class="registration-row"><code>Y</code><div><strong id="detectValueY">--</strong><small>动捕系 / mm</small></div><div><strong id="mocapValueY">--</strong><small>动捕系 / mm</small></div></div>
+              <div class="registration-row"><code>Z</code><div><strong id="detectValueZ">--</strong><small>动捕系 / mm</small></div><div><strong id="mocapValueZ">--</strong><small>动捕系 / mm</small></div></div>
             </div>
             <div class="registration-group registration-group--angle">
               <p><span>ORIENTATION</span><b>XYZ 欧拉角</b></p>
@@ -108,7 +131,41 @@
               <div><span id="mocapDot" class="source-status-dot"></span><p><b id="mocapState">正在连接 SDK</b><small id="mocapMeta">等待刚体数据</small></p></div>
             </div>
           </div>
-          <div class="comparison-foot"><span>欧拉角约定：四元数归一化后按 Roll-X / Pitch-Y / Yaw-Z 转换</span><code id="comparisonDelta">接收时差 --</code></div>
+          <div class="comparison-foot"><span>动捕姿态先在四元数域插值，再按 Roll-X / Pitch-Y / Yaw-Z 转为欧拉角</span><code id="comparisonDelta">本机新鲜度时差 --</code></div>
+
+          <details class="sync-settings">
+            <summary><span>REALTIME SYNC</span><strong>实时配对参数</strong><small>保存后重启生效</small></summary>
+            <div class="sync-settings-body">
+              <label class="switch-field switch-field--standalone"><input type="checkbox" data-path="sync.enabled"><span class="switch"></span><span><b>启用实时软件同步</b><small>只在网页服务中查询历史，不向推理线程增加等待</small></span></label>
+              <div class="field-row"><label class="field"><span>动捕时间补偿 / ms</span><input type="number" min="-5000" max="5000" step="0.1" data-path="sync.offset_ms"><small>该值加到速率校正后的动捕时间轴</small></label><label class="field"><span>最大匹配误差 / ms</span><input type="number" min="0.1" max="1000" step="0.1" data-path="sync.max_error_ms"><small>超出后明确标记未配对</small></label></div>
+              <div class="field-row"><label class="field"><span>历史缓存 / ms</span><input type="number" min="100" max="60000" step="100" data-path="sync.history_ms"><small>仅缓存轻量位姿，不缓存图像</small></label><label class="switch-field"><input type="checkbox" data-path="sync.interpolate"><span class="switch"></span><span><b>四元数插值</b><small>使用视觉时刻前后两帧动捕</small></span></label></div>
+              <label class="field"><span>自动估计搜索范围 / ±ms</span><input type="number" min="50" max="5000" step="50" data-path="sync.auto_offset_search_ms"><small>停止推理后，在该正负范围内搜索互相关峰；修改后先保存配置</small></label>
+            </div>
+          </details>
+
+          <section class="offline-sync-panel" aria-labelledby="offlineSyncTitle">
+            <div class="offline-sync-heading"><div><span>OFFLINE ANALYSIS</span><h4 id="offlineSyncTitle">离线同步与六轴图</h4><p>先用运动曲线互相关标定时间补偿，再生成完整配对报告。</p></div><div class="offline-sync-controls"><button id="estimateOffset" type="button">自动估计 offset</button><button id="generateOfflineSync" type="button">生成离线报告</button></div></div>
+            <div class="offset-estimate" id="offsetEstimate" data-confidence="none"><span>AUTO OFFSET</span><strong id="offsetEstimateValue">尚未估计</strong><small id="offsetEstimateMeta">停止推理后，建议做一段非周期的平移和转动</small></div>
+            <div class="offline-sync-empty" id="offlineSyncEmpty"><strong>尚未生成本次报告</strong><small>采集期间持续缓冲动捕 CSV；生成操作只在推理停止后执行。</small></div>
+            <div class="offline-sync-result" id="offlineSyncResult" hidden>
+              <div class="offline-metrics"><div><span>覆盖率</span><strong id="offlineCoverage">--</strong></div><div><span>匹配帧</span><strong id="offlineMatched">--</strong></div><div><span>P95 |Δt|</span><strong id="offlineP95">--</strong></div></div>
+              <div class="offline-report-deck" aria-label="相机、动捕与合成离线曲线">
+                <article class="offline-report-card" data-source="camera">
+                  <header><div><span>CAMERA / PNP · MOCAP FRAME</span><h5>相机画布</h5><p>首次有效位姿之后，经 T_M_C 转换的动捕坐标系六轴曲线</p></div><a id="openCameraReport" href="/api/sync/offline/report/camera.svg" target="_blank" rel="noopener">查看大图</a></header>
+                  <a class="offline-report-preview" id="cameraReportLink" href="/api/sync/offline/report/camera.svg" target="_blank" rel="noopener"><img id="cameraReportImage" alt="相机六轴离线曲线"></a>
+                </article>
+                <article class="offline-report-card" data-source="mocap">
+                  <header><div><span>MOCAP / NOKOV · MOCAP FRAME</span><h5>动捕画布</h5><p>共用相机零点，只显示成功配对的动捕坐标系位姿</p></div><a id="openMocapReport" href="/api/sync/offline/report/mocap.svg" target="_blank" rel="noopener">查看大图</a></header>
+                  <a class="offline-report-preview" id="mocapReportLink" href="/api/sync/offline/report/mocap.svg" target="_blank" rel="noopener"><img id="mocapReportImage" alt="动捕六轴离线曲线"></a>
+                </article>
+                <article class="offline-report-card" data-source="composite">
+                  <header><div><span>COMPOSITE / MOCAP FRAME</span><h5>合成画布</h5><p>同一动捕坐标系中的相机与动捕六轴叠加</p></div><a id="openCompositeReport" href="/api/sync/offline/report/composite.svg" target="_blank" rel="noopener">查看大图</a></header>
+                  <a class="offline-report-preview" id="compositeReportLink" href="/api/sync/offline/report/composite.svg" target="_blank" rel="noopener"><img id="compositeReportImage" alt="相机与动捕合成六轴离线曲线"></a>
+                </article>
+              </div>
+              <div class="offline-actions"><span id="offlineGeneratedAt">三张报告已生成</span><a id="downloadSyncedCsv" href="/api/sync/offline/download.csv">下载同步 CSV</a></div>
+            </div>
+          </section>
         </section>
 
         <section class="form-section" data-panel="cameras">
@@ -117,7 +174,7 @@
         </section>
 
         <section class="form-section" data-panel="calibration">
-          <div class="section-intro"><h3>内参与外参</h3><p>内参进入 solvePnP，外参把相机坐标转换到项目坐标。</p></div>
+          <div class="section-intro"><h3>内参与外参</h3><p>内参进入 solvePnP；外参 T_M_C 把相机坐标系位姿转换到 NOKOV 动捕坐标系。</p></div>
           <div class="calibration-history">
             <div><span>CALIBRATION HISTORY</span><strong>历史标定版本</strong><small id="calibrationHistoryMeta">正在读取历史记录</small></div>
             <select id="calibrationHistorySelect" aria-label="选择历史标定版本"><option value="">暂无历史记录</option></select>
@@ -125,7 +182,31 @@
           </div>
           <div class="matrix-block"><div class="matrix-title"><span>相机内参 K</span><code>3 × 3</code></div><div class="matrix matrix--3" id="cameraMatrix"></div></div>
           <div class="matrix-block"><div class="matrix-title"><span>畸变系数</span><code>k₁ k₂ p₁ p₂ k₃</code></div><div class="matrix matrix--5" id="distortionMatrix"></div></div>
-          <div class="matrix-block"><div class="matrix-title"><span>相机 → 项目外参</span><code>4 × 4</code></div><div class="matrix matrix--4" id="extrinsicMatrix"></div></div>
+          <section class="world-rotation-tool" aria-labelledby="worldRotationTitle">
+            <div class="world-rotation-head">
+              <div><span>WORLD FRAME ROTATION</span><strong id="worldRotationTitle">世界轴姿态修正</strong><small>相机光心固定 · 右手定则 · 输入相对当前矩阵的增量</small></div>
+              <code id="worldRotationFormula">Rz · Ry · Rx · R</code>
+            </div>
+            <div class="world-order-selector">
+              <p><strong>旋转顺序</strong><small>从左到右依次绕固定世界轴执行</small></p>
+              <div class="world-order-options" role="radiogroup" aria-label="选择固定世界轴旋转顺序">
+                <label><input type="radio" name="world-rotation-order" value="XYZ" checked><span>X · Y · Z</span></label>
+                <label><input type="radio" name="world-rotation-order" value="XZY"><span>X · Z · Y</span></label>
+                <label><input type="radio" name="world-rotation-order" value="YXZ"><span>Y · X · Z</span></label>
+                <label><input type="radio" name="world-rotation-order" value="YZX"><span>Y · Z · X</span></label>
+                <label><input type="radio" name="world-rotation-order" value="ZXY"><span>Z · X · Y</span></label>
+                <label><input type="radio" name="world-rotation-order" value="ZYX"><span>Z · Y · X</span></label>
+              </div>
+            </div>
+            <div class="world-axis-order" id="worldAxisOrder" aria-live="polite" aria-label="当前固定世界轴旋转顺序"><span class="axis-x">X</span><i>→</i><span class="axis-y">Y</span><i>→</i><span class="axis-z">Z</span><small>当前执行顺序</small></div>
+            <div class="world-rotation-fields">
+              <label><span><b>X</b> ΔRx</span><div><input id="worldRotationX" type="number" step="any" value="0" inputmode="decimal" aria-label="绕世界 X 轴增量角度"><em>°</em></div></label>
+              <label><span><b>Y</b> ΔRy</span><div><input id="worldRotationY" type="number" step="any" value="0" inputmode="decimal" aria-label="绕世界 Y 轴增量角度"><em>°</em></div></label>
+              <label><span><b>Z</b> ΔRz</span><div><input id="worldRotationZ" type="number" step="any" value="0" inputmode="decimal" aria-label="绕世界 Z 轴增量角度"><em>°</em></div></label>
+            </div>
+            <div class="world-rotation-actions"><p><strong id="worldRotationLast">尚未应用姿态修正</strong><small>只更新旋转 3 × 3；平移 XYZ 保持不变。连续应用会累积。</small></p><button id="clearWorldRotation" type="button">角度清零</button><button class="world-rotation-apply" id="applyWorldRotation" type="button">应用到 T_M_C</button></div>
+          </section>
+          <div class="matrix-block"><div class="matrix-title"><span>T_M_C · 相机 → 动捕外参</span><code>4 × 4</code></div><div class="matrix matrix--4" id="extrinsicMatrix"></div></div>
           <button class="text-button" id="resetCalibration" type="button">恢复当前已保存的标定值</button>
         </section>
 
@@ -171,6 +252,7 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=20260731-mocap-target" defer></script>
+  <script src="/extrinsic_rotation.js?v=20260817-six-orders" defer charset="utf-8"></script>
+  <script src="/app.js?v=20260817-six-orders" defer charset="utf-8"></script>
 </body>
 </html>

@@ -24,6 +24,7 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/home/wts/CVIA_trt/src/communication/client.cpp" "CMakeFiles/trt.dir/src/communication/client.cpp.o" "gcc" "CMakeFiles/trt.dir/src/communication/client.cpp.o.d"
   "/home/wts/CVIA_trt/src/lstm/lstm_predictor.cpp" "CMakeFiles/trt.dir/src/lstm/lstm_predictor.cpp.o" "gcc" "CMakeFiles/trt.dir/src/lstm/lstm_predictor.cpp.o.d"
   "/home/wts/CVIA_trt/src/main.cpp" "CMakeFiles/trt.dir/src/main.cpp.o" "gcc" "CMakeFiles/trt.dir/src/main.cpp.o.d"
+  "/home/wts/CVIA_trt/src/params/config.cpp" "CMakeFiles/trt.dir/src/params/config.cpp.o" "gcc" "CMakeFiles/trt.dir/src/params/config.cpp.o.d"
   "/home/wts/CVIA_trt/src/preprocess/preprocess.cpp" "CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o" "gcc" "CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o.d"
   "/home/wts/CVIA_trt/src/prj_detector.cpp" "CMakeFiles/trt.dir/src/prj_detector.cpp.o" "gcc" "CMakeFiles/trt.dir/src/prj_detector.cpp.o.d"
   "/home/wts/CVIA_trt/src/time/time.cpp" "CMakeFiles/trt.dir/src/time/time.cpp.o" "gcc" "CMakeFiles/trt.dir/src/time/time.cpp.o.d"

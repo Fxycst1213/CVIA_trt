@@ -20,7 +20,7 @@ namespace preprocess
 
     __host__ __device__ void affine_transformation(
         float trans_matrix[6],
-        int src_x, int src_y,
+        float src_x, float src_y,
         float *tar_x, float *tar_y)
     {
         *tar_x = trans_matrix[0] * src_x + trans_matrix[1] * src_y + trans_matrix[2];

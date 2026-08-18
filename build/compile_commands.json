@@ -71,6 +71,11 @@
 },
 {
   "directory": "/home/wts/CVIA_trt/build",
+  "command": "/usr/bin/aarch64-linux-gnu-g++ -D_DEBUG -I/usr/local/cuda/include -I/usr/include/eigen3 -I/home/wts/CVIA_trt/src/preprocess -I/home/wts/CVIA_trt/src/yolov8_detector -I/home/wts/CVIA_trt/src/yolov8_classifier -I/home/wts/CVIA_trt/src/yolov_pose -I/home/wts/CVIA_trt/src/TensorRT/calibrator -I/home/wts/CVIA_trt/src/TensorRT/CUDA_tools -I/home/wts/CVIA_trt/src/TensorRT/logger -I/home/wts/CVIA_trt/src/TensorRT/model -I/home/wts/CVIA_trt/src/TensorRT/utils -I/home/wts/CVIA_trt/src/lstm -I/home/wts/CVIA_trt/src/time -I/home/wts/CVIA_trt/src/lock -I/home/wts/CVIA_trt/src/worker -I/home/wts/CVIA_trt/src/ZEDX -I/home/wts/CVIA_trt/src/IRcamera -I/home/wts/CVIA_trt/src/communication -I/home/wts/CVIA_trt/src/params -I/home/wts/CVIA_trt/src/algorithms -I/usr/local/zed/include -isystem /usr/include/opencv4  -std=c++14 -Wall -O0 -Wfatal-errors -pthread -w -g -g -o CMakeFiles/trt.dir/src/params/config.cpp.o -c /home/wts/CVIA_trt/src/params/config.cpp",
+  "file": "/home/wts/CVIA_trt/src/params/config.cpp"
+},
+{
+  "directory": "/home/wts/CVIA_trt/build",
   "command": "/usr/bin/aarch64-linux-gnu-g++ -D_DEBUG -I/usr/local/cuda/include -I/usr/include/eigen3 -I/home/wts/CVIA_trt/src/preprocess -I/home/wts/CVIA_trt/src/yolov8_detector -I/home/wts/CVIA_trt/src/yolov8_classifier -I/home/wts/CVIA_trt/src/yolov_pose -I/home/wts/CVIA_trt/src/TensorRT/calibrator -I/home/wts/CVIA_trt/src/TensorRT/CUDA_tools -I/home/wts/CVIA_trt/src/TensorRT/logger -I/home/wts/CVIA_trt/src/TensorRT/model -I/home/wts/CVIA_trt/src/TensorRT/utils -I/home/wts/CVIA_trt/src/lstm -I/home/wts/CVIA_trt/src/time -I/home/wts/CVIA_trt/src/lock -I/home/wts/CVIA_trt/src/worker -I/home/wts/CVIA_trt/src/ZEDX -I/home/wts/CVIA_trt/src/IRcamera -I/home/wts/CVIA_trt/src/communication -I/home/wts/CVIA_trt/src/params -I/home/wts/CVIA_trt/src/algorithms -I/usr/local/zed/include -isystem /usr/include/opencv4  -std=c++14 -Wall -O0 -Wfatal-errors -pthread -w -g -g -o CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o -c /home/wts/CVIA_trt/src/preprocess/preprocess.cpp",
   "file": "/home/wts/CVIA_trt/src/preprocess/preprocess.cpp"
 },

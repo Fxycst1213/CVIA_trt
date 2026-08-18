@@ -265,10 +265,24 @@ CMakeFiles/trt.dir/src/main.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/trt.dir/src/main.cpp.s"
 	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/wts/CVIA_trt/src/main.cpp -o CMakeFiles/trt.dir/src/main.cpp.s
 
+CMakeFiles/trt.dir/src/params/config.cpp.o: CMakeFiles/trt.dir/flags.make
+CMakeFiles/trt.dir/src/params/config.cpp.o: ../src/params/config.cpp
+CMakeFiles/trt.dir/src/params/config.cpp.o: CMakeFiles/trt.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/trt.dir/src/params/config.cpp.o"
+	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/trt.dir/src/params/config.cpp.o -MF CMakeFiles/trt.dir/src/params/config.cpp.o.d -o CMakeFiles/trt.dir/src/params/config.cpp.o -c /home/wts/CVIA_trt/src/params/config.cpp
+
+CMakeFiles/trt.dir/src/params/config.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/trt.dir/src/params/config.cpp.i"
+	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/wts/CVIA_trt/src/params/config.cpp > CMakeFiles/trt.dir/src/params/config.cpp.i
+
+CMakeFiles/trt.dir/src/params/config.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/trt.dir/src/params/config.cpp.s"
+	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/wts/CVIA_trt/src/params/config.cpp -o CMakeFiles/trt.dir/src/params/config.cpp.s
+
 CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o: ../src/preprocess/preprocess.cpp
 CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building CXX object CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CXX object CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o"
 	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o -MF CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o.d -o CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o -c /home/wts/CVIA_trt/src/preprocess/preprocess.cpp
 
 CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.i: cmake_force
@@ -282,7 +296,7 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.s: cmake_force
 CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.cu
 CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building CUDA object CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building CUDA object CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o"
 	/usr/local/cuda-12.6/bin/nvcc -forward-unknown-to-host-compiler $(CUDA_DEFINES) $(CUDA_INCLUDES) $(CUDA_FLAGS) -MD -MT CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o -MF CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o.d -x cu -c /home/wts/CVIA_trt/src/preprocess/preprocess.cu -o CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o
 
 CMakeFiles/trt.dir/src/preprocess/preprocess.cu.i: cmake_force
@@ -296,7 +310,7 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.s: cmake_force
 CMakeFiles/trt.dir/src/prj_detector.cpp.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/prj_detector.cpp.o: ../src/prj_detector.cpp
 CMakeFiles/trt.dir/src/prj_detector.cpp.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building CXX object CMakeFiles/trt.dir/src/prj_detector.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Building CXX object CMakeFiles/trt.dir/src/prj_detector.cpp.o"
 	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/trt.dir/src/prj_detector.cpp.o -MF CMakeFiles/trt.dir/src/prj_detector.cpp.o.d -o CMakeFiles/trt.dir/src/prj_detector.cpp.o -c /home/wts/CVIA_trt/src/prj_detector.cpp
 
 CMakeFiles/trt.dir/src/prj_detector.cpp.i: cmake_force
@@ -310,7 +324,7 @@ CMakeFiles/trt.dir/src/prj_detector.cpp.s: cmake_force
 CMakeFiles/trt.dir/src/time/time.cpp.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/time/time.cpp.o: ../src/time/time.cpp
 CMakeFiles/trt.dir/src/time/time.cpp.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Building CXX object CMakeFiles/trt.dir/src/time/time.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_19) "Building CXX object CMakeFiles/trt.dir/src/time/time.cpp.o"
 	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/trt.dir/src/time/time.cpp.o -MF CMakeFiles/trt.dir/src/time/time.cpp.o.d -o CMakeFiles/trt.dir/src/time/time.cpp.o -c /home/wts/CVIA_trt/src/time/time.cpp
 
 CMakeFiles/trt.dir/src/time/time.cpp.i: cmake_force
@@ -324,7 +338,7 @@ CMakeFiles/trt.dir/src/time/time.cpp.s: cmake_force
 CMakeFiles/trt.dir/src/worker/worker.cpp.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/worker/worker.cpp.o: ../src/worker/worker.cpp
 CMakeFiles/trt.dir/src/worker/worker.cpp.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_19) "Building CXX object CMakeFiles/trt.dir/src/worker/worker.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_20) "Building CXX object CMakeFiles/trt.dir/src/worker/worker.cpp.o"
 	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/trt.dir/src/worker/worker.cpp.o -MF CMakeFiles/trt.dir/src/worker/worker.cpp.o.d -o CMakeFiles/trt.dir/src/worker/worker.cpp.o -c /home/wts/CVIA_trt/src/worker/worker.cpp
 
 CMakeFiles/trt.dir/src/worker/worker.cpp.i: cmake_force
@@ -338,7 +352,7 @@ CMakeFiles/trt.dir/src/worker/worker.cpp.s: cmake_force
 CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o: ../src/yolov8_classifier/classifier.cpp
 CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_20) "Building CXX object CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_21) "Building CXX object CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o"
 	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o -MF CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o.d -o CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o -c /home/wts/CVIA_trt/src/yolov8_classifier/classifier.cpp
 
 CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.i: cmake_force
@@ -352,7 +366,7 @@ CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.s: cmake_force
 CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o: ../src/yolov8_detector/detector.cpp
 CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_21) "Building CXX object CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_22) "Building CXX object CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o"
 	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o -MF CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o.d -o CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o -c /home/wts/CVIA_trt/src/yolov8_detector/detector.cpp
 
 CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.i: cmake_force
@@ -366,7 +380,7 @@ CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.s: cmake_force
 CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o: ../src/yolov_pose/pose.cpp
 CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_22) "Building CXX object CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building CXX object CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o"
 	/usr/bin/aarch64-linux-gnu-g++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o -MF CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o.d -o CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o -c /home/wts/CVIA_trt/src/yolov_pose/pose.cpp
 
 CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.i: cmake_force
@@ -380,7 +394,7 @@ CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.s: cmake_force
 CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: CMakeFiles/trt.dir/flags.make
 CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_pose_decode.cu
 CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: CMakeFiles/trt.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building CUDA object CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building CUDA object CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o"
 	/usr/local/cuda-12.6/bin/nvcc -forward-unknown-to-host-compiler $(CUDA_DEFINES) $(CUDA_INCLUDES) $(CUDA_FLAGS) -MD -MT CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o -MF CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o.d -x cu -c /home/wts/CVIA_trt/src/yolov_pose/yolo_pose_decode.cu -o CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o
 
 CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.i: cmake_force
@@ -407,6 +421,7 @@ trt_OBJECTS = \
 "CMakeFiles/trt.dir/src/communication/client.cpp.o" \
 "CMakeFiles/trt.dir/src/lstm/lstm_predictor.cpp.o" \
 "CMakeFiles/trt.dir/src/main.cpp.o" \
+"CMakeFiles/trt.dir/src/params/config.cpp.o" \
 "CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o" \
 "CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o" \
 "CMakeFiles/trt.dir/src/prj_detector.cpp.o" \
@@ -434,6 +449,7 @@ trt: CMakeFiles/trt.dir/src/communication/RS485.cpp.o
 trt: CMakeFiles/trt.dir/src/communication/client.cpp.o
 trt: CMakeFiles/trt.dir/src/lstm/lstm_predictor.cpp.o
 trt: CMakeFiles/trt.dir/src/main.cpp.o
+trt: CMakeFiles/trt.dir/src/params/config.cpp.o
 trt: CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o
 trt: CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o
 trt: CMakeFiles/trt.dir/src/prj_detector.cpp.o
@@ -468,7 +484,7 @@ trt: /usr/lib/libopencv_flann.so.4.8.0
 trt: /usr/lib/libopencv_imgproc.so.4.8.0
 trt: /usr/lib/libopencv_core.so.4.8.0
 trt: CMakeFiles/trt.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Linking CXX executable trt"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/home/wts/CVIA_trt/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Linking CXX executable trt"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/trt.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

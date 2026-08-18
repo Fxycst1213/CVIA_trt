@@ -1,5 +1,11 @@
 # 在 NVIDIA Jetson Orin 部署 NOKOV SDK 并保存动捕数据
 
+PTP 硬件时间同步的独立部署、验证和故障排查见
+[`README_PTP_TIME_SYNC.md`](README_PTP_TIME_SYNC.md)。
+
+当前 NOKOV SDK 独立时钟到 Orin 的 `CLOCK`/`POSE` 动态仿射同步方式见
+[`README_SDK_AFFINE_TIME_SYNC.md`](README_SDK_AFFINE_TIME_SYNC.md)。
+
 本文只说明以下内容：
 
 - 在 ARM64/AArch64 架构的 NVIDIA Jetson Orin 上部署 NOKOV SDK；
@@ -593,7 +599,14 @@ XING_Linux/bin/MocapBridge \
 
 ## 十四、POSE 字段定义
 
-`MocapBridge` 使用制表符分隔字段。一行共有 17 列：
+`MocapBridge` 对每个 FrameGroup 先输出一条 5 列 `CLOCK`，它不依赖目标刚体是否可见：
+
+```text
+CLOCK  frame  mocap_timestamp_ms  receive_unix_ns  receive_monotonic_ns
+```
+
+这条记录专门用于把独立 SDK 时钟动态映射到 Orin 时间域。随后，匹配到目标刚体时再输出
+制表符分隔的 17 列 `POSE`：
 
 | 列号 | 字段 | 说明 |
 |---:|---|---|
@@ -888,3 +901,49 @@ XING_Linux/bin/MocapBridge \
 ```
 
 确认实时数据正常后，再使用本文第十至十三节的命令保存 TXT。
+
+## 二十、单独测量动捕与 Orin 时间戳差值
+
+`measure_clock_offset.py` 只启动 `MocapBridge`，不会启动相机、TensorRT
+检测或网页服务。默认读取 `web_monitor/config.json` 中的动捕服务器和刚体：
+
+```bash
+cd /home/wts/CVIA_trt
+
+python3 web_monitor/mocap/measure_clock_offset.py \
+  --duration 30 \
+  --csv web_monitor/runtime/mocap_clock_offset.csv \
+  --json web_monitor/runtime/mocap_clock_offset_summary.json
+```
+
+也可以显式指定服务器和刚体：
+
+```bash
+python3 web_monitor/mocap/measure_clock_offset.py \
+  --server 10.1.1.198 \
+  --tracker 'name:Tracker0' \
+  --duration 30
+```
+
+主要指标的符号定义为：
+
+```text
+Orin回调时间 - SDK时间
+```
+
+正值表示 Orin 在更晚的时刻收到 SDK 回调。程序会自动检查 SDK
+`iTimeStamp` 是否像 Unix/PTP 毫秒时间：
+
+- 若两端看起来处于同一绝对时间域，报告绝对表观时差的平均值、P50、P95、
+  P99、范围、漂移和抖动；
+- 若 SDK 使用设备启动后的相对时间，则不把原始大数值当作绝对钟差，仅报告
+  相对首帧的漂移、ppm 和可变传输抖动；
+- 若差值接近负 37 秒，会提示检查 SDK 是否使用 TAI，而 Orin
+  `CLOCK_REALTIME` 使用 UTC。
+
+桥接程序的 Orin 时间是在 SDK 回调入口采集的，因此统计不会包含 Python
+读取标准输出的时间。输出还单独给出“桥接回调到 Python 读到数据的附加延迟”，
+用于检查采样程序自身的调度影响。
+
+即使使用 PTP，`Orin回调时间 - SDK时间` 仍然包含动捕曝光、解算、网络传输和
+SDK 分发时间，所以它是端到端表观时差，不是纯粹的 PTP 伺服误差。

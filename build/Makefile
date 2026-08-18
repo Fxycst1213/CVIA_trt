@@ -465,6 +465,30 @@ src/main.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/main.cpp.s
 .PHONY : src/main.cpp.s
 
+src/params/config.o: src/params/config.cpp.o
+.PHONY : src/params/config.o
+
+# target to build an object file
+src/params/config.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/params/config.cpp.o
+.PHONY : src/params/config.cpp.o
+
+src/params/config.i: src/params/config.cpp.i
+.PHONY : src/params/config.i
+
+# target to preprocess a source file
+src/params/config.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/params/config.cpp.i
+.PHONY : src/params/config.cpp.i
+
+src/params/config.s: src/params/config.cpp.s
+.PHONY : src/params/config.s
+
+# target to generate assembly for a file
+src/params/config.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/trt.dir/build.make CMakeFiles/trt.dir/src/params/config.cpp.s
+.PHONY : src/params/config.cpp.s
+
 src/preprocess/preprocess.o: src/preprocess/preprocess.cpp.o
 .PHONY : src/preprocess/preprocess.o
 
@@ -732,6 +756,9 @@ help:
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"
+	@echo "... src/params/config.o"
+	@echo "... src/params/config.i"
+	@echo "... src/params/config.s"
 	@echo "... src/preprocess/preprocess.o"
 	@echo "... src/preprocess/preprocess.i"
 	@echo "... src/preprocess/preprocess.s"

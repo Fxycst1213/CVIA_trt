@@ -132,6 +132,12 @@ void data_handler(sFrameOfMocapData* data, void*)
 
     const long long received_unix_ns = system_time_ns();
     const long long received_monotonic_ns = monotonic_time_ns();
+    std::ostringstream frame_output;
+    frame_output << "CLOCK\t" << data->iFrame
+                 << '\t' << data->iTimeStamp
+                 << '\t' << received_unix_ns
+                 << '\t' << received_monotonic_ns
+                 << '\n';
     for (int index = 0; index < data->nRigidBodies; ++index) {
         const sRigidBodyData& body = data->RigidBodies[index];
         const auto found = g_rigid_body_names.find(body.ID);
@@ -142,27 +148,28 @@ void data_handler(sFrameOfMocapData* data, void*)
             if (!matches(selector, body, body_name)) {
                 continue;
             }
-            std::ostringstream line;
-            line << std::setprecision(9)
-                 << "POSE\t" << percent_encode(selector.original)
-                 << '\t' << body.ID
-                 << '\t' << percent_encode(body_name)
-                 << '\t' << data->iFrame
-                 << '\t' << data->iTimeStamp
-                 << '\t' << received_unix_ns
-                 << '\t' << received_monotonic_ns
-                 << '\t' << body.x
-                 << '\t' << body.y
-                 << '\t' << body.z
-                 << '\t' << body.qx
-                 << '\t' << body.qy
-                 << '\t' << body.qz
-                 << '\t' << body.qw
-                 << '\t' << body.MeanError
-                 << '\t' << body.params;
-            emit_line(line.str());
+            frame_output << std::setprecision(9)
+                         << "POSE\t" << percent_encode(selector.original)
+                         << '\t' << body.ID
+                         << '\t' << percent_encode(body_name)
+                         << '\t' << data->iFrame
+                         << '\t' << data->iTimeStamp
+                         << '\t' << received_unix_ns
+                         << '\t' << received_monotonic_ns
+                         << '\t' << body.x
+                         << '\t' << body.y
+                         << '\t' << body.z
+                         << '\t' << body.qx
+                         << '\t' << body.qy
+                         << '\t' << body.qz
+                         << '\t' << body.qw
+                         << '\t' << body.MeanError
+                         << '\t' << body.params
+                         << '\n';
         }
     }
+    std::lock_guard<std::mutex> lock(g_output_mutex);
+    std::cout << frame_output.str() << std::flush;
 }
 
 void stop_handler(int)

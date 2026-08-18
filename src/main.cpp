@@ -23,7 +23,7 @@ void handle_stop_signal(int)
 
 int main(int argc, char const *argv[])
 {
-    LOG("CVIA runtime revision: dual60-latest-frame-v3");
+    LOG("CVIA runtime revision: v4l2-ptp-timestamp-v4");
     // 尽早接管停止信号；即使模型或相机仍在初始化，也会在构造完成后立即走优雅停止流程。
     std::signal(SIGINT, handle_stop_signal);
     std::signal(SIGTERM, handle_stop_signal);
@@ -31,7 +31,7 @@ int main(int argc, char const *argv[])
     // string onnxPath = "models/onnx/last_rebest_1203.onnx";
     // string onnxPath = "models/onnx/0128last.onnx";
 
-    string onnxPath = "models/onnx/qdy0721.onnx";
+    string onnxPath = "models/onnx/qdy0815.onnx";
     // INFO 会保留启动/告警日志，但关闭每帧 VERB 计时输出，避免终端 I/O 拖慢双 60 FPS。
     auto level = logger::Level::INFO;
     auto params = model::Params();
@@ -66,7 +66,7 @@ int main(int argc, char const *argv[])
     p_params.photo_camera.resolution = "HD1080";
     // 可见光相机保持设备默认成像效果，不写曝光、白平衡、亮度、对比度和清晰度。
     p_params.photo_camera.apply_image_controls = false;
-    p_params.ip = "192.168.31.214";
+    p_params.ip = "192.168.137.1";
     p_params.port = 1234;
     p_params.udp_ip = "10.128.85.15";
     p_params.udp_port = 1234;

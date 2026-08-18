@@ -18,6 +18,7 @@ let previewBitmaps = {primary:null, secondary:null};
 let previewNaturalSize = {primary:{width:0,height:0}, secondary:{width:0,height:0}};
 let latestPoseRow = null;
 let latestPoseFileTime = 0;
+let latestProjectionOrigin = null;
 let latestProjectionPoints = [];
 let runtimeProjectionAvailable = false;
 let projectionRequestPending = false;
@@ -29,17 +30,58 @@ let sessionDownloadPending = false;
 let latestSessionStatus = null;
 let mocapTargetApplying = false;
 let discoveredBodiesSignature = "";
+let offlineSyncGenerating = false;
+let offsetEstimating = false;
 
 // 网页刷新周期：位姿页打开时曲线 500 ms；其他页面跟随 1000 ms 状态周期。
 const POSE_REFRESH_MS = 200;
 const STATUS_REFRESH_MS = 1000;
 const PREVIEW_REQUEST_TIMEOUT_MS = 2000;
+const COMPAT_STORAGE_KEY = "cvia.compat.mode";
 
 const poseAxes = [
   {key:"X", field:"x", group:"position"}, {key:"Y", field:"y", group:"position"}, {key:"Z", field:"z", group:"position"},
   {key:"Rx", field:"rx", group:"euler_deg"}, {key:"Ry", field:"ry", group:"euler_deg"}, {key:"Rz", field:"rz", group:"euler_deg"}
 ];
-const projectionColors = ["#ef7b72", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4", "#65d7e4"];
+const projectionColors = {origin:"#ef7b72", feature:"#65d7e4"};
+
+function resolveCompatibilityMode(mode) {
+  if (mode === "win7" || mode === "win11") return mode;
+  return /Windows NT 6\.1/i.test(navigator.userAgent) ? "win7" : "win11";
+}
+
+function canvasPixelRatio() {
+  return document.documentElement.classList.contains("compat-win7")
+    ? 1
+    : Math.min(window.devicePixelRatio || 1, 2);
+}
+
+function applyCompatibilityMode(mode, announce = false) {
+  const preference = ["auto", "win7", "win11"].includes(mode) ? mode : "auto";
+  const resolved = resolveCompatibilityMode(preference);
+  const root = document.documentElement;
+  root.classList.remove("compat-win7", "compat-win11");
+  root.classList.add(`compat-${resolved}`);
+  root.dataset.compatPreference = preference;
+  root.dataset.compatResolved = resolved;
+  try { localStorage.setItem(COMPAT_STORAGE_KEY, preference); } catch (error) {}
+  const select = $("#compatMode"), state = $("#compatModeState");
+  if (select) select.value = preference;
+  if (state) state.textContent = preference === "auto"
+    ? `自动 · ${resolved === "win7" ? "Win7 兼容" : "Win11"}`
+    : resolved === "win7" ? "低负载兼容" : "完整效果";
+  drawPreviewCanvas("primary");
+  drawPreviewCanvas("secondary");
+  renderReprojection();
+  if (announce) showToast(resolved === "win7" ? "已切换 Windows 7 兼容模式" : "已切换 Windows 11 显示模式");
+}
+
+function initializeCompatibilityMode() {
+  const root = document.documentElement;
+  const preference = root.dataset.compatPreference || "auto";
+  applyCompatibilityMode(preference);
+  $("#compatMode")?.addEventListener("change", event => applyCompatibilityMode(event.target.value, true));
+}
 
 const cameraAcquisitionFields = [
   ["camera_id", "设备 ID", "number"], ["fps", "帧率 / FPS", "number"],
@@ -251,6 +293,10 @@ function updateDependentUI() {
   $$('[data-path^="mocap."]', $("#mocapOptions")).forEach(control => control.disabled = !mocapEnabled);
   $$('input[name="mocap-target-mode"], #mocapTargetValue, #mocapDiscoveredBodies').forEach(control => control.disabled = !mocapEnabled);
   updateMocapTargetEditor(false);
+  const syncEnabled = Boolean(config.sync?.enabled);
+  $$('[data-path^="sync."]').forEach(control => {
+    if (control.dataset.path !== "sync.enabled") control.disabled = !syncEnabled;
+  });
   $("#socketModeReadout").textContent = tcpEnabled ? ({0:"单图 + 位姿",1:"仅位姿",2:"双图 + 位姿"})[Number(config.network.socket_mode)] : "TCP 关闭 · 本地落盘";
   $("#resolutionReadout").textContent = `${config.runtime.frame_width} × ${config.runtime.frame_height}`;
   $$('[data-camera-summary]').forEach(item => { const camera = config[item.dataset.cameraSummary]; item.textContent = `ID ${camera.camera_id} · ${camera.fps} FPS`; });
@@ -295,6 +341,56 @@ function readControl(control) {
   let value = control.type === "checkbox" ? control.checked : control.value;
   if (control.type === "number" || control.tagName === "SELECT" && /^\d+$/.test(value)) value = Number(value);
   setPath(config, control.dataset.path, value); updateDependentUI(); updateDirty();
+}
+
+function clearWorldRotationInputs() {
+  ["#worldRotationX", "#worldRotationY", "#worldRotationZ"].forEach(selector => {
+    $(selector).value = "0";
+  });
+}
+
+function formatRotationAngle(value) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${Number(value.toPrecision(10))}°`;
+}
+
+function selectedWorldRotationOrder() {
+  return $('input[name="world-rotation-order"]:checked')?.value || "XYZ";
+}
+
+function renderWorldRotationOrder() {
+  const order = selectedWorldRotationOrder();
+  const axisClass = {X:"axis-x", Y:"axis-y", Z:"axis-z"};
+  $("#worldAxisOrder").innerHTML = order.split("").map((axis, index) =>
+    `<span class="${axisClass[axis]}">${axis}</span>${index < 2 ? "<i>→</i>" : ""}`
+  ).join("") + "<small>当前执行顺序</small>";
+  $("#worldRotationFormula").textContent = order.split("").reverse().map(axis => `R${axis.toLowerCase()}`).join(" · ") + " · R";
+}
+
+function applyWorldRotationToExtrinsic() {
+  const inputs = [$("#worldRotationX"), $("#worldRotationY"), $("#worldRotationZ")];
+  const angles = inputs.map(input => Number(input.value));
+  if (inputs.some((input, index) => input.value.trim() === "" || !Number.isFinite(angles[index]))) {
+    showToast("世界轴旋转角度必须是有限数字", true);
+    return;
+  }
+  if (angles.every(value => Math.abs(value) < 1e-12)) {
+    showToast("至少输入一个非零旋转角度", true);
+    return;
+  }
+  try {
+    const order = selectedWorldRotationOrder();
+    config.calibration.extrinsic = window.ExtrinsicRotation.applyWorldRotation(
+      config.calibration.extrinsic,
+      angles[0], angles[1], angles[2], order
+    );
+    bindConfig();
+    clearWorldRotationInputs();
+    $("#worldRotationLast").textContent = `顺序 ${order.split("").join("→")} · X ${formatRotationAngle(angles[0])} · Y ${formatRotationAngle(angles[1])} · Z ${formatRotationAngle(angles[2])}`;
+    showToast(`已按世界轴 ${order.split("").join("→")} 更新 T_M_C；请检查矩阵后保存配置`);
+  } catch (error) {
+    showToast(error.message || "世界轴旋转应用失败", true);
+  }
 }
 
 function setFrame(name, state) {
@@ -349,6 +445,16 @@ function updateInferenceStatus(status) {
   stopButton.disabled = !inference.running && !canSave;
   stopButton.dataset.action = inference.running ? "stop" : "save";
   stopButton.textContent = inference.running ? "停止推理并保存" : canSave ? "保存本次 PnP" : "推理已停止";
+  const offlineButton = $("#generateOfflineSync");
+  if (offlineButton && !offlineSyncGenerating) {
+    offlineButton.disabled = Boolean(inference.running);
+    offlineButton.textContent = inference.running ? "停止后生成" : "生成离线报告";
+  }
+  const estimateButton = $("#estimateOffset");
+  if (estimateButton && !offsetEstimating) {
+    estimateButton.disabled = Boolean(inference.running);
+    estimateButton.textContent = inference.running ? "停止后估计" : "自动估计 offset";
+  }
   if (previousInferenceRunning === true && !inference.running) openSessionModal(session);
   else if (previousInferenceRunning === null && !inference.running) openSessionModal(session);
   previousInferenceRunning = inference.running;
@@ -565,7 +671,7 @@ function drawPreviewCanvas(name) {
   const bitmap = previewBitmaps[name];
   if (!canvas || !bitmap) return;
   const rect = canvas.getBoundingClientRect();
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const ratio = canvasPixelRatio();
   const width = Math.max(1, Math.round(rect.width * ratio));
   const height = Math.max(1, Math.round(rect.height * ratio));
   if (canvas.width !== width || canvas.height !== height) {
@@ -603,24 +709,6 @@ function schedulePreviewRefresh() {
   previewTimer = setTimeout(() => { refreshPreviewImages(); schedulePreviewRefresh(); }, interval);
 }
 
-// Equivalent to cv2.projectPoints for one point with k1, k2, p1, p2, k3.
-// CSV order is timestamp, x, y, z, rx, ry, rz; XYZ is the PnP translation in camera coordinates.
-function projectPnpPoint(row) {
-  if (!config || !row || row.length < 4) return null;
-  const [x, y, z] = row.slice(1, 4).map(Number);
-  if (![x, y, z].every(Number.isFinite) || z <= 0) return {valid:false, reason:"目标位于相机后方"};
-  const k = config.calibration.camera_matrix.map(Number);
-  const [k1, k2, p1, p2, k3] = config.calibration.distortion.map(Number);
-  const xn = x / z, yn = y / z;
-  const r2 = xn * xn + yn * yn, r4 = r2 * r2, r6 = r4 * r2;
-  const radial = 1 + k1 * r2 + k2 * r4 + k3 * r6;
-  const xd = xn * radial + 2 * p1 * xn * yn + p2 * (r2 + 2 * xn * xn);
-  const yd = yn * radial + p1 * (r2 + 2 * yn * yn) + 2 * p2 * xn * yn;
-  const homogeneous = k[6] * xd + k[7] * yd + k[8];
-  if (!Number.isFinite(homogeneous) || Math.abs(homogeneous) < 1e-12) return {valid:false, reason:"投影矩阵无效"};
-  return {valid:true, u:(k[0] * xd + k[1] * yd + k[2]) / homogeneous, v:(k[3] * xd + k[4] * yd + k[5]) / homogeneous, x, y, z};
-}
-
 async function refreshReprojection() {
   if (projectionRequestPending) return;
   projectionRequestPending = true;
@@ -629,11 +717,14 @@ async function refreshReprojection() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "重投影状态读取失败");
     runtimeProjectionAvailable = Boolean(result.available);
-    if (!runtimeProjectionAvailable) latestProjectionPoints = [];
+    if (!runtimeProjectionAvailable) { latestProjectionOrigin = null; latestProjectionPoints = []; }
     if (runtimeProjectionAvailable) {
       latestPoseFileTime = result.mtime_ns ? result.mtime_ns / 1e6 : 0;
       if (result.valid && Array.isArray(result.pose) && result.pose.length === 6) {
         latestPoseRow = [Number(result.timestamp), ...result.pose.map(Number)];
+        const origin = Array.isArray(result.origin) && result.origin.length === 2
+          ? result.origin.map(Number) : null;
+        latestProjectionOrigin = origin?.every(Number.isFinite) ? origin : null;
         latestProjectionPoints = Array.isArray(result.points) ? result.points
           .filter(point => Array.isArray(point) && point.length === 2)
           .map(point => point.map(Number))
@@ -641,6 +732,7 @@ async function refreshReprojection() {
         projectionEmptyMessage = "等待位姿";
       } else {
         latestPoseRow = null;
+        latestProjectionOrigin = null;
         latestProjectionPoints = [];
         projectionEmptyMessage = "当前帧无有效 PnP";
       }
@@ -654,47 +746,58 @@ async function refreshReprojection() {
 function renderReprojection() {
   const canvas = $("#reprojectionCanvas"), readout = $("#projectionReadout");
   if (!canvas || !readout) return;
-  const rect = canvas.getBoundingClientRect(), ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const rect = canvas.getBoundingClientRect(), ratio = canvasPixelRatio();
   const width = Math.max(1, Math.round(rect.width * ratio)), height = Math.max(1, Math.round(rect.height * ratio));
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
   const ctx = canvas.getContext("2d"); ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, rect.width, rect.height);
   readout.classList.remove("is-outside", "is-stale");
 
   if (!latestPoseRow) { $("#projectionState").textContent = projectionEmptyMessage; $("#projectionPixel").textContent = "u -- · v --"; return; }
-  const projectedOrigin = projectPnpPoint(latestPoseRow);
-  if (!projectedOrigin?.valid) { $("#projectionState").textContent = projectedOrigin?.reason || "无法投影"; $("#projectionPixel").textContent = "u -- · v --"; readout.classList.add("is-outside"); return; }
-
   const sourceWidth = Math.max(1, Number(config.runtime.frame_width));
   const sourceHeight = Math.max(1, Number(config.runtime.frame_height));
   const imageWidth = previewNaturalSize.primary.width || sourceWidth;
   const imageHeight = previewNaturalSize.primary.height || sourceHeight;
-  // 新版 C++ 直接发布与 solvePnP 同一组 _p3d/R/T 得到的 7 点；旧版回退为仅投影 P0。
-  const sourcePoints = latestProjectionPoints.length === 7 ? latestProjectionPoints : [[projectedOrigin.u, projectedOrigin.v]];
-  const displayPoints = sourcePoints.map(([sourceU, sourceV], index) => {
+  // C++ 分别发布刚体坐标系原点 (0,0,0) 和模型特征点。最终位姿属于原点，
+  // 因此红点必须使用 origin；不能再把 _p3d[0] 当作刚体中心。
+  if (!latestProjectionOrigin) {
+    $("#projectionState").textContent = "等待刚体中心重投影";
+    $("#projectionPixel").textContent = "CENTER u -- · v --";
+    readout.classList.add("is-outside");
+    return;
+  }
+  const toDisplayPoint = ([sourceU, sourceV], index = -1) => {
     const u = sourceU * imageWidth / sourceWidth, v = sourceV * imageHeight / sourceHeight;
     return {index, u, v, inside:u > 0 && u < imageWidth && v > 0 && v < imageHeight};
-  });
-  const origin = displayPoints[0], insideCount = displayPoints.filter(point => point.inside).length;
+  };
+  const origin = toDisplayPoint(latestProjectionOrigin);
+  const displayPoints = latestProjectionPoints.map((point, index) => toDisplayPoint(point, index));
+  const insideCount = displayPoints.filter(point => point.inside).length;
+  const allInside = origin.inside && insideCount === displayPoints.length;
   const age = latestPoseFileTime ? Date.now() - latestPoseFileTime : 0;
   const stale = age > 2500;
-  $("#projectionPixel").textContent = `P0 u ${origin.u.toFixed(1)} · v ${origin.v.toFixed(1)}`;
-  $("#projectionState").textContent = stale ? "位姿已停止更新" : sourcePoints.length === 7 && insideCount === 7 ? "七点重投影有效" : `${insideCount}/${sourcePoints.length} 点在画面内`;
-  readout.classList.toggle("is-outside", insideCount !== sourcePoints.length); readout.classList.toggle("is-stale", stale);
-  if (!insideCount || stale || !previewBitmaps.primary) return;
+  $("#projectionPixel").textContent = `CENTER u ${origin.u.toFixed(1)} · v ${origin.v.toFixed(1)}`;
+  $("#projectionState").textContent = stale
+    ? `位姿已停止更新 · 保留中心和 ${displayPoints.length} 个特征点`
+    : !origin.inside
+      ? `中心在画面外 · ${insideCount}/${displayPoints.length} 个特征点在画面内`
+      : allInside
+        ? `中心和 ${displayPoints.length} 个特征点重投影有效`
+        : `中心有效 · ${insideCount}/${displayPoints.length} 个特征点在画面内`;
+  readout.classList.toggle("is-outside", !allInside); readout.classList.toggle("is-stale", stale);
+  if (!previewBitmaps.primary) return;
 
   const scale = Math.min(rect.width / imageWidth, rect.height / imageHeight);
   const drawWidth = imageWidth * scale, drawHeight = imageHeight * scale;
   const offsetX = (rect.width - drawWidth) / 2, offsetY = (rect.height - drawHeight) / 2;
+  // 停止推理后预览图本身也冻结在同一帧；保留半透明重投影比直接清空更便于检查。
+  ctx.globalAlpha = stale ? 0.48 : 1;
   for (const point of displayPoints) {
     if (!point.inside) continue;
     const px = offsetX + point.u * scale, py = offsetY + point.v * scale;
-    const color = projectionColors[point.index] || "#e9f0f2";
-    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = point.index === 0 ? 1.5 : 1.2;
-    ctx.beginPath(); ctx.arc(px, py, point.index === 0 ? 8 : 5, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(px, py, point.index === 0 ? 3.2 : 2.4, 0, Math.PI * 2); ctx.fill();
-    if (point.index === 0) {
-      ctx.beginPath(); ctx.moveTo(px - 15, py); ctx.lineTo(px + 15, py); ctx.moveTo(px, py - 15); ctx.lineTo(px, py + 15); ctx.stroke();
-    }
+    const color = projectionColors.feature;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(px, py, 2.4, 0, Math.PI * 2); ctx.fill();
     const pointLabel = `P${point.index}`;
     const labelX = Math.min(rect.width - 18, Math.max(4, px + 7));
     const labelY = Math.min(rect.height - 7, Math.max(10, py - 7));
@@ -703,13 +806,26 @@ function renderReprojection() {
     ctx.fillStyle = color; ctx.fillText(pointLabel, labelX, labelY);
   }
 
-  if (!origin.inside) return;
+  if (!origin.inside) { ctx.globalAlpha = 1; return; }
   const originPx = offsetX + origin.u * scale, originPy = offsetY + origin.v * scale;
-  const label = `XYZ ${projectedOrigin.x.toFixed(1)}  ${projectedOrigin.y.toFixed(1)}  ${projectedOrigin.z.toFixed(1)}`;
+  ctx.strokeStyle = projectionColors.origin; ctx.fillStyle = projectionColors.origin; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(originPx, originPy, 8, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(originPx, originPy, 3.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(originPx - 15, originPy); ctx.lineTo(originPx + 15, originPy);
+  ctx.moveTo(originPx, originPy - 15); ctx.lineTo(originPx, originPy + 15); ctx.stroke();
+  const originLabelX = Math.min(rect.width - 38, Math.max(4, originPx + 7));
+  const originLabelY = Math.min(rect.height - 7, Math.max(10, originPy - 7));
+  ctx.font = "600 9px ui-monospace, monospace"; ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(5,10,12,.92)"; ctx.strokeText("CENTER", originLabelX, originLabelY);
+  ctx.fillStyle = projectionColors.origin; ctx.fillText("CENTER", originLabelX, originLabelY);
+  const [poseX, poseY, poseZ] = latestPoseRow.slice(1, 4).map(Number);
+  const label = `MOCAP XYZ ${poseX.toFixed(1)}  ${poseY.toFixed(1)}  ${poseZ.toFixed(1)}`;
   ctx.font = "10px ui-monospace, monospace"; const labelWidth = ctx.measureText(label).width;
   const labelX = Math.min(Math.max(8, originPx + 13), rect.width - labelWidth - 14), labelY = Math.max(17, originPy - 17);
   ctx.fillStyle = "rgba(5,10,12,.82)"; ctx.fillRect(labelX - 5, labelY - 11, labelWidth + 10, 16);
   ctx.fillStyle = "#f3aaa4"; ctx.fillText(label, labelX, labelY);
+  ctx.globalAlpha = 1;
 }
 
 function formatPoseValue(value) {
@@ -725,8 +841,10 @@ function setSourceState(dotSelector, live, warning = false) {
 function renderPoseComparison(result) {
   const detection = result.detection || {};
   const mocap = result.mocap || {};
+  const synchronization = result.synchronization || {};
   const detectionPose = detection.pose || {};
-  const mocapPose = mocap.pose || {};
+  const synchronized = ["matched", "interpolated"].includes(synchronization.status);
+  const mocapPose = synchronized ? (synchronization.pose || {}) : {};
 
   for (const axis of poseAxes) {
     $(`#detectValue${axis.key}`).textContent = formatPoseValue(detectionPose[axis.field]);
@@ -737,8 +855,13 @@ function renderPoseComparison(result) {
   const detectionAge = Number(detection.age_ms);
   const detectionLive = Boolean(detection.available) && Number.isFinite(detectionAge) && detectionAge <= 2500;
   $("#detectionState").textContent = !detection.available ? "等待视觉位姿" : detectionLive ? "视觉检测在线" : "视觉位姿已暂停";
+  const timestampLabel = detection.timestamp_source === "v4l2_driver"
+    ? `V4L2 ${detection.timestamp_point === "start_of_exposure" ? "SOE" : "EOF/未知"}`
+    : detection.source === "reprojection" ? "软件接收时间" : "CSV";
+  const pipelineLatency = detection.pipeline_latency_ms == null
+    ? NaN : Number(detection.pipeline_latency_ms);
   $("#detectionMeta").textContent = detection.available
-    ? `PnP ${detection.source === "reprojection" ? "当前帧" : "CSV 回退"} · ${Number.isFinite(detectionAge) ? `${detectionAge.toFixed(0)} ms 前更新` : "更新时间未知"}`
+    ? `${timestampLabel} · ${Number.isFinite(pipelineLatency) ? `采集→结果 ${pipelineLatency.toFixed(1)} ms` : "延迟未知"} · ${Number.isFinite(detectionAge) ? `${detectionAge.toFixed(0)} ms 前更新` : "更新时间未知"}`
     : "PnP 尚未输出";
   setSourceState("#detectionDot", detectionLive, Boolean(detection.available) && !detectionLive);
 
@@ -749,25 +872,145 @@ function renderPoseComparison(result) {
     disconnected:"SDK 连接已断开", error:"动捕启动失败", unavailable:"动捕尚未初始化"
   };
   $("#mocapState").textContent = mocapLabels[mocap.status] || "等待动捕数据";
-  const trackerName = mocapPose.tracker_name || mocap.selector || "RIGID BODY";
+  const trackerName = synchronization.pose?.tracker_name || mocap.pose?.tracker_name || mocap.selector || "RIGID BODY";
   $("#mocapTrackerHeading").textContent = String(trackerName).toUpperCase();
-  $("#mocapMeta").textContent = mocapPose.frame !== undefined
-    ? `帧 ${mocapPose.frame} · ${Number(mocap.age_ms).toFixed(0)} ms 前接收 · SDK ${mocap.sdk_version || "--"}`
+  $("#mocapMeta").textContent = synchronized
+    ? `配对帧 ${(synchronization.mocap_frames || [mocapPose.frame]).join(" → ")} · |Δt| ${Math.abs(Number(synchronization.sync_error_ms)).toFixed(2)} ms`
+    : mocap.pose?.frame !== undefined
+    ? `最新帧 ${mocap.pose.frame} 在线，但尚未匹配当前视觉帧`
     : (mocap.message || `${mocap.selector || "目标刚体"} · SDK ${mocap.sdk_version || "--"}`);
-  setSourceState("#mocapDot", mocap.status === "live", ["stale", "invalid", "waiting", "ready"].includes(mocap.status));
+  setSourceState("#mocapDot", synchronized, mocap.status === "live" && !synchronized || ["stale", "invalid", "waiting", "ready"].includes(mocap.status));
   updateMocapNetworkStatus(mocap);
 
   const bothLive = detectionLive && mocap.status === "live";
-  const eitherAvailable = Boolean(detection.available || mocapPose.frame !== undefined);
-  $("#poseState").textContent = bothLive ? "双源在线" : eitherAvailable ? "单源 / 待同步" : "等待双源";
-  $("#poseState").classList.toggle("is-live", bothLive);
+  const eitherAvailable = Boolean(detection.available || mocap.pose?.frame !== undefined);
+  $("#poseState").textContent = synchronized ? "实时已配对" : bothLive ? "双源在线 / 未配对" : eitherAvailable ? "单源 / 待同步" : "等待双源";
+  $("#poseState").classList.toggle("is-live", synchronized);
 
-  const delta = Number(result.receive_delta_ms);
+  const rail = $("#syncRail");
+  rail.dataset.state = synchronized ? "matched" : synchronization.status === "unmatched" ? "unmatched" : "waiting";
+  const visualStamp = Number(synchronization.visual_timestamp_ms);
+  $("#syncVisionStamp").textContent = Number.isFinite(visualStamp) && visualStamp > 0
+    ? `${new Date(visualStamp).toLocaleTimeString("zh-CN", {hour12:false})}.${String(Math.trunc(visualStamp) % 1000).padStart(3, "0")}`
+    : "等待视觉帧";
+  const syncError = synchronization.sync_error_ms == null ? NaN : Number(synchronization.sync_error_ms);
+  $("#syncDeltaValue").textContent = Number.isFinite(syncError)
+    ? `${syncError >= 0 ? "+" : ""}${syncError.toFixed(2)} ms`
+    : "-- ms";
+  $("#syncMethod").textContent = synchronization.status === "interpolated"
+    ? `SLERP · α ${Number(synchronization.alpha).toFixed(3)}`
+    : synchronization.status === "matched" ? "NEAREST FRAME" : synchronization.message || "等待时间配对";
+  const frames = synchronization.mocap_frames || [];
+  $("#syncMocapFrames").textContent = frames.length ? `帧 ${frames.join(" → ")}` : "等待动捕帧";
+  $("#syncBufferMeta").textContent = `历史缓存 ${Number(synchronization.history_samples || 0)} 帧`;
+
+  const delta = result.receive_delta_ms == null ? NaN : Number(result.receive_delta_ms);
   if (detectionLive && mocap.status === "live" && Number.isFinite(delta)) {
     const relation = delta >= 0 ? "视觉更新晚于动捕" : "视觉更新早于动捕";
     $("#comparisonDelta").textContent = `本机更新时差 · ${relation} ${Math.abs(delta).toFixed(1)} ms`;
   } else {
     $("#comparisonDelta").textContent = "双源同时在线后显示本机更新时差";
+  }
+}
+
+function renderOffsetEstimation(estimation) {
+  const panel = $("#offsetEstimate");
+  if (!estimation) {
+    panel.dataset.confidence = "none";
+    $("#offsetEstimateValue").textContent = "尚未估计";
+    $("#offsetEstimateMeta").textContent = "停止推理后，建议做一段非周期的平移和转动";
+    return;
+  }
+  panel.dataset.confidence = estimation.reliable ? estimation.confidence : "low";
+  const sign = Number(estimation.offset_ms) >= 0 ? "+" : "";
+  $("#offsetEstimateValue").textContent = `${sign}${Number(estimation.offset_ms).toFixed(1)} ms · ${estimation.applied ? "已应用" : "未应用"}`;
+  const confidenceLabels = {high:"高置信", medium:"中置信", low:"低置信"};
+  $("#offsetEstimateMeta").textContent = `${confidenceLabels[estimation.confidence] || "置信度未知"} · 相关 ${Number(estimation.correlation).toFixed(3)} · 峰差 ${Number(estimation.peak_margin).toFixed(3)} · ${estimation.message || ""}`;
+}
+
+function renderOfflineSync(result) {
+  renderOffsetEstimation(result?.offset_estimation);
+  const available = Boolean(result?.available && result.summary);
+  $("#offlineSyncEmpty").hidden = available;
+  $("#offlineSyncResult").hidden = !available;
+  if (!available) return;
+  const summary = result.summary;
+  $("#offlineCoverage").textContent = `${Number(summary.coverage_percent || 0).toFixed(1)}%`;
+  $("#offlineMatched").textContent = `${summary.matched_samples || 0} / ${summary.detection_samples || 0}`;
+  $("#offlineP95").textContent = summary.p95_abs_error_ms == null ? "--" : `${Number(summary.p95_abs_error_ms).toFixed(2)} ms`;
+  $("#offlineGeneratedAt").textContent = `${summary.generated_at || "报告已生成"} · 偏移 ${Number(summary.offset_ms || 0).toFixed(1)} ms`;
+  const cacheKey = summary.generated_unix_ns || Date.now();
+  const reportUrls = result.report_urls || {
+    camera: "/api/sync/offline/report/camera.svg",
+    mocap: "/api/sync/offline/report/mocap.svg",
+    composite: result.report_url || "/api/sync/offline/report.svg",
+  };
+  for (const [mode, prefix] of [["camera", "camera"], ["mocap", "mocap"], ["composite", "composite"]]) {
+    const reportUrl = `${reportUrls[mode]}?v=${cacheKey}`;
+    $(`#${prefix}ReportImage`).src = reportUrl;
+    $(`#${prefix}ReportLink`).href = reportUrl;
+    $(`#open${prefix[0].toUpperCase()}${prefix.slice(1)}Report`).href = reportUrl;
+  }
+  $("#downloadSyncedCsv").href = result.csv_url || "/api/sync/offline/download.csv";
+}
+
+async function estimateOffset() {
+  if (offsetEstimating) return;
+  offsetEstimating = true;
+  const button = $("#estimateOffset");
+  button.disabled = true; button.textContent = "正在计算互相关…";
+  try {
+    const response = await fetch("/api/sync/offline/estimate-offset", {method:"POST", cache:"no-store"});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "自动估计时间补偿失败");
+    renderOffsetEstimation(result.offset_estimation);
+    if (result.offset_estimation?.applied) {
+      await loadConfig();
+      await refreshOfflineSync();
+      showToast(`已自动应用 offset ${Number(result.config_offset_ms).toFixed(1)} ms；请重新生成离线报告`);
+    } else {
+      showToast(result.offset_estimation?.message || "估计结果未通过可靠性检查", true);
+    }
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    offsetEstimating = false;
+    button.disabled = Boolean(previousInferenceRunning);
+    button.textContent = previousInferenceRunning ? "停止后估计" : "重新估计 offset";
+  }
+}
+
+async function refreshOfflineSync() {
+  try {
+    const response = await fetch("/api/sync/offline", {cache:"no-store"});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "离线同步状态读取失败");
+    renderOfflineSync(result);
+  } catch (error) {
+    const empty = $("#offlineSyncEmpty");
+    empty.hidden = false;
+    empty.querySelector("strong").textContent = "离线报告状态读取失败";
+    empty.querySelector("small").textContent = error.message;
+  }
+}
+
+async function generateOfflineSync() {
+  if (offlineSyncGenerating) return;
+  offlineSyncGenerating = true;
+  const button = $("#generateOfflineSync");
+  button.disabled = true; button.textContent = "正在配对并绘图…";
+  try {
+    const response = await fetch("/api/sync/offline/generate", {method:"POST", cache:"no-store"});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "离线同步报告生成失败");
+    renderOfflineSync(result);
+    showToast("同步 CSV 与相机、动捕、合成三张六轴图已生成");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    offlineSyncGenerating = false;
+    button.disabled = Boolean(previousInferenceRunning);
+    button.textContent = previousInferenceRunning ? "停止后生成" : "重新生成报告";
   }
 }
 
@@ -786,7 +1029,7 @@ async function refreshPose() {
       latestPoseFileTime = result.detection.updated_unix_ns ? result.detection.updated_unix_ns / 1e6 : 0;
       projectionEmptyMessage = "等待 CSV 位姿";
     }
-    // C++ 已提供同帧七点投影时，图像预览循环负责绘制；这里只更新 CSV 回退投影。
+    // C++ 已提供同帧模型点投影时，图像预览循环负责绘制；这里只更新旧版 CSV 回退投影。
     if (!runtimeProjectionAvailable) renderReprojection();
     renderPoseComparison(result);
   } catch (error) {
@@ -806,12 +1049,17 @@ function schedulePoseRefresh() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  initializeCompatibilityMode();
   createControls();
   $("#configForm").addEventListener("input", event => { if (event.target.dataset.path) readControl(event.target); });
   $("#configForm").addEventListener("change", event => { if (event.target.dataset.path) readControl(event.target); });
   $("#configForm").addEventListener("submit", event => { event.preventDefault(); saveConfig(); });
   $("#reloadButton").addEventListener("click", () => loadConfig(true));
   $("#resetCalibration").addEventListener("click", () => { config.calibration = clone(savedConfig.calibration); bindConfig(); showToast("标定值已恢复到当前保存状态"); });
+  $("#applyWorldRotation").addEventListener("click", applyWorldRotationToExtrinsic);
+  $("#clearWorldRotation").addEventListener("click", () => { clearWorldRotationInputs(); $("#worldRotationLast").textContent = "旋转角度已清零"; });
+  $$('input[name="world-rotation-order"]').forEach(control => control.addEventListener("change", renderWorldRotationOrder));
+  renderWorldRotationOrder();
   $("#loadCalibrationHistory").addEventListener("click", applyCalibrationHistory);
   $$('input[name="mocap-target-mode"]').forEach(control => control.addEventListener("change", () => changeMocapTargetMode(control.value)));
   $("#mocapTargetValue").addEventListener("input", updateMocapTargetEditor);
@@ -820,6 +1068,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#stopInferenceButton").addEventListener("click", stopInferenceOrSave);
   $("#saveSessionButton").addEventListener("click", savePnpSession);
   $("#saveSessionLater").addEventListener("click", () => { $("#sessionModal").hidden = true; sessionModalDismissed = true; });
+  $("#generateOfflineSync").addEventListener("click", generateOfflineSync);
+  $("#estimateOffset").addEventListener("click", estimateOffset);
   $$(".nav-tab").forEach(tab => tab.addEventListener("click", () => { $$(".nav-tab").forEach(item => item.classList.toggle("is-active", item === tab)); $$(".form-section").forEach(panel => panel.classList.toggle("is-active", panel.dataset.panel === tab.dataset.tab)); if (tab.dataset.tab === "pose") requestAnimationFrame(refreshPose); }));
   window.addEventListener("beforeunload", event => { if (JSON.stringify(config) !== JSON.stringify(savedConfig)) { event.preventDefault(); event.returnValue = ""; } });
   document.addEventListener("visibilitychange", () => {
@@ -831,7 +1081,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       refreshPose();
     }
   });
-  await loadConfig(); await loadCalibrationHistory(); await refreshStatus(); refreshPreviewImages(); scheduleStatusRefresh(); schedulePreviewRefresh(); schedulePoseRefresh(); setInterval(() => $("#clock").textContent = new Date().toLocaleTimeString("zh-CN", {hour12:false}), 1000);
+  await loadConfig(); await loadCalibrationHistory(); await refreshStatus(); await refreshOfflineSync(); refreshPreviewImages(); scheduleStatusRefresh(); schedulePreviewRefresh(); schedulePoseRefresh(); setInterval(() => $("#clock").textContent = new Date().toLocaleTimeString("zh-CN", {hour12:false}), 1000);
   window.addEventListener("resize", () => {
     drawPreviewCanvas("primary");
     drawPreviewCanvas("secondary");

@@ -27,6 +27,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/trt.dir/src/lstm/lstm_predictor.cpp.o.d"
   "CMakeFiles/trt.dir/src/main.cpp.o"
   "CMakeFiles/trt.dir/src/main.cpp.o.d"
+  "CMakeFiles/trt.dir/src/params/config.cpp.o"
+  "CMakeFiles/trt.dir/src/params/config.cpp.o.d"
   "CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o"
   "CMakeFiles/trt.dir/src/preprocess/preprocess.cpp.o.d"
   "CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o"

@@ -49,6 +49,10 @@ private:
     cv::Mat _latest_detect_rgb;
     cv::Mat _latest_photo_rgb;
     uint64_t _latest_detect_timestamp = 0;
+    uint64_t _latest_detect_capture_timestamp_ns = 0;
+    uint64_t _latest_detect_dequeue_timestamp_ns = 0;
+    bool _latest_detect_driver_timestamp = false;
+    bool _latest_detect_timestamp_start_of_exposure = false;
     uint64_t _latest_photo_timestamp = 0;
     uint64_t _latest_detect_sequence = 0;
     bool _has_detect_frame = false;

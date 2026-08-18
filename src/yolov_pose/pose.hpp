@@ -66,6 +66,9 @@ namespace model
             void refine_keypoints(std::vector<keypoint> &kpt);
             std::vector<float> m_result;
             std::vector<float> uart_result;
+            // 刚体坐标系原点 (0,0,0) 在当前红外图像上的重投影。
+            cv::Point2d m_reprojected_origin;
+            bool m_reprojected_origin_valid = false;
             std::vector<cv::Point2d> m_reprojected_points;
             float linear_map(float val, float in_min, float in_max, float out_min, float out_max);
             std::vector<bbox> m_bboxes;
@@ -81,14 +84,22 @@ namespace model
             int m_inputSize;
             int m_imgArea;
             int m_outputSize;
+            int m_outputBoxes = 0;
+            int m_outputFeatures = 0;
+            int m_outputClasses = 0;
+            // Ultralytics exports may use either [1, boxes, features] or
+            // [1, features, boxes]. Keep the engine layout explicit instead
+            // of assuming one exporter-specific order in postprocess.
+            bool m_outputFeaturesFirst = false;
             cv::Mat _K;
             cv::Mat _diff;
             cv::Mat _p3d;
 
             cv::Mat _handTrans;
             cv::Mat _wxj2cam;
-            cv::Mat combined_inv;
-            cv::Mat combined;
+            // T_M_C: camera coordinates -> NOKOV mocap coordinates.
+            cv::Mat mocap_from_camera_inv;
+            cv::Mat mocap_from_camera;
 
             cv::Mat R1, T1;
             cv::Mat _R1_prev;

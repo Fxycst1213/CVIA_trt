@@ -14,10 +14,18 @@ struct Resultframe
     std::vector<model::pose::bbox> bboxes;
     std::vector<float> pose_result;
     std::vector<float> udp_result;
-    // 当前 PnP 使用的 7 个三维模型点在红外原图上的重投影像素坐标。
+    // 刚体坐标系原点 (0,0,0) 与当前 PnP 模型特征点在红外原图上的重投影。
+    cv::Point2d reprojected_origin;
+    bool reprojected_origin_valid = false;
     std::vector<cv::Point2d> reprojected_points;
     bool pose_valid = false;
+    // timestamp 保留毫秒协议；capture_timestamp_ns 用于 PTP 时间域精确配对。
     uint64_t timestamp;
+    uint64_t capture_timestamp_ns = 0;
+    uint64_t dequeue_timestamp_ns = 0;
+    uint64_t publish_timestamp_ns = 0;
+    bool driver_timestamp = false;
+    bool timestamp_start_of_exposure = false;
     uint64_t secondary_timestamp = 0;
 };
 
@@ -82,11 +90,11 @@ struct prj_params
     bool save_pnp_results = true;
     std::string pnp_result_dir = "./PNP_result";
 
-    // PnP 相机标定参数，以及从相机坐标系到项目坐标系的 4x4 外参。
-    std::array<double, 9> camera_matrix = {{1064.8, 0.0, 952.7,
-                                            0.0, 1077.3, 624.1,
+    // PnP 相机标定参数，以及 T_M_C（相机坐标系到 NOKOV 动捕坐标系）的 4x4 外参。
+    std::array<double, 9> camera_matrix = {{1078.39302318049, 0, 939.772377680377,
+                                            0, 1078.53917414318, 595.175265662463,
                                             0.0, 0.0, 1.0}};
-    std::array<double, 5> distortion = {{-0.0991, 0.3451, 0.0018, -0.0018, -0.4370}};
+    std::array<double, 5> distortion = {{-0.0630336003089920, 0.187345652299030, 0, 0, -0.163375015304349}};
     std::array<double, 16> extrinsic = {{-0.036791138,     0.480521384,     0.87621094,  -1908.919479898,
                         0.999094004,     0.036455454,     0.021958388,  -388.940632775,
                         -0.021391192313944075,0.8762249705686078,-0.48142727160333376,647.8513827001716,

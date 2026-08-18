@@ -4,7 +4,11 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-TRT_BINARY="${TRT_BINARY:-${PROJECT_ROOT}/trt}"
+DEFAULT_TRT_BINARY="${PROJECT_ROOT}/build/trt"
+if [[ ! -x "${DEFAULT_TRT_BINARY}" ]]; then
+    DEFAULT_TRT_BINARY="${PROJECT_ROOT}/trt"
+fi
+TRT_BINARY="${TRT_BINARY:-${DEFAULT_TRT_BINARY}}"
 CONFIG_FILE="${CONFIG_FILE:-${SCRIPT_DIR}/config.json}"
 WEB_HOST="${WEB_HOST:-0.0.0.0}"
 WEB_PORT="${WEB_PORT:-8765}"
@@ -60,8 +64,8 @@ if [[ ! -x "${TRT_BINARY}" ]]; then
     exit 1
 fi
 
-if ! grep -aFq "CVIA runtime revision: dual60-latest-frame-v3" "${TRT_BINARY}"; then
-    echo "[CVIA] 当前推理程序不是本次双 60 FPS 优化后的版本：${TRT_BINARY}" >&2
+if ! grep -aFq "CVIA runtime revision: v4l2-ptp-timestamp-v4" "${TRT_BINARY}"; then
+    echo "[CVIA] 当前推理程序不是本次 V4L2/PTP 时间戳优化后的版本：${TRT_BINARY}" >&2
     echo "[CVIA] 请重新编译，或通过 TRT_BINARY 指向新生成的 trt。" >&2
     exit 1
 fi

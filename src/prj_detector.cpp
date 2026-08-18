@@ -43,6 +43,11 @@ void prj_v8detector::detect_camera_loop()
             // 交换 Mat 所有权，不复制 1920x1080 像素。
             std::swap(_latest_detect_rgb, *_detect_writeframe->rgb_ptr);
             _latest_detect_timestamp = _detect_writeframe->timestamp;
+            _latest_detect_capture_timestamp_ns = _detect_writeframe->capture_timestamp_ns;
+            _latest_detect_dequeue_timestamp_ns = _detect_writeframe->dequeue_timestamp_ns;
+            _latest_detect_driver_timestamp = _detect_writeframe->driver_timestamp;
+            _latest_detect_timestamp_start_of_exposure =
+                _detect_writeframe->timestamp_start_of_exposure;
             ++_latest_detect_sequence;
             _has_detect_frame = true;
         }
@@ -148,6 +153,11 @@ void prj_v8detector::camera()
             // cv::Mat 浅拷贝只增加引用计数；采集线程通过 swap 发布下一帧，不会覆写该内存。
             _resultframe.rgb = _latest_detect_rgb;
             _resultframe.timestamp = _latest_detect_timestamp;
+            _resultframe.capture_timestamp_ns = _latest_detect_capture_timestamp_ns;
+            _resultframe.dequeue_timestamp_ns = _latest_detect_dequeue_timestamp_ns;
+            _resultframe.driver_timestamp = _latest_detect_driver_timestamp;
+            _resultframe.timestamp_start_of_exposure =
+                _latest_detect_timestamp_start_of_exposure;
             last_processed_sequence = _latest_detect_sequence;
         }
 
@@ -170,9 +180,14 @@ void prj_v8detector::camera()
 
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
+        _resultframe.reprojected_origin = _worker->m_pose->m_reprojected_origin;
+        _resultframe.reprojected_origin_valid = _worker->m_pose->m_reprojected_origin_valid;
         _resultframe.reprojected_points = _worker->m_pose->m_reprojected_points;
         _resultframe.pose_valid = _worker->m_pose->is_current_frame_good;
         _resultframe.udp_result = _resultframe.pose_result;
+        _resultframe.publish_timestamp_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
         // CSV 在推理线程直接顺序追加，避免预览限频/丢帧影响位姿记录完整性。
         _client.record_pose(_resultframe);
         {
@@ -239,14 +254,22 @@ void prj_v8detector::camera_foldimages()
         }
         _resultframe.rgb_secondary = _resultframe.rgb;
         _resultframe.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        _resultframe.capture_timestamp_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
+        _resultframe.dequeue_timestamp_ns = _resultframe.capture_timestamp_ns;
         _resultframe.secondary_timestamp = _resultframe.timestamp;
         _worker->inference(_resultframe);
 
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
+        _resultframe.reprojected_origin = _worker->m_pose->m_reprojected_origin;
+        _resultframe.reprojected_origin_valid = _worker->m_pose->m_reprojected_origin_valid;
         _resultframe.reprojected_points = _worker->m_pose->m_reprojected_points;
         _resultframe.pose_valid = _worker->m_pose->is_current_frame_good;
         _resultframe.udp_result = _resultframe.pose_result;
+        _resultframe.publish_timestamp_ns = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
         _client.record_pose(_resultframe);
         {
             std::lock_guard<std::mutex> lock(_udp_mtx);

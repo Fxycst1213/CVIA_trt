@@ -17,10 +17,6 @@
 
 using namespace std;
 using namespace nvinfer1;
-double deg2rad(double deg)
-{
-    return deg * CV_PI / 180.0;
-};
 
 namespace
 {
@@ -64,27 +60,27 @@ namespace
         return cv::Vec3d(rx * rad_to_deg, ry * rad_to_deg, rz * rad_to_deg);
     }
 
-    cv::Mat transformCameraPoseToWorld(const cv::Mat &camera_to_world,
+    cv::Mat transformCameraPoseToMocap(const cv::Mat &mocap_from_camera,
                                        const cv::Mat &object_to_camera_rotation,
                                        const cv::Vec3f &object_position_in_camera)
     {
-        CV_Assert(camera_to_world.rows == 4 && camera_to_world.cols == 4);
+        CV_Assert(mocap_from_camera.rows == 4 && mocap_from_camera.cols == 4);
         CV_Assert(object_to_camera_rotation.rows == 3 && object_to_camera_rotation.cols == 3);
 
-        cv::Mat camera_to_world_64;
+        cv::Mat mocap_from_camera_64;
         cv::Mat object_to_camera_rotation_64;
-        camera_to_world.convertTo(camera_to_world_64, CV_64F);
+        mocap_from_camera.convertTo(mocap_from_camera_64, CV_64F);
         object_to_camera_rotation.convertTo(object_to_camera_rotation_64, CV_64F);
 
-        // solvePnP 给出 T_camera_object；combined 是 T_world_camera。
-        // 对完整位姿左乘，位置和姿态才能一起进入世界坐标系。
+        // solvePnP 给出 T_C_O；calibration.extrinsic 是 T_M_C。
+        // 对完整位姿左乘得到 T_M_O，位置和姿态一起进入动捕坐标系。
         cv::Mat object_to_camera = cv::Mat::eye(4, 4, CV_64F);
         object_to_camera_rotation_64.copyTo(object_to_camera(cv::Rect(0, 0, 3, 3)));
         object_to_camera.at<double>(0, 3) = object_position_in_camera[0];
         object_to_camera.at<double>(1, 3) = object_position_in_camera[1];
         object_to_camera.at<double>(2, 3) = object_position_in_camera[2];
 
-        return camera_to_world_64 * object_to_camera;
+        return mocap_from_camera_64 * object_to_camera;
     }
 }
 
@@ -100,8 +96,8 @@ namespace model
             auto inter_x1 = std::min(bbox1.x1, bbox2.x1);
             auto inter_y1 = std::min(bbox1.y1, bbox2.y1);
 
-            float inter_w = inter_x1 - inter_x0;
-            float inter_h = inter_y1 - inter_y0;
+            float inter_w = std::max(0.0f, inter_x1 - inter_x0);
+            float inter_h = std::max(0.0f, inter_y1 - inter_y0);
 
             float inter_area = inter_w * inter_h;
             float union_area =
@@ -109,7 +105,7 @@ namespace model
                 (bbox2.x1 - bbox2.x0) * (bbox2.y1 - bbox2.y0) -
                 inter_area;
 
-            return inter_area / union_area;
+            return union_area > 0.0f ? inter_area / union_area : 0.0f;
         }
 
         void Pose::setup(void const *data, size_t size)
@@ -123,11 +119,51 @@ namespace model
             m_inputDims = m_engine->getTensorShape(input_name);
             m_outputDims = m_engine->getTensorShape(output_name);
 
+            if (m_outputDims.nbDims != 3 || m_outputDims.d[0] != 1 ||
+                m_outputDims.d[1] <= 0 || m_outputDims.d[2] <= 0)
+            {
+                LOGE("Unsupported pose output shape: nbDims=%d [%d,%d,%d]",
+                     m_outputDims.nbDims,
+                     m_outputDims.nbDims > 0 ? m_outputDims.d[0] : -1,
+                     m_outputDims.nbDims > 1 ? m_outputDims.d[1] : -1,
+                     m_outputDims.nbDims > 2 ? m_outputDims.d[2] : -1);
+                return;
+            }
+
+            const int expected_features = 4 + POSE_CLASS_COUNT + NUM_KEYPOINTS * 3;
+            const int dim1 = m_outputDims.d[1];
+            const int dim2 = m_outputDims.d[2];
+            if (dim1 == expected_features && dim2 != expected_features)
+            {
+                m_outputFeaturesFirst = true;
+                m_outputFeatures = dim1;
+                m_outputBoxes = dim2;
+            }
+            else if (dim2 == expected_features && dim1 != expected_features)
+            {
+                m_outputFeaturesFirst = false;
+                m_outputBoxes = dim1;
+                m_outputFeatures = dim2;
+            }
+            else
+            {
+                LOGE("Pose model/config mismatch: output=[1,%d,%d], expected feature dimension=%d for %d classes and %d configured 3D points",
+                     dim1, dim2, expected_features, POSE_CLASS_COUNT, NUM_KEYPOINTS);
+                return;
+            }
+
+            m_outputClasses = POSE_CLASS_COUNT;
+
+            LOG("Pose output: raw=[1,%d,%d], layout=%s, boxes=%d, features=%d, classes=%d, keypoints=%d",
+                dim1, dim2,
+                m_outputFeaturesFirst ? "features-first" : "boxes-first",
+                m_outputBoxes, m_outputFeatures, m_outputClasses, NUM_KEYPOINTS);
+
             CUDA_CHECK(cudaStreamCreate(&m_stream));
 
             m_inputSize = m_params->img.h * m_params->img.w * m_params->img.c * sizeof(float);
             m_imgArea = m_params->img.h * m_params->img.w;
-            m_outputSize = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
+            m_outputSize = m_outputBoxes * m_outputFeatures * sizeof(float);
 
             CUDA_CHECK(cudaMallocHost(&m_inputMemory[0], m_inputSize));
             CUDA_CHECK(cudaMallocHost(&m_outputMemory[0], m_outputSize));
@@ -253,42 +289,33 @@ namespace model
             // _K = (cv::Mat_<double>(3, 3) << 1067.695, 0.0, 972.357,
             //       0.0, 1068.264, 504.225,
             //       0.0, 0.0, 1.0);
-            _K = (cv::Mat_<double>(3, 3) << 1064.8, 0.0, 952.7,
-                  0.0, 1077.3, 624.1,
-                  0.0, 0.0, 1.0);
+            _K = (cv::Mat_<double>(3, 3) << 1078.39302318049, 0, 939.772377680377,
+                                            0, 1078.53917414318, 595.175265662463,
+                                            0.0, 0.0, 1.0);
 
-            _diff = (cv::Mat_<float>(1, 5) << -0.0991, 0.3451, 0.0018, -0.0018, -0.4370);
+            _diff = (cv::Mat_<float>(1, 5) << -0.0630336003089920, 0.187345652299030, 0, 0, -0.163375015304349);
 
-            // 0721
-            // _p3d = (cv::Mat_<double>(7, 3) << 0, 0, 0,
-            //         -10.686994,	-17.808170,	2.328647,
-            //         -32.978067, -20.367124, 0.705424,
-            //         -56.310435, -17.604014, -3.684765,
-            //         -65.142842, 2.854420, -4.912121,
-            //         -44.441506, 2.412795, -3.280094,
-            //         -21.763430, 5.657619, 0.019250);
+            // 点数和坐标都来自 pose_params.hpp 的唯一配置表，避免 NUM_KEYPOINTS
+            // 与 _p3d 行数分别修改后不一致。
+            _p3d = cv::Mat(NUM_KEYPOINTS, 3, CV_64FC1);
+            for (int index = 0; index < NUM_KEYPOINTS; ++index)
+            {
+                _p3d.at<double>(index, 0) = MODEL_KEYPOINTS_3D[index].x;
+                _p3d.at<double>(index, 1) = MODEL_KEYPOINTS_3D[index].y;
+                _p3d.at<double>(index, 2) = MODEL_KEYPOINTS_3D[index].z;
+            }
 
-            // 0721_1
-            _p3d = (cv::Mat_<double>(7, 3) << 0, 0, 0,
-                    -21.763430, 5.657619, 0.019250,
-                    -44.441506, 2.412795, -3.280094,
-                    -65.142842, 2.854420, -4.912121,
-                    -56.310435, -17.604014, -3.684765,
-                    -32.978067, -20.367124, 0.705424,
-                    -10.686994,	-17.808170,	2.328647
-                    );
-
-            // combined = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
+            // mocap_from_camera = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
             //             9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
             //             -1.0373164e-01, 7.6292819e-01, 6.3810676e-01, 1.3706354e+02,
             //             0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
-            // combined_inv = combined.inv();
-            combined = (cv::Mat_<float>(4, 4) << 
+            // mocap_from_camera_inv = mocap_from_camera.inv();
+            mocap_from_camera = (cv::Mat_<float>(4, 4) <<
                         0.990200045,    -0.102967953,     0.094347611, -1313.326552871,
                         -0.135454307,    -0.543632945,     0.828320802, -1868.458172769,
                         -0.034000028,    -0.832983086,    -0.55225282,  1061.160468608,
                         0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00);
-            combined_inv = combined.inv();
+            mocap_from_camera_inv = mocap_from_camera.inv();
 
             // 未来位置预测已停用，不加载/构建 LSTM TensorRT engine。
             // m_lstm_ready = false;
@@ -302,16 +329,22 @@ namespace model
             cv::Mat distortion64(1, 5, CV_64F, const_cast<double *>(distortion.data()));
             distortion64.convertTo(_diff, CV_32F);
             cv::Mat transform64(4, 4, CV_64F, const_cast<double *>(extrinsic.data()));
-            transform64.convertTo(combined, CV_32F);
-            combined_inv = combined.inv();
-            LOG("Web calibration loaded: fx=%.3f fy=%.3f cx=%.3f cy=%.3f",
+            transform64.convertTo(mocap_from_camera, CV_32F);
+            mocap_from_camera_inv = mocap_from_camera.inv();
+            LOG("Web calibration loaded: fx=%.3f fy=%.3f cx=%.3f cy=%.3f, extrinsic=T_M_C",
                 camera_matrix[0], camera_matrix[4], camera_matrix[2], camera_matrix[5]);
         }
 
         bool Pose::postprocess_cpu(const uint64_t &timestamp)
         {
 
-            int output_size = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
+            if (m_outputBoxes <= 0 || m_outputFeatures <= 0 || m_outputClasses <= 0)
+            {
+                LOGE("Pose output layout was not initialized");
+                return false;
+            }
+
+            int output_size = m_outputBoxes * m_outputFeatures * sizeof(float);
             CUDA_CHECK(cudaMemcpyAsync(m_outputMemory[0], m_outputMemory[1], output_size, cudaMemcpyKind::cudaMemcpyDeviceToHost, m_stream));
             CUDA_CHECK(cudaStreamSynchronize(m_stream));
 
@@ -319,27 +352,39 @@ namespace model
             float nms_threshold = 0.45;
             float kpt_conf_threshold = 0.5f;
 
-            int boxes_count = m_outputDims.d[1];
-            int dim_kpts = NUM_KEYPOINTS * 3;
-            int class_count = m_outputDims.d[2] - 4 - dim_kpts;
-            float *tensor;
+            const int boxes_count = m_outputBoxes;
+            const int class_count = m_outputClasses;
+            auto output_at = [this](int box_index, int feature_index) -> float
+            {
+                if (m_outputFeaturesFirst)
+                    return m_outputMemory[0][feature_index * m_outputBoxes + box_index];
+                return m_outputMemory[0][box_index * m_outputFeatures + feature_index];
+            };
 
-            float cx, cy, w, h, obj, prob, conf;
+            float cx, cy, w, h, conf;
             float x0, y0, x1, y1, u, v, kconf;
             int label;
 
             for (int i = 0; i < boxes_count; i++)
             {
-                tensor = m_outputMemory[0] + i * m_outputDims.d[2];
-                label = max_element(tensor + 4, tensor + 4 + class_count) - (tensor + 4);
-                conf = tensor[4 + label];
+                label = 0;
+                conf = output_at(i, 4);
+                for (int class_index = 1; class_index < class_count; ++class_index)
+                {
+                    const float class_confidence = output_at(i, 4 + class_index);
+                    if (class_confidence > conf)
+                    {
+                        conf = class_confidence;
+                        label = class_index;
+                    }
+                }
                 if (conf < conf_threshold)
                     continue;
 
-                cx = tensor[0];
-                cy = tensor[1];
-                w = tensor[2];
-                h = tensor[3];
+                cx = output_at(i, 0);
+                cy = output_at(i, 1);
+                w = output_at(i, 2);
+                h = output_at(i, 3);
 
                 x0 = cx - w / 2;
                 y0 = cy - h / 2;
@@ -352,11 +397,11 @@ namespace model
                 keypoints.reserve(NUM_KEYPOINTS);
 
                 int Keypoint_start = 4 + class_count;
-                for (int i = 0; i < NUM_KEYPOINTS; ++i)
+                for (int keypoint_index = 0; keypoint_index < NUM_KEYPOINTS; ++keypoint_index)
                 {
-                    u = tensor[Keypoint_start + i * 3];
-                    v = tensor[Keypoint_start + i * 3 + 1];
-                    kconf = tensor[Keypoint_start + i * 3 + 2];
+                    u = output_at(i, Keypoint_start + keypoint_index * 3);
+                    v = output_at(i, Keypoint_start + keypoint_index * 3 + 1);
+                    kconf = output_at(i, Keypoint_start + keypoint_index * 3 + 2);
                     preprocess::affine_transformation(preprocess::affine_matrix.reverse, u, v, &u, &v);
                     if (kconf >= kpt_conf_threshold)
                     {
@@ -755,14 +800,18 @@ namespace model
         void Pose::run_pnp_multi_stage()
         {
             is_current_frame_good = false; // 重置标记位
+            m_reprojected_origin_valid = false;
             m_reprojected_points.clear();
             if (m_bboxes.size() >= 1)
             {
                 auto &target = m_bboxes[0];
-                cv::Mat p3d_Mat = cv::Mat::zeros(10, 3, CV_64FC1);
-                cv::Mat p2d_Mat = cv::Mat::zeros(10, 2, CV_64FC1);
+                const int point_count = std::min(
+                    std::min(static_cast<int>(target.keypoints.size()), _p3d.rows),
+                    NUM_KEYPOINTS);
+                cv::Mat p3d_Mat = cv::Mat::zeros(point_count, 3, CV_64FC1);
+                cv::Mat p2d_Mat = cv::Mat::zeros(point_count, 2, CV_64FC1);
                 int valid_count = 0;
-                for (int i = 0; i < 7; i++)
+                for (int i = 0; i < point_count; i++)
                 {
                     if (target.keypoints[i].conf > 0.75)
                     {
@@ -787,7 +836,19 @@ namespace model
                         R1.copyTo(_R1_prev);
                         T1.copyTo(_T1_prev);
 
-                        // 使用与 solvePnP 完全一致的模型点、R/T、内参和畸变参数生成网页七点重投影。
+                        // 刚体原点不必是特征点。单独投影 (0,0,0)，网页将它显示为
+                        // 几何中心；_p3d 的模型点投影仍用于检查特征点/PnP 对齐质量。
+                        const std::vector<cv::Point3d> object_origin(1, cv::Point3d(0.0, 0.0, 0.0));
+                        std::vector<cv::Point2d> projected_origin;
+                        cv::projectPoints(object_origin, R1, T1, _K, _diff, projected_origin);
+                        if (projected_origin.size() == 1 &&
+                            std::isfinite(projected_origin[0].x) &&
+                            std::isfinite(projected_origin[0].y))
+                        {
+                            m_reprojected_origin = projected_origin[0];
+                            m_reprojected_origin_valid = true;
+                        }
+
                         cv::projectPoints(_p3d, R1, T1, _K, _diff, m_reprojected_points);
 
                         cv::Rodrigues(R1, R_mat);
@@ -812,6 +873,41 @@ namespace model
                         m_result[4] = static_cast<float>(pnp_transform.at<double>(1, 3));
                         m_result[5] = static_cast<float>(pnp_transform.at<double>(2, 3));
                     }
+
+                    static auto last_pnp_log_at = std::chrono::steady_clock::time_point{};
+                    const auto now = std::chrono::steady_clock::now();
+                    if (last_pnp_log_at.time_since_epoch().count() == 0 ||
+                        now - last_pnp_log_at >= std::chrono::seconds(1))
+                    {
+                        LOG("Pose PnP: boxes=%d, eligible_points=%d/%d, solve=%s, inliers=%d, valid=%s",
+                            static_cast<int>(m_bboxes.size()), valid_count, point_count,
+                            success ? "true" : "false", static_cast<int>(inliers.size()),
+                            is_current_frame_good ? "true" : "false");
+                        last_pnp_log_at = now;
+                    }
+                }
+                else
+                {
+                    static auto last_short_log_at = std::chrono::steady_clock::time_point{};
+                    const auto now = std::chrono::steady_clock::now();
+                    if (last_short_log_at.time_since_epoch().count() == 0 ||
+                        now - last_short_log_at >= std::chrono::seconds(1))
+                    {
+                        LOGW("Pose PnP skipped: boxes=%d, eligible_points=%d/%d (need at least 4 with confidence > 0.75)",
+                             static_cast<int>(m_bboxes.size()), valid_count, point_count);
+                        last_short_log_at = now;
+                    }
+                }
+            }
+            else
+            {
+                static auto last_empty_log_at = std::chrono::steady_clock::time_point{};
+                const auto now = std::chrono::steady_clock::now();
+                if (last_empty_log_at.time_since_epoch().count() == 0 ||
+                    now - last_empty_log_at >= std::chrono::seconds(1))
+                {
+                    LOGW("Pose PnP skipped: no decoded bounding box");
+                    last_empty_log_at = now;
                 }
             }
         }
@@ -841,36 +937,22 @@ namespace model
                     kf_result = predicted_pos;
                 }
 
-                // 4. 相机坐标系下滤波后的结果
-                // m_result[3] = kf_result.x;
-                // m_result[4] = kf_result.y;
-                // m_result[5] = kf_result.z;
-                double angle = -0.05;
-                cv::Mat vec = (cv::Mat_<float>(3, 1) << kf_result.x, kf_result.y, kf_result.z);
-                double rad = deg2rad(angle); // 转换为弧度
-                double cos_theta = cos(rad);
-                double sin_theta = sin(rad);
-                cv::Mat rot_mat = (cv::Mat_<float>(3, 3) << 1, 0, 0,
-                                   0, cos_theta, -sin_theta,
-                                   0, sin_theta, cos_theta);
-                cv::Mat result;
-                cv::gemm(rot_mat, vec, 1.0, cv::Mat(), 0.0, result);
-                m_result[3] = result.at<float>(0, 0);
-                m_result[4] = result.at<float>(1, 0);
-                m_result[5] = result.at<float>(2, 0);
-
-                const cv::Mat world_pose = transformCameraPoseToWorld(
-                    combined, R_mat, cv::Vec3f(m_result[3], m_result[4], m_result[5]));
-                const cv::Vec3d world_euler_angles_deg =
-                    rotationMatrixToEulerRxRyRzDegrees(world_pose(cv::Rect(0, 0, 3, 3)));
+                // 滤波只更新 T_C_O 的平移，不添加未标定的轴向修正；随后用
+                // 同一个齐次变换把位置与姿态一起转换到动捕坐标系。
+                const cv::Vec3f filtered_object_position_in_camera(
+                    kf_result.x, kf_result.y, kf_result.z);
+                const cv::Mat mocap_pose = transformCameraPoseToMocap(
+                    mocap_from_camera, R_mat, filtered_object_position_in_camera);
+                const cv::Vec3d mocap_euler_angles_deg =
+                    rotationMatrixToEulerRxRyRzDegrees(mocap_pose(cv::Rect(0, 0, 3, 3)));
 
                 // 所有发送/记录链路共用 m_result，顺序保持 rx, ry, rz, x, y, z。
-                m_result[0] = static_cast<float>(world_euler_angles_deg[0]);
-                m_result[1] = static_cast<float>(world_euler_angles_deg[1]);
-                m_result[2] = static_cast<float>(world_euler_angles_deg[2]);
-                m_result[3] = static_cast<float>(world_pose.at<double>(0, 3));
-                m_result[4] = static_cast<float>(world_pose.at<double>(1, 3));
-                m_result[5] = static_cast<float>(world_pose.at<double>(2, 3));
+                m_result[0] = static_cast<float>(mocap_euler_angles_deg[0]);
+                m_result[1] = static_cast<float>(mocap_euler_angles_deg[1]);
+                m_result[2] = static_cast<float>(mocap_euler_angles_deg[2]);
+                m_result[3] = static_cast<float>(mocap_pose.at<double>(0, 3));
+                m_result[4] = static_cast<float>(mocap_pose.at<double>(1, 3));
+                m_result[5] = static_cast<float>(mocap_pose.at<double>(2, 3));
 
                 // 高频逐帧日志会阻塞终端并拖慢网页预览；每秒保留一条诊断信息。
                 static auto last_filter_log_at = std::chrono::steady_clock::time_point{};
@@ -878,7 +960,7 @@ namespace model
                 if (last_filter_log_at.time_since_epoch().count() == 0 ||
                     now - last_filter_log_at >= std::chrono::seconds(1))
                 {
-                    LOG("\tId: %d, dt:%.4f, [World pose] rx:%.4f, ry:%.4f, rz:%.4f | x:%.4f, y:%.4f, z:%.4f",
+                    LOG("\tId: %d, dt:%.4f, [Mocap-frame pose] rx:%.4f, ry:%.4f, rz:%.4f | x:%.4f, y:%.4f, z:%.4f",
                         frame_id, dt, m_result[0], m_result[1], m_result[2],
                         m_result[3], m_result[4], m_result[5]);
                     last_filter_log_at = now;
@@ -926,7 +1008,7 @@ namespace model
          *                                  m_result[2],
          *                                  1.0);
          *
-         *     cv::Mat transformed_point = combined * point_homogeneous;
+         *     cv::Mat transformed_point = mocap_from_camera * point_homogeneous;
          *
          *     uart_result[0] = transformed_point.at<float>(0, 0);
          *     uart_result[1] = transformed_point.at<float>(1, 0);
