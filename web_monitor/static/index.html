@@ -23,12 +23,12 @@
       try { localStorage.setItem(key, mode); } catch (error) {}
     }());
   </script>
-  <link rel="stylesheet" href="/app.css?v=20260817-six-orders">
+  <link rel="stylesheet" href="/app.css?v=20260819-camera-only-report">
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><div><strong>CVIA</strong><span>气动院</span></div></div>
-    <div class="system-status"><span id="systemDot" class="status-dot"></span><span id="systemText">正在连接图像流</span><label class="compat-control"><span>显示模式</span><select id="compatMode" aria-label="Windows 显示兼容模式"><option value="auto">自动</option><option value="win11">Windows 11</option><option value="win7">Windows 7 兼容</option></select><small id="compatModeState">自动识别</small></label><button class="stop-inference" id="stopInferenceButton" type="button" disabled>停止推理并保存</button><span class="clock" id="clock">--:--:--</span></div>
+    <div class="system-status"><span id="systemDot" class="status-dot"></span><span id="systemText">等待配置并启动</span><label class="compat-control"><span>显示模式</span><select id="compatMode" aria-label="Windows 显示兼容模式"><option value="auto">自动</option><option value="win11">Windows 11</option><option value="win7">Windows 7 兼容</option></select><small id="compatModeState">自动识别</small></label><button class="start-inference" id="startInferenceButton" type="button" disabled>开始推理</button><button class="stop-inference" id="stopInferenceButton" type="button" disabled>停止推理并保存</button><span class="clock" id="clock">--:--:--</span></div>
   </header>
 
   <main class="workspace">
@@ -83,6 +83,15 @@
       <form id="configForm" novalidate>
         <section class="form-section is-active" data-panel="source">
           <div class="section-intro"><h3>图像从哪里来</h3><p>切换后需要重启推理进程，当前网页不会断开。</p></div>
+          <div class="model-source-card">
+            <div class="model-source-heading">
+              <div><span>POSE MODEL</span><strong>推理模型</strong><small>保存后在下一次“开始推理”时装载</small></div>
+              <code id="modelFeatureShape">-- PTS · -- FEATURES</code>
+            </div>
+            <label class="field field--wide model-source-input"><span>ONNX 文件路径</span><input type="text" data-path="model.onnx_path" placeholder="models/onnx/qdy0815.onnx" spellcheck="false"><small>可填写相对于软件根目录的路径或设备上的绝对路径</small></label>
+            <div class="model-engine-route"><span>FP16 ENGINE</span><code id="modelEnginePath">等待模型路径</code></div>
+            <p class="model-source-note"><b>启动检查</b><span>已有 engine 时直接加载；否则从 ONNX 构建。模型输出关键点数必须与当前三维点集一致。</span></p>
+          </div>
           <div class="segmented" role="radiogroup" aria-label="图像读取模式">
             <label><input type="radio" name="input-mode" value="camera" data-path="input.mode"><span><b>相机读取</b><small>使用 V4L2 双相机</small></span></label>
             <label><input type="radio" name="input-mode" value="folder" data-path="input.mode"><span><b>文件夹读取</b><small>按文件名顺序循环</small></span></label>
@@ -144,26 +153,26 @@
           </details>
 
           <section class="offline-sync-panel" aria-labelledby="offlineSyncTitle">
-            <div class="offline-sync-heading"><div><span>OFFLINE ANALYSIS</span><h4 id="offlineSyncTitle">离线同步与六轴图</h4><p>先用运动曲线互相关标定时间补偿，再生成完整配对报告。</p></div><div class="offline-sync-controls"><button id="estimateOffset" type="button">自动估计 offset</button><button id="generateOfflineSync" type="button">生成离线报告</button></div></div>
+            <div class="offline-sync-heading"><div><span>OFFLINE ANALYSIS</span><h4 id="offlineSyncTitle">离线同步与六轴图</h4><p>有动捕时生成三源配对报告；没有动捕时仍可生成完整相机检测图。</p></div><div class="offline-sync-controls"><button id="estimateOffset" type="button">自动估计 offset</button><button id="generateOfflineSync" type="button">生成离线报告</button></div></div>
             <div class="offset-estimate" id="offsetEstimate" data-confidence="none"><span>AUTO OFFSET</span><strong id="offsetEstimateValue">尚未估计</strong><small id="offsetEstimateMeta">停止推理后，建议做一段非周期的平移和转动</small></div>
-            <div class="offline-sync-empty" id="offlineSyncEmpty"><strong>尚未生成本次报告</strong><small>采集期间持续缓冲动捕 CSV；生成操作只在推理停止后执行。</small></div>
+            <div class="offline-sync-empty" id="offlineSyncEmpty"><strong>尚未生成本次报告</strong><small>只要已有相机 PnP 记录，停止推理后即可生成 PNG；动捕数据不是必需项。</small></div>
             <div class="offline-sync-result" id="offlineSyncResult" hidden>
               <div class="offline-metrics"><div><span>覆盖率</span><strong id="offlineCoverage">--</strong></div><div><span>匹配帧</span><strong id="offlineMatched">--</strong></div><div><span>P95 |Δt|</span><strong id="offlineP95">--</strong></div></div>
               <div class="offline-report-deck" aria-label="相机、动捕与合成离线曲线">
                 <article class="offline-report-card" data-source="camera">
-                  <header><div><span>CAMERA / PNP · MOCAP FRAME</span><h5>相机画布</h5><p>首次有效位姿之后，经 T_M_C 转换的动捕坐标系六轴曲线</p></div><a id="openCameraReport" href="/api/sync/offline/report/camera.svg" target="_blank" rel="noopener">查看大图</a></header>
-                  <a class="offline-report-preview" id="cameraReportLink" href="/api/sync/offline/report/camera.svg" target="_blank" rel="noopener"><img id="cameraReportImage" alt="相机六轴离线曲线"></a>
+                  <header><div><span>CAMERA / PNP · MOCAP FRAME</span><h5>相机检测数据</h5><p>首次有效位姿之后，经 T_M_C 转换的动捕坐标系六轴曲线</p></div><a id="openCameraReport" href="/api/sync/offline/report/camera.png" download="synchronized_camera_report.png">下载 PNG</a></header>
+                  <a class="offline-report-preview" id="cameraReportLink" href="/api/sync/offline/report/camera.png" target="_blank" rel="noopener"><img id="cameraReportImage" alt="相机检测数据六轴 PNG"></a>
                 </article>
                 <article class="offline-report-card" data-source="mocap">
-                  <header><div><span>MOCAP / NOKOV · MOCAP FRAME</span><h5>动捕画布</h5><p>共用相机零点，只显示成功配对的动捕坐标系位姿</p></div><a id="openMocapReport" href="/api/sync/offline/report/mocap.svg" target="_blank" rel="noopener">查看大图</a></header>
-                  <a class="offline-report-preview" id="mocapReportLink" href="/api/sync/offline/report/mocap.svg" target="_blank" rel="noopener"><img id="mocapReportImage" alt="动捕六轴离线曲线"></a>
+                  <header><div><span>MOCAP / NOKOV · MOCAP FRAME</span><h5>动捕数据</h5><p>共用相机零点，只显示成功配对的动捕坐标系位姿</p></div><a id="openMocapReport" href="/api/sync/offline/report/mocap.png" download="synchronized_mocap_report.png">下载 PNG</a></header>
+                  <a class="offline-report-preview" id="mocapReportLink" href="/api/sync/offline/report/mocap.png" target="_blank" rel="noopener"><img id="mocapReportImage" alt="动捕数据六轴 PNG"></a>
                 </article>
                 <article class="offline-report-card" data-source="composite">
-                  <header><div><span>COMPOSITE / MOCAP FRAME</span><h5>合成画布</h5><p>同一动捕坐标系中的相机与动捕六轴叠加</p></div><a id="openCompositeReport" href="/api/sync/offline/report/composite.svg" target="_blank" rel="noopener">查看大图</a></header>
-                  <a class="offline-report-preview" id="compositeReportLink" href="/api/sync/offline/report/composite.svg" target="_blank" rel="noopener"><img id="compositeReportImage" alt="相机与动捕合成六轴离线曲线"></a>
+                  <header><div><span>COMPOSITE / MOCAP FRAME</span><h5>相机与动捕合成数据</h5><p>同一动捕坐标系中的相机与动捕六轴叠加</p></div><a id="openCompositeReport" href="/api/sync/offline/report/composite.png" download="synchronized_report.png">下载 PNG</a></header>
+                  <a class="offline-report-preview" id="compositeReportLink" href="/api/sync/offline/report/composite.png" target="_blank" rel="noopener"><img id="compositeReportImage" alt="相机与动捕合成六轴 PNG"></a>
                 </article>
               </div>
-              <div class="offline-actions"><span id="offlineGeneratedAt">三张报告已生成</span><a id="downloadSyncedCsv" href="/api/sync/offline/download.csv">下载同步 CSV</a></div>
+              <div class="offline-actions"><span id="offlineGeneratedAt">报告已生成</span><a id="downloadSyncedCsv" href="/api/sync/offline/download.csv">下载同步 CSV</a></div>
             </div>
           </section>
         </section>
@@ -174,7 +183,7 @@
         </section>
 
         <section class="form-section" data-panel="calibration">
-          <div class="section-intro"><h3>内参与外参</h3><p>内参进入 solvePnP；外参 T_M_C 把相机坐标系位姿转换到 NOKOV 动捕坐标系。</p></div>
+          <div class="section-intro"><h3>PnP 几何与外参</h3><p>内参与三维模型点进入 solvePnP；外参 T_M_C 把相机坐标系位姿转换到 NOKOV 动捕坐标系。</p></div>
           <div class="calibration-history">
             <div><span>CALIBRATION HISTORY</span><strong>历史标定版本</strong><small id="calibrationHistoryMeta">正在读取历史记录</small></div>
             <select id="calibrationHistorySelect" aria-label="选择历史标定版本"><option value="">暂无历史记录</option></select>
@@ -182,6 +191,14 @@
           </div>
           <div class="matrix-block"><div class="matrix-title"><span>相机内参 K</span><code>3 × 3</code></div><div class="matrix matrix--3" id="cameraMatrix"></div></div>
           <div class="matrix-block"><div class="matrix-title"><span>畸变系数</span><code>k₁ k₂ p₁ p₂ k₃</code></div><div class="matrix matrix--5" id="distortionMatrix"></div></div>
+          <section class="model-keypoints-block" aria-labelledby="modelKeypointsTitle">
+            <div class="model-keypoints-title">
+              <div><span>PNP MODEL GEOMETRY</span><strong id="modelKeypointsTitle">三维模型关键点</strong><small>顺序必须与模型输出 P0～Pn 一致；坐标单位与最终位姿单位一致</small></div>
+              <div class="model-keypoints-actions"><code id="modelKeypointCount">-- × XYZ</code><button id="addModelKeypoint" type="button">新增点</button></div>
+            </div>
+            <div class="model-keypoints-grid" id="modelKeypoints3D"></div>
+            <p class="model-keypoints-note"><b id="modelKeypointRange">动态点集</b><span>允许 4～256 点。只改 XYZ 可热应用；新增或删除点后需停止并重新开始推理，模型输出点数必须完全一致。</span></p>
+          </section>
           <section class="world-rotation-tool" aria-labelledby="worldRotationTitle">
             <div class="world-rotation-head">
               <div><span>WORLD FRAME ROTATION</span><strong id="worldRotationTitle">世界轴姿态修正</strong><small>相机光心固定 · 右手定则 · 输入相对当前矩阵的增量</small></div>
@@ -233,12 +250,12 @@
               <label class="field"><span>SDK 已发现刚体</span><select id="mocapDiscoveredBodies"><option value="">等待 SDK 返回刚体描述</option></select><small>选择一项会按上面的 NAME / ID 模式自动填入</small></label>
               <div class="mocap-target-actions"><code id="mocapSelectorPreview">name:Tracker4</code><button id="applyMocapTarget" type="button">应用目标并连接</button></div>
             </div>
-            <small class="mocap-restart-note">服务器地址和过期阈值随底部“保存配置”保存，重启控制台后生效；目标刚体可在上方立即切换。</small>
+            <small class="mocap-restart-note">服务器地址和过期阈值随底部“保存并应用”保存，下次开始推理时生效；目标刚体可在上方立即切换。</small>
           </div>
         </section>
       </form>
 
-      <footer class="save-bar"><div><span id="dirtyDot" class="dirty-dot"></span><p><strong id="saveTitle">配置已同步</strong><small id="saveHint">修改参数后在这里保存</small></p></div><button class="save-button" id="saveButton" type="submit" form="configForm" disabled>保存配置</button></footer>
+      <footer class="save-bar"><div><span id="dirtyDot" class="dirty-dot"></span><p><strong id="saveTitle">配置已同步</strong><small id="saveHint">修改参数后可在这里保存并应用</small></p></div><button class="save-button" id="saveButton" type="submit" form="configForm" disabled>保存并应用</button></footer>
     </aside>
   </main>
   <div class="session-modal" id="sessionModal" hidden role="dialog" aria-modal="true" aria-labelledby="sessionModalTitle">
@@ -253,6 +270,6 @@
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="/extrinsic_rotation.js?v=20260817-six-orders" defer charset="utf-8"></script>
-  <script src="/app.js?v=20260817-six-orders" defer charset="utf-8"></script>
+  <script src="/app.js?v=20260819-camera-only-report" defer charset="utf-8"></script>
 </body>
 </html>

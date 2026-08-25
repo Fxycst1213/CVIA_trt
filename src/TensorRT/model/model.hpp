@@ -56,6 +56,7 @@ namespace model
         task_type task = POSE;
         size_t ws_size = WORKSPACESIZE;
         precision prec = FP32;
+        int pose_keypoint_count = model::pose::DEFAULT_NUM_KEYPOINTS;
     };
 
     /* 构建一个针对trt的shared pointer. 所有的trt指针的释放都是通过ptr->destroy完成*/
@@ -77,7 +78,7 @@ namespace model
         Model(std::string onnx_path, logger::Level level, Params params);
         virtual ~Model() {};
         void load_image(std::string image_path);
-        void init_model();            // 初始化模型，包括build推理引擎, 分配内存，创建context, 设置bindings
+        bool init_model();            // 初始化模型，包括build推理引擎, 分配内存，创建context, 设置bindings
         void inference(const Resultframe &resultframe); // 推理部分，preprocess-enqueue-postprocess
         std::string getPrec(precision prec);
 
@@ -116,9 +117,9 @@ namespace model
         Params *m_params;
 
         size_t m_workspaceSize;
-        float *m_bindings[2];
-        float *m_inputMemory[2];
-        float *m_outputMemory[2];
+        float *m_bindings[2] = {nullptr, nullptr};
+        float *m_inputMemory[2] = {nullptr, nullptr};
+        float *m_outputMemory[2] = {nullptr, nullptr};
 
         nvinfer1::Dims m_inputDims;
         nvinfer1::Dims m_outputDims;

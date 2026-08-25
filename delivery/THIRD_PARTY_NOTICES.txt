@@ -1,0 +1,11 @@
+第三方运行组件提示
+==================
+
+本软件在运行时依赖 NVIDIA JetPack/CUDA/TensorRT、OpenCV、ZED SDK、Python，以及可选的
+NOKOV/XING 动捕 SDK。系统级运行库不包含在本交付包中，应由客户按各厂商许可安装。
+
+交付包可包含与本项目配套的 libnokov_sdk.so。交付方应在对外发送前确认其与 NOKOV/XING
+签订的 SDK 许可允许向该客户、该设备和该项目再分发；本文件不构成再分发授权。
+
+TensorRT engine 由交付方模型转换产生，只用于约定的硬件和项目。客户不得将本软件包、
+模型、SDK 动态库或其副本提供给未获授权的第三方。

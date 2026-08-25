@@ -75,15 +75,43 @@ int main(int argc, char const *argv[])
     // p_params.rs485_port = "/dev/ttyUSB0"; // 串口发送已停用，结果改用 UDP 上传。
     // p_params.rs485_baudrate = B57600;
 
-    const std::string config_path = argc > 1 ? argv[1] : "web_monitor/config.json";
+    const bool check_assets = argc > 1 && string(argv[1]) == "--check-assets";
+    const std::string config_path = check_assets
+        ? (argc > 2 ? argv[2] : "web_monitor/config.json")
+        : (argc > 1 ? argv[1] : "web_monitor/config.json");
     std::string config_error;
     if (load_project_config(config_path, p_params, config_error))
         LOG("Loaded project config: %s", config_path.c_str());
     else
         LOGW("Using compiled defaults (%s)", config_error.c_str());
+    params.pose_keypoint_count = static_cast<int>(p_params.model_keypoints_3d.size() / 3);
+    onnxPath = p_params.onnx_model_path;
+    const string enginePath = changePath(onnxPath, "../engine", ".engine", "fp16");
+    if (check_assets)
+    {
+        if (!fileExists(enginePath) && !fileExists(onnxPath))
+        {
+            fprintf(stderr,
+                    "[CVIA] Model unavailable; engine: %s; ONNX fallback: %s\n",
+                    enginePath.c_str(), onnxPath.c_str());
+            return 4;
+        }
+        fprintf(stdout, "[CVIA] Runtime model OK: onnx=%s, engine=%s, source=%s, configured_keypoints=%d\n",
+                onnxPath.c_str(), enginePath.c_str(),
+                fileExists(enginePath) ? "engine" : "onnx",
+                params.pose_keypoint_count);
+        return 0;
+    }
 
     // 根据worker中的task类型进行推理
-    prj_v8detector prj(onnxPath, level, params, p_params);
+    prj_v8detector prj(onnxPath, level, params, p_params, config_path);
+    if (!prj.ready())
+    {
+        fprintf(stderr,
+                "[CVIA] Runtime did not start; verify model output keypoint count "
+                "and calibration.model_keypoints_3d.\n");
+        return 6;
+    }
     std::atomic<bool> run_finished{false};
     std::thread stop_watcher([&]() {
         while (!run_finished && !g_stop_requested)

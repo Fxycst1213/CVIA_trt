@@ -392,6 +392,9 @@ CUDA_nvToolsExt_LIBRARY:FILEPATH=/usr/local/cuda/lib64/libnvToolsExt.so
 //Path to a library.
 CUDA_rt_LIBRARY:FILEPATH=/usr/lib/aarch64-linux-gnu/librt.a
 
+//Build a stripped customer-delivery executable
+CVIA_PRODUCTION_BUILD:BOOL=OFF
+
 //Link with the ZED SDK shared executable
 LINK_SHARED_ZED:BOOL=ON
 

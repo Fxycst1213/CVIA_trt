@@ -79,7 +79,9 @@ struct prj_params
     bool enable_udp = true;
     int socket_mode = 0;
     tcp_params t_params;
-    // 输入源与网页预览。配置保存后在下次启动 trt 时生效。
+    // ONNX 路径决定启动时使用的模型；FP16 engine 位于其相邻的 ../engine 目录。
+    std::string onnx_model_path = "models/onnx/qdy0815.onnx";
+    // 输入源与网页预览需要重启采集/输出管线；只有下方 calibration 支持运行时热更新。
     std::string input_mode = "camera"; // camera | folder
     std::string folder_path = "data/source";
     bool folder_loop = true;
@@ -99,6 +101,9 @@ struct prj_params
                         0.999094004,     0.036455454,     0.021958388,  -388.940632775,
                         -0.021391192313944075,0.8762249705686078,-0.48142727160333376,647.8513827001716,
                         0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00}};
+    // 动态三维模型点，扁平存储为 P0.xyz、P1.xyz……；至少 4 点。
+    model::pose::ModelKeypoints3D model_keypoints_3d =
+        model::pose::default_model_keypoints_3d();
     // 串口参数保留给 RS485 模块；当前主流程已停用串口发送，改用 UDP 上传结果。
     std::string rs485_port = "/dev/ttyUSB0";
     int rs485_baudrate = 57600;

@@ -17,8 +17,8 @@ namespace model
             double z;
         };
 
-        // 唯一的关键点配置入口：顺序必须与训练标签/模型输出的 P0、P1……严格一致。
-        // 后续更换关键点时只需增删或修改这里的行；NUM_KEYPOINTS 会自动按行数推导。
+        // 默认关键点：顺序必须与训练标签/模型输出的 P0、P1……严格一致。
+        // 网页可以修改坐标和点数；运行时以配置数组长度与模型输出共同校验。
         // 坐标原点为刚体几何中心，坐标单位必须与最终位姿需要的单位一致。
         constexpr ModelPoint3D MODEL_KEYPOINTS_3D[] = {
             {179.617252624, -40.337850737, 17.513833145},
@@ -33,10 +33,25 @@ namespace model
             {178.457384656,  41.633121462, 26.852492195},
         };
 
-        constexpr int NUM_KEYPOINTS =
+        constexpr int DEFAULT_NUM_KEYPOINTS =
             static_cast<int>(sizeof(MODEL_KEYPOINTS_3D) / sizeof(MODEL_KEYPOINTS_3D[0]));
         constexpr int POSE_CLASS_COUNT = 1;
-        static_assert(NUM_KEYPOINTS >= 4, "solvePnP requires at least four configured keypoints");
+        static_assert(DEFAULT_NUM_KEYPOINTS >= 4, "solvePnP requires at least four configured keypoints");
+
+        using ModelKeypoints3D = std::vector<double>;
+
+        inline ModelKeypoints3D default_model_keypoints_3d()
+        {
+            ModelKeypoints3D points;
+            points.reserve(DEFAULT_NUM_KEYPOINTS * 3);
+            for (int index = 0; index < DEFAULT_NUM_KEYPOINTS; ++index)
+            {
+                points.push_back(MODEL_KEYPOINTS_3D[index].x);
+                points.push_back(MODEL_KEYPOINTS_3D[index].y);
+                points.push_back(MODEL_KEYPOINTS_3D[index].z);
+            }
+            return points;
+        }
 
         struct keypoint
         {
@@ -55,7 +70,6 @@ namespace model
                                                                                   confidence(conf), flg_remove(false),
                                                                                   label(label)
             {
-                keypoints.reserve(NUM_KEYPOINTS);
             };
         };
 

@@ -17,6 +17,7 @@ namespace thread
     public:
         Worker(std::string onnxPath, logger::Level level, model::Params params);
         void inference(const Resultframe &resultframe);
+        bool ready() const { return m_ready; }
 
     public:
         std::shared_ptr<logger::Logger> m_logger;
@@ -25,6 +26,7 @@ namespace thread
         std::shared_ptr<model::classifier::Classifier> m_classifier;
         std::shared_ptr<model::detector::Detector> m_detector;
         std::shared_ptr<model::pose::Pose> m_pose;
+        bool m_ready = false;
     };
 
     std::shared_ptr<Worker> create_worker(

@@ -148,24 +148,21 @@ string printTensorShape(nvinfer1::ITensor *tensor)
 
 string changePath(string srcPath, string relativePath, string postfix, string tag)
 {
-    int name_l = srcPath.rfind("/");
-    int name_r = srcPath.rfind(".");
-
-    int dir_l = 0;
-    int dir_r = srcPath.rfind("/");
-
-    string newPath;
-
-    newPath = srcPath.substr(dir_l, dir_r + 1);
-    newPath += relativePath;
-    newPath += srcPath.substr(name_l, name_r - name_l);
-
-    if (!tag.empty())
-        newPath += "-" + tag + postfix;
-    else
-        newPath += postfix;
-
-    return newPath;
+    const experimental::filesystem::path source(srcPath);
+    string filename = source.stem().string();
+    if (!tag.empty()) filename += "-" + tag;
+    filename += postfix;
+    // Lexically normalize "onnx/../engine" before checking the filesystem.
+    // std::experimental::filesystem in the C++14 toolchain has no
+    // path::lexically_normal(), so resolve the relative components explicitly.
+    experimental::filesystem::path destination = source.parent_path();
+    for (const auto &component : experimental::filesystem::path(relativePath))
+    {
+        if (component == ".") continue;
+        if (component == "..") destination = destination.parent_path();
+        else destination /= component;
+    }
+    return (destination / filename).string();
 }
 
 string getOutputPath(string srcPath, string postfix)

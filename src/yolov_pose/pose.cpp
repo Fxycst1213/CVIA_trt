@@ -20,6 +20,69 @@ using namespace nvinfer1;
 
 namespace
 {
+    bool matrixAllFinite(const cv::Mat &matrix)
+    {
+        if (matrix.empty())
+            return false;
+        cv::Mat values;
+        matrix.convertTo(values, CV_64F);
+        for (int row = 0; row < values.rows; ++row)
+            for (int column = 0; column < values.cols; ++column)
+                if (!std::isfinite(values.at<double>(row, column)))
+                    return false;
+        return true;
+    }
+
+    double rotationDistanceDegrees(const cv::Mat &first, const cv::Mat &second)
+    {
+        cv::Mat first64, second64;
+        first.convertTo(first64, CV_64F);
+        second.convertTo(second64, CV_64F);
+        const cv::Mat delta = first64.t() * second64;
+        const double cosine = std::max(-1.0, std::min(1.0,
+            (cv::trace(delta)[0] - 1.0) * 0.5));
+        return std::acos(cosine) * 180.0 / CV_PI;
+    }
+
+    double translationDistance(const cv::Mat &first, const cv::Mat &second)
+    {
+        cv::Mat first64, second64;
+        first.reshape(1, 3).convertTo(first64, CV_64F);
+        second.reshape(1, 3).convertTo(second64, CV_64F);
+        return cv::norm(first64 - second64);
+    }
+
+    double nearestEquivalentAngle(double angle, double reference)
+    {
+        return angle + 360.0 * std::round((reference - angle) / 360.0);
+    }
+
+    cv::Vec3d nearestEquivalentEuler(const cv::Vec3d &raw,
+                                      const cv::Vec3d &previous)
+    {
+        // 对 R = Rz * Ry * Rx，(rx, ry, rz) 与
+        // (rx + 180°, 180° - ry, rz + 180°) 描述同一个旋转。
+        // 两个分支分别按 360° 展开后，选择离上一帧最近的一组，避免在
+        // ±180° 边界和 ry≈±90° 奇异区产生没有物理意义的欧拉角尖峰。
+        const cv::Vec3d alternate(
+            raw[0] + 180.0, 180.0 - raw[1], raw[2] + 180.0);
+        cv::Vec3d candidates[2] = {raw, alternate};
+        double best_distance = std::numeric_limits<double>::infinity();
+        cv::Vec3d best = raw;
+        for (auto candidate : candidates)
+        {
+            for (int axis = 0; axis < 3; ++axis)
+                candidate[axis] = nearestEquivalentAngle(candidate[axis], previous[axis]);
+            const double distance = cv::norm(candidate - previous);
+            if (distance < best_distance)
+            {
+                best_distance = distance;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
     cv::Vec3d rotationMatrixToEulerRxRyRzDegrees(const cv::Mat &rotation_matrix)
     {
         CV_Assert(rotation_matrix.rows == 3 && rotation_matrix.cols == 3);
@@ -122,7 +185,7 @@ namespace model
             if (m_outputDims.nbDims != 3 || m_outputDims.d[0] != 1 ||
                 m_outputDims.d[1] <= 0 || m_outputDims.d[2] <= 0)
             {
-                LOGE("Unsupported pose output shape: nbDims=%d [%d,%d,%d]",
+                LOGW("Unsupported pose output shape: nbDims=%d [%d,%d,%d]",
                      m_outputDims.nbDims,
                      m_outputDims.nbDims > 0 ? m_outputDims.d[0] : -1,
                      m_outputDims.nbDims > 1 ? m_outputDims.d[1] : -1,
@@ -130,7 +193,13 @@ namespace model
                 return;
             }
 
-            const int expected_features = 4 + POSE_CLASS_COUNT + NUM_KEYPOINTS * 3;
+            if (m_numKeypoints < 4 || m_numKeypoints > 256)
+            {
+                LOGW("Configured pose keypoint count is invalid: %d (expected 4..256)",
+                     m_numKeypoints);
+                return;
+            }
+            const int expected_features = 4 + POSE_CLASS_COUNT + m_numKeypoints * 3;
             const int dim1 = m_outputDims.d[1];
             const int dim2 = m_outputDims.d[2];
             if (dim1 == expected_features && dim2 != expected_features)
@@ -147,8 +216,8 @@ namespace model
             }
             else
             {
-                LOGE("Pose model/config mismatch: output=[1,%d,%d], expected feature dimension=%d for %d classes and %d configured 3D points",
-                     dim1, dim2, expected_features, POSE_CLASS_COUNT, NUM_KEYPOINTS);
+                LOGW("Pose model/config mismatch: output=[1,%d,%d], expected feature dimension=%d for %d classes and %d configured 3D points",
+                     dim1, dim2, expected_features, POSE_CLASS_COUNT, m_numKeypoints);
                 return;
             }
 
@@ -157,7 +226,7 @@ namespace model
             LOG("Pose output: raw=[1,%d,%d], layout=%s, boxes=%d, features=%d, classes=%d, keypoints=%d",
                 dim1, dim2,
                 m_outputFeaturesFirst ? "features-first" : "boxes-first",
-                m_outputBoxes, m_outputFeatures, m_outputClasses, NUM_KEYPOINTS);
+                m_outputBoxes, m_outputFeatures, m_outputClasses, m_numKeypoints);
 
             CUDA_CHECK(cudaStreamCreate(&m_stream));
 
@@ -272,7 +341,8 @@ namespace model
         }
 
         Pose::Pose(std::string onnx_path, logger::Level level, Params params)
-            : Model(onnx_path, level, params)
+            : Model(onnx_path, level, params),
+              m_numKeypoints(params.pose_keypoint_count)
         {
             //初始化模式为红色(远距离)
             m_use_red_mode = true;
@@ -295,15 +365,8 @@ namespace model
 
             _diff = (cv::Mat_<float>(1, 5) << -0.0630336003089920, 0.187345652299030, 0, 0, -0.163375015304349);
 
-            // 点数和坐标都来自 pose_params.hpp 的唯一配置表，避免 NUM_KEYPOINTS
-            // 与 _p3d 行数分别修改后不一致。
-            _p3d = cv::Mat(NUM_KEYPOINTS, 3, CV_64FC1);
-            for (int index = 0; index < NUM_KEYPOINTS; ++index)
-            {
-                _p3d.at<double>(index, 0) = MODEL_KEYPOINTS_3D[index].x;
-                _p3d.at<double>(index, 1) = MODEL_KEYPOINTS_3D[index].y;
-                _p3d.at<double>(index, 2) = MODEL_KEYPOINTS_3D[index].z;
-            }
+            // 实际坐标会在 worker 完成模型初始化后由项目配置一次性写入。
+            _p3d = cv::Mat::zeros(std::max(0, m_numKeypoints), 3, CV_64FC1);
 
             // mocap_from_camera = (cv::Mat_<float>(4, 4) << -4.7331553e-02, -6.4462757e-01, 7.6303029e-01, 1.4811254e+03,
             //             9.9347848e-01, 4.8947793e-02, 1.0297883e-01, -8.0326591e+01,
@@ -321,18 +384,65 @@ namespace model
             // m_lstm_ready = false;
         }
 
-        void Pose::set_calibration(const std::array<double, 9> &camera_matrix,
+        bool Pose::set_calibration(const std::array<double, 9> &camera_matrix,
                                    const std::array<double, 5> &distortion,
-                                   const std::array<double, 16> &extrinsic)
+                                   const std::array<double, 16> &extrinsic,
+                                   const ModelKeypoints3D &model_keypoints_3d,
+                                   bool reset_tracking_state)
         {
+            if (model_keypoints_3d.size() % 3 != 0 ||
+                static_cast<int>(model_keypoints_3d.size() / 3) != m_numKeypoints)
+            {
+                LOGW("Calibration/model mismatch: received %zu XYZ values (%zu points), model expects %d points",
+                     model_keypoints_3d.size(), model_keypoints_3d.size() / 3,
+                     m_numKeypoints);
+                return false;
+            }
             _K = cv::Mat(3, 3, CV_64F, const_cast<double *>(camera_matrix.data())).clone();
             cv::Mat distortion64(1, 5, CV_64F, const_cast<double *>(distortion.data()));
             distortion64.convertTo(_diff, CV_32F);
             cv::Mat transform64(4, 4, CV_64F, const_cast<double *>(extrinsic.data()));
             transform64.convertTo(mocap_from_camera, CV_32F);
             mocap_from_camera_inv = mocap_from_camera.inv();
-            LOG("Web calibration loaded: fx=%.3f fy=%.3f cx=%.3f cy=%.3f, extrinsic=T_M_C",
-                camera_matrix[0], camera_matrix[4], camera_matrix[2], camera_matrix[5]);
+            _p3d = cv::Mat(m_numKeypoints, 3, CV_64FC1);
+            for (int index = 0; index < m_numKeypoints; ++index)
+            {
+                _p3d.at<double>(index, 0) = model_keypoints_3d[index * 3];
+                _p3d.at<double>(index, 1) = model_keypoints_3d[index * 3 + 1];
+                _p3d.at<double>(index, 2) = model_keypoints_3d[index * 3 + 2];
+            }
+            if (reset_tracking_state)
+                reset_tracking_after_calibration_change();
+            LOG("Web calibration loaded: fx=%.3f fy=%.3f cx=%.3f cy=%.3f, extrinsic=T_M_C, model_points=%d",
+                camera_matrix[0], camera_matrix[4], camera_matrix[2], camera_matrix[5],
+                m_numKeypoints);
+            return true;
+        }
+
+        void Pose::reset_tracking_after_calibration_change()
+        {
+            R1.release();
+            T1.release();
+            R_mat.release();
+            _R1_prev.release();
+            _T1_prev.release();
+            _accepted_R_mat.release();
+            _accepted_T1.release();
+            _accepted_timestamp = 0;
+            _pending_R_mat.release();
+            _pending_T1.release();
+            _pending_timestamp = 0;
+            _pending_pose_count = 0;
+            _reset_filter_on_next_measurement = false;
+            _last_mocap_euler_deg = cv::Vec3d(0.0, 0.0, 0.0);
+            _has_last_mocap_euler = false;
+            m_kf.reset();
+            _last_timestamp = 0;
+            is_current_frame_good = false;
+            m_reprojected_origin_valid = false;
+            m_reprojected_points.clear();
+            std::fill(m_result.begin(), m_result.end(), 0.0f);
+            LOG("Calibration geometry changed; cleared cached PnP and Kalman state");
         }
 
         bool Pose::postprocess_cpu(const uint64_t &timestamp)
@@ -394,10 +504,10 @@ namespace model
                 preprocess::affine_transformation(preprocess::affine_matrix.reverse, x1, y1, &x1, &y1);
 
                 vector<keypoint> keypoints;
-                keypoints.reserve(NUM_KEYPOINTS);
+                keypoints.reserve(m_numKeypoints);
 
                 int Keypoint_start = 4 + class_count;
-                for (int keypoint_index = 0; keypoint_index < NUM_KEYPOINTS; ++keypoint_index)
+                for (int keypoint_index = 0; keypoint_index < m_numKeypoints; ++keypoint_index)
                 {
                     u = output_at(i, Keypoint_start + keypoint_index * 3);
                     v = output_at(i, Keypoint_start + keypoint_index * 3 + 1);
@@ -450,7 +560,7 @@ namespace model
             {
                 refine_keypoints(m_bboxes[0].keypoints);
             }
-            run_pnp_multi_stage();
+            run_pnp_multi_stage(timestamp);
             run_filter_and_estimation(timestamp, m_frame_counter);
             // 未来位置预测已停用；如需恢复，还需恢复头文件中的 LSTM 声明和成员。
             // run_lstm_predictin();
@@ -620,10 +730,10 @@ namespace model
         void Pose::refine_keypoints(std::vector<keypoint> &keypoints)
         {
             // --- 核心调参区 ---
-            const int search_side = 120;          // ROI 搜索框大小
+            const int search_side = 80;           // 收紧搜索区，避免相邻关键点吸附到同一亮斑
             const double min_area = 60.0;         // 最小面积过滤 (防止微小噪点)
             const double max_area = 2500.0;       // 最大面积过滤
-            const double dist_limit_pixel = 60.0; // 允许偏离 YOLO 初始点的最大像素距离
+            const double dist_limit_pixel = 30.0; // 精修只能做局部亚像素修正，不能替代网络匹配
             const int half_side = search_side / 2;
 
             for (auto &kpt : keypoints)
@@ -712,7 +822,7 @@ namespace model
                     double area = cv::contourArea(contours[i]);
                     // 注意：这里面的 continue 是跳过当前“不合格”的轮廓，去检查下一个轮廓
                     // 所以这里不能置 0，要等全部遍历完再判断
-                    if (area < min_area)
+                    if (area < min_area || area > max_area)
                         continue;
 
                     cv::Moments M = cv::moments(contours[i]);
@@ -797,125 +907,281 @@ namespace model
             }
         }
 
-        void Pose::run_pnp_multi_stage()
+        void Pose::run_pnp_multi_stage(const uint64_t &timestamp)
         {
-            is_current_frame_good = false; // 重置标记位
+            is_current_frame_good = false;
             m_reprojected_origin_valid = false;
             m_reprojected_points.clear();
+            int eligible_count = 0;
+            int inlier_count = 0;
+            double reprojection_rms = std::numeric_limits<double>::infinity();
+            double reprojection_max = std::numeric_limits<double>::infinity();
+            std::string rejection_reason = "no decoded bounding box";
+
             if (m_bboxes.size() >= 1)
             {
                 auto &target = m_bboxes[0];
                 const int point_count = std::min(
                     std::min(static_cast<int>(target.keypoints.size()), _p3d.rows),
-                    NUM_KEYPOINTS);
-                cv::Mat p3d_Mat = cv::Mat::zeros(point_count, 3, CV_64FC1);
-                cv::Mat p2d_Mat = cv::Mat::zeros(point_count, 2, CV_64FC1);
-                int valid_count = 0;
+                    m_numKeypoints);
+                std::vector<cv::Point3d> object_points;
+                std::vector<cv::Point2d> image_points;
+                object_points.reserve(point_count);
+                image_points.reserve(point_count);
                 for (int i = 0; i < point_count; i++)
                 {
-                    if (target.keypoints[i].conf > 0.75)
-                    {
-                        p2d_Mat.at<double>(valid_count, 0) = target.keypoints[i].x;
-                        p2d_Mat.at<double>(valid_count, 1) = target.keypoints[i].y;
-                        _p3d.row(i).copyTo(p3d_Mat.row(valid_count));
-                        valid_count++;
-                    }
-                }
-                p3d_Mat.resize(valid_count);
-                p2d_Mat.resize(valid_count);
+                    const auto &keypoint = target.keypoints[i];
+                    if (keypoint.conf <= 0.75f ||
+                        !std::isfinite(keypoint.x) || !std::isfinite(keypoint.y) ||
+                        keypoint.x < 0.0f || keypoint.y < 0.0f ||
+                        keypoint.x >= m_inputImage.cols || keypoint.y >= m_inputImage.rows)
+                        continue;
 
-                if (p3d_Mat.rows >= 4)
+                    // 两个不同的 3D 点不能使用同一个亮斑。重叠点会让 SQPnP 退化，
+                    // 即使 RANSAC 勉强给出四个内点，也可能落到完全错误的位姿分支。
+                    bool duplicate = false;
+                    for (const auto &selected : image_points)
+                    {
+                        if (cv::norm(selected - cv::Point2d(keypoint.x, keypoint.y)) < 3.0)
+                        {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (duplicate)
+                        continue;
+
+                    object_points.emplace_back(
+                        _p3d.at<double>(i, 0), _p3d.at<double>(i, 1), _p3d.at<double>(i, 2));
+                    image_points.emplace_back(keypoint.x, keypoint.y);
+                }
+                eligible_count = static_cast<int>(object_points.size());
+
+                if (eligible_count >= 4)
                 {
                     std::vector<int> inliers;
-                    bool success = cv::solvePnPRansac(p3d_Mat, p2d_Mat, _K, _diff, R1, T1,
-                                                      false, 100, 2.0, 0.99, inliers, cv::SOLVEPNP_SQPNP);
-                    // 4. 验证解算质量
-                    if (success && inliers.size() >= 4)
+                    cv::Mat candidate_R1, candidate_T1;
+                    const bool use_previous_pose =
+                        !_R1_prev.empty() && !_T1_prev.empty();
+                    if (use_previous_pose)
                     {
-                        is_current_frame_good = true;
-                        R1.copyTo(_R1_prev);
-                        T1.copyTo(_T1_prev);
+                        _R1_prev.copyTo(candidate_R1);
+                        _T1_prev.copyTo(candidate_T1);
+                    }
+                    const bool solved = cv::solvePnPRansac(
+                        object_points, image_points, _K, _diff,
+                        candidate_R1, candidate_T1, use_previous_pose,
+                        150, 2.5, 0.995, inliers,
+                        use_previous_pose ? cv::SOLVEPNP_ITERATIVE : cv::SOLVEPNP_SQPNP);
+                    inlier_count = static_cast<int>(inliers.size());
+                    const int required_inliers = std::max(
+                        4, static_cast<int>(std::ceil(eligible_count * 0.60)));
 
-                        // 刚体原点不必是特征点。单独投影 (0,0,0)，网页将它显示为
-                        // 几何中心；_p3d 的模型点投影仍用于检查特征点/PnP 对齐质量。
-                        const std::vector<cv::Point3d> object_origin(1, cv::Point3d(0.0, 0.0, 0.0));
-                        std::vector<cv::Point2d> projected_origin;
-                        cv::projectPoints(object_origin, R1, T1, _K, _diff, projected_origin);
-                        if (projected_origin.size() == 1 &&
-                            std::isfinite(projected_origin[0].x) &&
-                            std::isfinite(projected_origin[0].y))
+                    if (solved && inlier_count >= required_inliers &&
+                        matrixAllFinite(candidate_R1) && matrixAllFinite(candidate_T1))
+                    {
+                        std::vector<cv::Point3d> inlier_object_points;
+                        std::vector<cv::Point2d> inlier_image_points;
+                        inlier_object_points.reserve(inliers.size());
+                        inlier_image_points.reserve(inliers.size());
+                        for (int index : inliers)
                         {
-                            m_reprojected_origin = projected_origin[0];
-                            m_reprojected_origin_valid = true;
+                            if (index < 0 || index >= eligible_count)
+                                continue;
+                            inlier_object_points.push_back(object_points[index]);
+                            inlier_image_points.push_back(image_points[index]);
                         }
 
-                        cv::projectPoints(_p3d, R1, T1, _K, _diff, m_reprojected_points);
+                        try
+                        {
+                            cv::solvePnPRefineLM(
+                                inlier_object_points, inlier_image_points,
+                                _K, _diff, candidate_R1, candidate_T1);
+                        }
+                        catch (const cv::Exception &error)
+                        {
+                            LOGW("PnP LM refinement skipped: %s", error.what());
+                        }
 
-                        cv::Rodrigues(R1, R_mat);
+                        std::vector<cv::Point2d> inlier_reprojected;
+                        cv::projectPoints(
+                            inlier_object_points, candidate_R1, candidate_T1,
+                            _K, _diff, inlier_reprojected);
+                        double squared_error = 0.0;
+                        reprojection_max = 0.0;
+                        for (size_t index = 0; index < inlier_reprojected.size(); ++index)
+                        {
+                            const double error = cv::norm(
+                                inlier_reprojected[index] - inlier_image_points[index]);
+                            squared_error += error * error;
+                            reprojection_max = std::max(reprojection_max, error);
+                        }
+                        if (!inlier_reprojected.empty())
+                            reprojection_rms = std::sqrt(
+                                squared_error / inlier_reprojected.size());
 
-                        cv::Mat pnp_transform = cv::Mat::eye(4, 4, CV_64F);
-                        cv::Mat R64;
-                        cv::Mat T64;
-                        R_mat.convertTo(R64, CV_64F);
-                        T1.convertTo(T64, CV_64F);
-                        T64 = T64.reshape(1, 3);
+                        cv::Mat candidate_R_mat;
+                        cv::Rodrigues(candidate_R1, candidate_R_mat);
+                        candidate_R_mat.convertTo(candidate_R_mat, CV_64F);
+                        candidate_T1 = candidate_T1.reshape(1, 3);
+                        candidate_T1.convertTo(candidate_T1, CV_64F);
 
-                        R64.copyTo(pnp_transform(cv::Rect(0, 0, 3, 3)));
-                        T64.copyTo(pnp_transform(cv::Rect(3, 0, 1, 3)));
+                        // 所有配置模型点都必须位于相机前方。负深度/近零深度通常表示
+                        // PnP 选中了镜像或退化分支。
+                        double minimum_depth = std::numeric_limits<double>::infinity();
+                        for (int point_index = 0; point_index < _p3d.rows; ++point_index)
+                        {
+                            const cv::Mat point = (cv::Mat_<double>(3, 1) <<
+                                _p3d.at<double>(point_index, 0),
+                                _p3d.at<double>(point_index, 1),
+                                _p3d.at<double>(point_index, 2));
+                            const cv::Mat camera_point = candidate_R_mat * point + candidate_T1;
+                            minimum_depth = std::min(
+                                minimum_depth, camera_point.at<double>(2, 0));
+                        }
 
-                        cv::Vec3d euler_angles_deg =
-                            rotationMatrixToEulerRxRyRzDegrees(pnp_transform(cv::Rect(0, 0, 3, 3)));
+                        bool geometry_valid =
+                            std::isfinite(reprojection_rms) && reprojection_rms <= 2.5 &&
+                            std::isfinite(reprojection_max) && reprojection_max <= 4.0 &&
+                            std::isfinite(minimum_depth) && minimum_depth > 50.0;
+                        if (!geometry_valid)
+                        {
+                            rejection_reason = "reprojection/depth quality gate";
+                        }
+                        else
+                        {
+                            bool promote_pending_pose = false;
+                            bool long_tracking_gap = false;
+                            if (!_accepted_R_mat.empty() && !_accepted_T1.empty())
+                            {
+                                const double elapsed = timestamp > _accepted_timestamp
+                                    ? (timestamp - _accepted_timestamp) / 1000.0 : 0.001;
+                                const double gate_dt = std::max(0.001, std::min(elapsed, 1.5));
+                                const double position_delta = translationDistance(
+                                    _accepted_T1, candidate_T1);
+                                const double rotation_delta = rotationDistanceDegrees(
+                                    _accepted_R_mat, candidate_R_mat);
+                                const double position_limit = 60.0 + 140.0 * gate_dt;
+                                const double rotation_limit = 12.0 + 30.0 * gate_dt;
+                                long_tracking_gap = elapsed > 2.0;
 
-                        m_result[0] = static_cast<float>(euler_angles_deg[0]);
-                        m_result[1] = static_cast<float>(euler_angles_deg[1]);
-                        m_result[2] = static_cast<float>(euler_angles_deg[2]);
-                        m_result[3] = static_cast<float>(pnp_transform.at<double>(0, 3));
-                        m_result[4] = static_cast<float>(pnp_transform.at<double>(1, 3));
-                        m_result[5] = static_cast<float>(pnp_transform.at<double>(2, 3));
+                                if (position_delta > position_limit ||
+                                    rotation_delta > rotation_limit)
+                                {
+                                    bool agrees_with_pending = false;
+                                    if (!_pending_R_mat.empty() && !_pending_T1.empty())
+                                    {
+                                        const double pending_elapsed = timestamp > _pending_timestamp
+                                            ? (timestamp - _pending_timestamp) / 1000.0 : 0.001;
+                                        const double pending_dt = std::max(
+                                            0.001, std::min(pending_elapsed, 1.5));
+                                        agrees_with_pending =
+                                            translationDistance(_pending_T1, candidate_T1)
+                                                <= 100.0 + 300.0 * pending_dt &&
+                                            rotationDistanceDegrees(_pending_R_mat, candidate_R_mat)
+                                                <= 20.0 + 90.0 * pending_dt;
+                                    }
+
+                                    if (agrees_with_pending)
+                                        ++_pending_pose_count;
+                                    else
+                                        _pending_pose_count = 1;
+                                    candidate_R_mat.copyTo(_pending_R_mat);
+                                    candidate_T1.copyTo(_pending_T1);
+                                    _pending_timestamp = timestamp;
+
+                                    if (_pending_pose_count >= 3)
+                                        promote_pending_pose = true;
+                                    else
+                                    {
+                                        geometry_valid = false;
+                                        rejection_reason = "SE3 continuity gate";
+                                    }
+                                }
+                                else
+                                {
+                                    _pending_R_mat.release();
+                                    _pending_T1.release();
+                                    _pending_timestamp = 0;
+                                    _pending_pose_count = 0;
+                                }
+                            }
+
+                            if (geometry_valid)
+                            {
+                                candidate_R1.copyTo(R1);
+                                candidate_T1.copyTo(T1);
+                                candidate_R_mat.copyTo(R_mat);
+                                R1.copyTo(_R1_prev);
+                                T1.copyTo(_T1_prev);
+                                R_mat.copyTo(_accepted_R_mat);
+                                T1.copyTo(_accepted_T1);
+                                _accepted_timestamp = timestamp;
+                                _reset_filter_on_next_measurement =
+                                    promote_pending_pose || long_tracking_gap;
+                                _pending_R_mat.release();
+                                _pending_T1.release();
+                                _pending_timestamp = 0;
+                                _pending_pose_count = 0;
+                                is_current_frame_good = true;
+
+                                const std::vector<cv::Point3d> object_origin(
+                                    1, cv::Point3d(0.0, 0.0, 0.0));
+                                std::vector<cv::Point2d> projected_origin;
+                                cv::projectPoints(
+                                    object_origin, R1, T1, _K, _diff, projected_origin);
+                                if (projected_origin.size() == 1 &&
+                                    std::isfinite(projected_origin[0].x) &&
+                                    std::isfinite(projected_origin[0].y))
+                                {
+                                    m_reprojected_origin = projected_origin[0];
+                                    m_reprojected_origin_valid = true;
+                                }
+                                cv::projectPoints(
+                                    _p3d, R1, T1, _K, _diff, m_reprojected_points);
+
+                                cv::Vec3d euler_angles_deg =
+                                    rotationMatrixToEulerRxRyRzDegrees(R_mat);
+                                m_result[0] = static_cast<float>(euler_angles_deg[0]);
+                                m_result[1] = static_cast<float>(euler_angles_deg[1]);
+                                m_result[2] = static_cast<float>(euler_angles_deg[2]);
+                                m_result[3] = static_cast<float>(T1.at<double>(0, 0));
+                                m_result[4] = static_cast<float>(T1.at<double>(1, 0));
+                                m_result[5] = static_cast<float>(T1.at<double>(2, 0));
+                                rejection_reason = "accepted";
+                            }
+                        }
                     }
-
-                    static auto last_pnp_log_at = std::chrono::steady_clock::time_point{};
-                    const auto now = std::chrono::steady_clock::now();
-                    if (last_pnp_log_at.time_since_epoch().count() == 0 ||
-                        now - last_pnp_log_at >= std::chrono::seconds(1))
-                    {
-                        LOG("Pose PnP: boxes=%d, eligible_points=%d/%d, solve=%s, inliers=%d, valid=%s",
-                            static_cast<int>(m_bboxes.size()), valid_count, point_count,
-                            success ? "true" : "false", static_cast<int>(inliers.size()),
-                            is_current_frame_good ? "true" : "false");
-                        last_pnp_log_at = now;
-                    }
+                    else if (!solved)
+                        rejection_reason = "solvePnPRansac failed";
+                    else if (inlier_count < required_inliers)
+                        rejection_reason = "insufficient inlier ratio";
+                    else
+                        rejection_reason = "non-finite PnP solution";
                 }
                 else
                 {
-                    static auto last_short_log_at = std::chrono::steady_clock::time_point{};
-                    const auto now = std::chrono::steady_clock::now();
-                    if (last_short_log_at.time_since_epoch().count() == 0 ||
-                        now - last_short_log_at >= std::chrono::seconds(1))
-                    {
-                        LOGW("Pose PnP skipped: boxes=%d, eligible_points=%d/%d (need at least 4 with confidence > 0.75)",
-                             static_cast<int>(m_bboxes.size()), valid_count, point_count);
-                        last_short_log_at = now;
-                    }
+                    rejection_reason = "fewer than four unique high-confidence points";
                 }
             }
-            else
+
+            static auto last_pnp_log_at = std::chrono::steady_clock::time_point{};
+            const auto now = std::chrono::steady_clock::now();
+            if (last_pnp_log_at.time_since_epoch().count() == 0 ||
+                now - last_pnp_log_at >= std::chrono::seconds(1))
             {
-                static auto last_empty_log_at = std::chrono::steady_clock::time_point{};
-                const auto now = std::chrono::steady_clock::now();
-                if (last_empty_log_at.time_since_epoch().count() == 0 ||
-                    now - last_empty_log_at >= std::chrono::seconds(1))
-                {
-                    LOGW("Pose PnP skipped: no decoded bounding box");
-                    last_empty_log_at = now;
-                }
+                LOG("Pose PnP quality: boxes=%d, eligible=%d, inliers=%d, rms_px=%.3f, max_px=%.3f, valid=%s, reason=%s",
+                    static_cast<int>(m_bboxes.size()), eligible_count, inlier_count,
+                    reprojection_rms, reprojection_max,
+                    is_current_frame_good ? "true" : "false", rejection_reason.c_str());
+                last_pnp_log_at = now;
             }
         }
 
         void Pose::run_filter_and_estimation(const uint64_t &timestamp, uint64_t frame_id)
         {
             double dt = 0.0;
-            if (_last_timestamp != 0)
+            if (_last_timestamp != 0 && timestamp > _last_timestamp)
             {
                 dt = static_cast<double>(timestamp - _last_timestamp) / 1000.0;
             }
@@ -923,6 +1189,11 @@ namespace model
             if (dt <= 0.0)
             {
                 dt = 0.033;
+            }
+            if (_reset_filter_on_next_measurement && is_current_frame_good)
+            {
+                m_kf.reset();
+                _reset_filter_on_next_measurement = false;
             }
             cv::Point3f predicted_pos = m_kf.predict(dt); // 先验估计，预测值
             cv::Point3f kf_result;
@@ -943,8 +1214,17 @@ namespace model
                     kf_result.x, kf_result.y, kf_result.z);
                 const cv::Mat mocap_pose = transformCameraPoseToMocap(
                     mocap_from_camera, R_mat, filtered_object_position_in_camera);
-                const cv::Vec3d mocap_euler_angles_deg =
+                const cv::Vec3d raw_mocap_euler_angles_deg =
                     rotationMatrixToEulerRxRyRzDegrees(mocap_pose(cv::Rect(0, 0, 3, 3)));
+                const cv::Vec3d mocap_euler_angles_deg = _has_last_mocap_euler
+                    ? nearestEquivalentEuler(
+                        raw_mocap_euler_angles_deg, _last_mocap_euler_deg)
+                    : raw_mocap_euler_angles_deg;
+                if (is_current_frame_good)
+                {
+                    _last_mocap_euler_deg = mocap_euler_angles_deg;
+                    _has_last_mocap_euler = true;
+                }
 
                 // 所有发送/记录链路共用 m_result，顺序保持 rx, ry, rz, x, y, z。
                 m_result[0] = static_cast<float>(mocap_euler_angles_deg[0]);

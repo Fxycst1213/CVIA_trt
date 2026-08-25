@@ -41,22 +41,29 @@ namespace model
         }
     }
 
-    void Model::init_model()
+    bool Model::init_model()
     {
         /* 一个model的engine, context这些一旦创建好了，当多次调用这个模型的时候就没必要每次都初始化了*/
         if (m_context == nullptr)
         {
             if (!fileExists(m_enginePath))
             {
+                if (!fileExists(m_onnxPath))
+                {
+                    LOGE("TensorRT engine not found: %s; ONNX fallback is unavailable: %s",
+                         m_enginePath.c_str(), m_onnxPath.c_str());
+                    return false;
+                }
                 LOG("%s not found. Building trt engine...", m_enginePath.c_str());
-                build_engine();
+                if (!build_engine()) return false;
             }
             else
             {
                 LOG("%s has been generated! loading trt engine...", m_enginePath.c_str());
-                load_engine();
+                if (!load_engine()) return false;
             }
         }
+        return m_context && m_bindings[0] && m_bindings[1];
     }
 
     bool Model::build_engine()
@@ -105,7 +112,7 @@ namespace model
             print_network(*network, true);
         }
 
-        return true;
+        return m_context && m_bindings[0] && m_bindings[1];
     }
 
     bool Model::enqueue_bindings()
@@ -143,7 +150,7 @@ namespace model
             }
         }
 
-        return true;
+        return m_context && m_bindings[0] && m_bindings[1];
     }
 
     bool Model::load_engine()
@@ -159,7 +166,7 @@ namespace model
 
         setup(modelData.data(), modelData.size());
 
-        return true;
+        return m_context && m_bindings[0] && m_bindings[1];
     }
 
     void Model::save_plan(IHostMemory &plan)
@@ -171,6 +178,16 @@ namespace model
 
     void Model::inference(const Resultframe &resultframe)
     {
+        if (!m_context || !m_bindings[0] || !m_bindings[1])
+        {
+            static bool reported = false;
+            if (!reported)
+            {
+                LOGE("Inference is unavailable because model setup did not complete");
+                reported = true;
+            }
+            return;
+        }
         reset_task();
         if (m_params->dev == CPU)
         {

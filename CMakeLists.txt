@@ -2,8 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 project(trt)
 
 set(CMAKE_CUDA_ARCHITECTURES 87)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(LINK_SHARED_ZED "Link with the ZED SDK shared executable" ON)
+option(CVIA_PRODUCTION_BUILD "Build a stripped customer-delivery executable" OFF)
 
 if (NOT LINK_SHARED_ZED AND MSVC)
     message(FATAL_ERROR "LINK_SHARED_ZED OFF : ZED SDK static libraries not available on Windows")
@@ -13,9 +17,8 @@ set(CMAKE_CUDA_COMPILER "/usr/local/cuda-12.6/bin/nvcc")
 enable_language(CUDA)
 
 
-set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -std=c++14 -Wall -O0 -Wfatal-errors -pthread -w -g")
-set(CUDA_GEN_CODE "-gencode=arch=compute_87,code=sm_87")
-set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++14 -O0 -Xcompiler -fPIC -g -w ${CUDA_GEN_CODE}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wfatal-errors -pthread -w")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-fPIC -w")
 
 set(TENSORRT_INCLUDE_DIR     "/usr/include/aarch64-linux-gnu/")
 set(TENSORRT_LIB_DIR     "/usr/lib/aarch64-linux-gnu/")
@@ -67,6 +70,14 @@ link_libraries(stdc++fs)
 file(GLOB_RECURSE srcs ${PROJECT_SOURCE_DIR}/src/*.cpp ${PROJECT_SOURCE_DIR}/src/*.cu)
 
 add_executable(trt ${srcs} )
+
+if(CVIA_PRODUCTION_BUILD)
+    # Do not embed the developer workspace path in __FILE__ strings or debug metadata.
+    target_compile_options(trt PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-O3;-DNDEBUG;-fvisibility=hidden;-fvisibility-inlines-hidden;-ffile-prefix-map=${PROJECT_SOURCE_DIR}=.;-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=.>
+        $<$<COMPILE_LANGUAGE:CUDA>:-O3;-DNDEBUG;-Xcompiler=-fvisibility=hidden;-Xcompiler=-fvisibility-inlines-hidden>)
+    target_link_options(trt PRIVATE -Wl,--strip-all)
+endif()
 
 target_link_libraries(trt ${CUDA_LIBRARIES})
 target_link_libraries(trt nvinfer nvinfer_plugin)

@@ -2,6 +2,7 @@
 #include <opencv2/core.hpp>
 #include <sstream>
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -40,6 +41,43 @@ void read_array(const cv::FileNode &node, std::array<double, N> &target)
     for (cv::FileNodeIterator it = node.begin(); it != node.end(); ++it)
         target[index++] = static_cast<double>(*it);
 }
+
+bool read_model_keypoints(const cv::FileNode &node,
+                          model::pose::ModelKeypoints3D &target,
+                          std::string &error)
+{
+    if (node.empty()) return true; // 兼容尚未写入网页点集的旧配置。
+    if (node.type() != cv::FileNode::SEQ || node.size() < 4 || node.size() > 256)
+    {
+        error = "calibration.model_keypoints_3d must contain 4..256 XYZ points";
+        return false;
+    }
+
+    model::pose::ModelKeypoints3D candidate;
+    candidate.reserve(node.size() * 3);
+    for (cv::FileNodeIterator point_it = node.begin(); point_it != node.end(); ++point_it)
+    {
+        const cv::FileNode point = *point_it;
+        if (point.type() != cv::FileNode::SEQ || point.size() != 3)
+        {
+            error = "each calibration.model_keypoints_3d item must contain X, Y and Z";
+            return false;
+        }
+        for (cv::FileNodeIterator coordinate_it = point.begin();
+             coordinate_it != point.end(); ++coordinate_it)
+        {
+            const double value = static_cast<double>(*coordinate_it);
+            if (!std::isfinite(value))
+            {
+                error = "calibration.model_keypoints_3d contains a non-finite coordinate";
+                return false;
+            }
+            candidate.push_back(value);
+        }
+    }
+    target.swap(candidate);
+    return true;
+}
 }
 
 bool load_project_config(const std::string &path, prj_params &params, std::string &error)
@@ -59,6 +97,9 @@ bool load_project_config(const std::string &path, prj_params &params, std::strin
         read_if_present(input, "loop", params.folder_loop);
         read_if_present(input, "interval_ms", params.folder_interval_ms);
 
+        const cv::FileNode model = file["model"];
+        read_if_present(model, "onnx_path", params.onnx_model_path);
+
         read_camera(file["detect_camera"], params.detect_camera);
         read_camera(file["photo_camera"], params.photo_camera);
 
@@ -66,6 +107,9 @@ bool load_project_config(const std::string &path, prj_params &params, std::strin
         read_array(calibration["camera_matrix"], params.camera_matrix);
         read_array(calibration["distortion"], params.distortion);
         read_array(calibration["extrinsic"], params.extrinsic);
+        if (!read_model_keypoints(calibration["model_keypoints_3d"],
+                                  params.model_keypoints_3d, error))
+            return false;
 
         const cv::FileNode network = file["network"];
         read_if_present(network, "tcp_ip", params.ip);

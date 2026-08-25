@@ -17,22 +17,23 @@ namespace thread
         if (params.task == model::task_type::CLASSIFICATION)
         {
             m_classifier = model::classifier::make_classifier(onnxPath, level, params);
-            m_classifier->init_model();
+            m_ready = m_classifier->init_model();
         }
         else if (params.task == model::task_type::DETECTION)
         {
             m_detector = model::detector::make_detector(onnxPath, level, params);
-            m_detector->init_model();
+            m_ready = m_detector->init_model();
         }
         else if (params.task == model::task_type::POSE)
         {
             m_pose = model::pose::make_pose(onnxPath, level, params); // m_pose 的生命周期由智能指针自动管理
-            m_pose->init_model();
+            m_ready = m_pose->init_model();
         }
     }
 
     void Worker::inference(const Resultframe &resultframe)
     {
+        if (!m_ready) return;
         
         if (m_params.task == model::task_type::CLASSIFICATION)
         {

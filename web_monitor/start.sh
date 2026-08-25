@@ -14,7 +14,6 @@ WEB_HOST="${WEB_HOST:-0.0.0.0}"
 WEB_PORT="${WEB_PORT:-8765}"
 WEB_PORT_MAX_TRIES="${WEB_PORT_MAX_TRIES:-20}"
 WEB_PID=""
-TRT_PID=""
 TRT_PID_FILE="${SCRIPT_DIR}/runtime/trt.pid"
 
 port_is_available() {
@@ -38,20 +37,13 @@ cleanup() {
     local exit_code=$?
     trap - EXIT INT TERM
 
-    if [[ -n "${TRT_PID}" ]] && kill -0 "${TRT_PID}" 2>/dev/null; then
-        echo
-        echo "[CVIA] 正在优雅停止推理进程（PID ${TRT_PID}）..."
-        kill -TERM "${TRT_PID}" 2>/dev/null || true
-        wait "${TRT_PID}" 2>/dev/null || true
-    fi
-    rm -f "${TRT_PID_FILE}"
-
     if [[ -n "${WEB_PID}" ]] && kill -0 "${WEB_PID}" 2>/dev/null; then
         echo
-        echo "[CVIA] 正在关闭网页服务（PID ${WEB_PID}）..."
+        echo "[CVIA] 正在关闭网页服务及其托管的推理进程（PID ${WEB_PID}）..."
         kill "${WEB_PID}" 2>/dev/null || true
         wait "${WEB_PID}" 2>/dev/null || true
     fi
+    rm -f "${TRT_PID_FILE}"
 
     exit "${exit_code}"
 }
@@ -115,7 +107,8 @@ if [[ "${WEB_PORT}" != "${REQUESTED_WEB_PORT}" ]]; then
 fi
 echo "[CVIA] 正在启动网页控制台 http://${WEB_HOST}:${WEB_PORT} ..."
 
-python3 -u "${SCRIPT_DIR}/server.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
+CVIA_TRT_BINARY="${TRT_BINARY}" CVIA_CONFIG_FILE="${CONFIG_FILE}" \
+    python3 -u "${SCRIPT_DIR}/server.py" --host "${WEB_HOST}" --port "${WEB_PORT}" &
 WEB_PID=$!
 
 # 给网页进程一个短暂的初始化窗口，并确认它没有因端口占用等原因退出。
@@ -142,22 +135,8 @@ if [[ "${WEB_HOST}" == "0.0.0.0" ]]; then
 else
     echo "[CVIA] 网页地址：http://${WEB_HOST}:${WEB_PORT}"
 fi
-echo "[CVIA] 正在启动推理程序。完成采集后请在网页点击“停止推理并保存”。"
-echo "[CVIA] 终端 Ctrl+C 会同时关闭推理和网页服务，不会弹出笔记本另存为面板。"
+echo "[CVIA] 推理程序尚未启动。请先在网页保存全部参数，再点击“开始推理”。"
+echo "[CVIA] 完成采集后请在网页点击“停止推理并保存”。"
+echo "[CVIA] 终端 Ctrl+C 会关闭网页和正在运行的推理进程，不会弹出笔记本另存为面板。"
 echo
-
-"${TRT_BINARY}" "${CONFIG_FILE}" &
-TRT_PID=$!
-printf '%s\n' "${TRT_PID}" > "${TRT_PID_FILE}"
-
-TRT_EXIT=0
-wait "${TRT_PID}" || TRT_EXIT=$?
-TRT_PID=""
-rm -f "${TRT_PID_FILE}"
-
-echo
-echo "[CVIA] 推理进程已停止（退出码 ${TRT_EXIT}）。"
-echo "[CVIA] 网页服务继续运行，请在浏览器中选择位置并保存本次 PnP CSV。"
-echo "[CVIA] 保存完成后回到终端按 Ctrl+C 关闭网页服务。"
-
 wait "${WEB_PID}"

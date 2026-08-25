@@ -11,6 +11,7 @@ public:
     ~TrajectoryKF();
 
     void init(float x, float y, float z);
+    void reset();
 
     cv::Point3f predict(double dt);
     cv::Point3f update(float x, float y, float z);
@@ -25,9 +26,6 @@ private:
     cv::Mat measurement;
     bool initialized = false;
 
-    int consecutive_reject_count = 0;
-    const int MAX_REJECT_COUNT = 3;
-
     // --- 自适应参数配置 ---
 
     // 1. 基础过程噪声 (对应平稳直线运动)
@@ -35,13 +33,8 @@ private:
     const float BASE_Q_POS = 0.5f;
     const float BASE_Q_VEL = 0.8f;
 
-    // 2. 机动判定阈值 (Maneuver Threshold)
-    // 预测值和观测值相差超过 1.5cm，认为物体在急转弯/变速
-    // const float MANEUVER_THRESHOLD = 18.00f;
-
-    // 3. 离谱阈值 (Outlier Threshold)
-    // 预测值和观测值相差超过 50cm，认为绝对是传感器飞了
-    const float IMPOSSIBLE_THRESHOLD = 65.0f;
+    // 离群点由 Pose 的重投影质量与 SE(3) 连续性门控统一处理。KF 只负责平滑
+    // 已经通过门控的测量，避免“连续拒绝若干帧后反而接收异常值”的状态跳变。
 };
 
 #endif // TRAJECTORY_KF_H

@@ -32,12 +32,18 @@ let mocapTargetApplying = false;
 let discoveredBodiesSignature = "";
 let offlineSyncGenerating = false;
 let offsetEstimating = false;
+let runtimeConfigStatus = null;
+let lastConfigApply = null;
+let latestInferenceStatus = {running:false, available:false};
+let inferenceStartPending = false;
 
 // 网页刷新周期：位姿页打开时曲线 500 ms；其他页面跟随 1000 ms 状态周期。
 const POSE_REFRESH_MS = 200;
 const STATUS_REFRESH_MS = 1000;
 const PREVIEW_REQUEST_TIMEOUT_MS = 2000;
 const COMPAT_STORAGE_KEY = "cvia.compat.mode";
+const MODEL_KEYPOINT_MIN_COUNT = 4;
+const MODEL_KEYPOINT_MAX_COUNT = 256;
 
 const poseAxes = [
   {key:"X", field:"x", group:"position"}, {key:"Y", field:"y", group:"position"}, {key:"Z", field:"z", group:"position"},
@@ -97,6 +103,18 @@ function getPath(object, path) { return path.split(".").reduce((value, key) => v
 function setPath(object, path, value) { const keys = path.split("."); const last = keys.pop(); const parent = keys.reduce((item, key) => item[key], object); parent[last] = value; }
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function showToast(message, error = false) { const toast = $("#toast"); toast.textContent = message; toast.classList.toggle("is-error", error); toast.classList.add("is-visible"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 3200); }
+
+function deriveEnginePath(onnxPath) {
+  const raw = String(onnxPath || "").trim().replace(/\\/g, "/");
+  if (!raw) return "等待模型路径";
+  const absolute = raw.startsWith("/");
+  const parts = raw.split("/").filter(Boolean);
+  const filename = parts.pop() || "model.onnx";
+  const stem = filename.toLowerCase().endsWith(".onnx") ? filename.slice(0, -5) : filename;
+  parts.pop();
+  const route = [...parts, "engine", `${stem}-fp16.engine`].join("/");
+  return absolute ? `/${route}` : route;
+}
 
 function parseMocapSelector(selector) {
   const text = String(selector || "").trim();
@@ -255,6 +273,58 @@ function createMatrix(container, path, count) {
   }
 }
 
+function createModelKeypointsEditor() {
+  const root = $("#modelKeypoints3D");
+  const points = config?.calibration?.model_keypoints_3d || [];
+  root.innerHTML = '<span class="model-keypoint-corner">POINT</span><span>X</span><span>Y</span><span>Z</span><span class="model-keypoint-action-heading">ACTION</span>';
+  for (let pointIndex = 0; pointIndex < points.length; pointIndex++) {
+    const marker = document.createElement("strong");
+    marker.textContent = `P${pointIndex}`;
+    root.appendChild(marker);
+    ["X", "Y", "Z"].forEach((axis, coordinateIndex) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "any";
+      input.inputMode = "decimal";
+      input.dataset.path = `calibration.model_keypoints_3d.${pointIndex}.${coordinateIndex}`;
+      input.setAttribute("aria-label", `模型关键点 P${pointIndex} ${axis} 坐标`);
+      root.appendChild(input);
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "model-keypoint-remove";
+    remove.textContent = "删除";
+    remove.disabled = points.length <= MODEL_KEYPOINT_MIN_COUNT;
+    remove.setAttribute("aria-label", `删除模型关键点 P${pointIndex}`);
+    remove.addEventListener("click", () => removeModelKeypoint(pointIndex));
+    root.appendChild(remove);
+  }
+  $("#modelKeypointCount").textContent = `${points.length} × XYZ`;
+  $("#modelKeypointRange").textContent = `${points.length} 个点`;
+}
+
+function addModelKeypoint() {
+  const points = config.calibration.model_keypoints_3d;
+  if (points.length >= MODEL_KEYPOINT_MAX_COUNT) {
+    showToast(`最多允许 ${MODEL_KEYPOINT_MAX_COUNT} 个三维点`, true);
+    return;
+  }
+  points.push([0, 0, 0]);
+  bindConfig();
+  showToast(`已新增 P${points.length - 1}；请填写 XYZ 后保存`);
+}
+
+function removeModelKeypoint(pointIndex) {
+  const points = config.calibration.model_keypoints_3d;
+  if (points.length <= MODEL_KEYPOINT_MIN_COUNT) {
+    showToast(`solvePnP 至少需要 ${MODEL_KEYPOINT_MIN_COUNT} 个三维点`, true);
+    return;
+  }
+  points.splice(pointIndex, 1);
+  bindConfig();
+  showToast(`已删除 P${pointIndex}，后续点编号已重新排列`);
+}
+
 function createControls() {
   $("#cameraEditors").innerHTML = cameraEditor("detect_camera", "红外检测相机", "IR", true, true) + cameraEditor("photo_camera", "可见光相机", "RGB", false, false);
   createMatrix("#cameraMatrix", "calibration.camera_matrix", 9);
@@ -263,6 +333,7 @@ function createControls() {
 }
 
 function bindConfig() {
+  createModelKeypointsEditor();
   $$('[data-path]').forEach(control => {
     const path = control.dataset.path;
     const value = getPath(config, path);
@@ -274,6 +345,14 @@ function bindConfig() {
 }
 
 function updateDependentUI() {
+  const modelPointCount = config.calibration.model_keypoints_3d.length;
+  $("#modelFeatureShape").textContent = `${modelPointCount} PTS · ${5 + modelPointCount * 3} FEATURES`;
+  $("#addModelKeypoint").disabled = modelPointCount >= MODEL_KEYPOINT_MAX_COUNT;
+  const modelEnginePath = $("#modelEnginePath");
+  if (modelEnginePath) {
+    modelEnginePath.textContent = deriveEnginePath(config.model?.onnx_path);
+    modelEnginePath.title = modelEnginePath.textContent;
+  }
   const isFolder = config.input.mode === "folder";
   $("#folderOptions").style.opacity = isFolder ? "1" : ".46";
   $$('[data-path^="input.folder"], [data-path="input.interval_ms"], [data-path="input.loop"]').forEach(control => control.disabled = !isFolder);
@@ -306,9 +385,66 @@ function updateDirty() {
   const dirty = JSON.stringify(config) !== JSON.stringify(savedConfig);
   $("#saveButton").disabled = !dirty;
   $("#dirtyDot").classList.toggle("is-dirty", dirty);
-  $("#saveTitle").textContent = dirty ? "有未保存的修改" : "配置已同步";
-  $("#saveHint").textContent = dirty ? "保存后重启控制台生效" : "修改参数后在这里保存";
-  $("#saveReadout").textContent = dirty ? "待保存" : "已同步";
+  updateStartButton(dirty);
+  if (dirty) {
+    $("#saveTitle").textContent = "有未保存的修改";
+    $("#saveHint").textContent = "标定参数可热应用；其他参数会在下次开始推理时生效";
+    $("#saveReadout").textContent = "待保存";
+    return;
+  }
+
+  const hotPaths = lastConfigApply?.hot_apply_paths || [];
+  const restartPaths = lastConfigApply?.restart_required_paths || [];
+  const runtimeCurrent = Boolean(runtimeConfigStatus?.current);
+  const runtimeOk = runtimeCurrent && runtimeConfigStatus?.result === "ok";
+  const runtimeRequiresRestart = Boolean(runtimeConfigStatus?.restart_required);
+  const waitingForHotApply = hotPaths.length > 0 && !runtimeOk;
+
+  if (runtimeCurrent && runtimeConfigStatus?.result === "error") {
+    $("#saveTitle").textContent = "运行时应用失败";
+    $("#saveHint").textContent = runtimeConfigStatus.message || "推理进程无法读取最新配置";
+    $("#saveReadout").textContent = "应用失败";
+  } else if (waitingForHotApply) {
+    const inferenceRunning = previousInferenceRunning === true;
+    $("#saveTitle").textContent = inferenceRunning ? "标定参数等待热应用" : "标定参数已保存";
+    $("#saveHint").textContent = inferenceRunning
+      ? "推理进程将在下一帧前读取并应用最新标定"
+      : "启动推理后会自动加载最新标定";
+    $("#saveReadout").textContent = "等待应用";
+  } else if (restartPaths.length > 0 || runtimeRequiresRestart) {
+    $("#saveTitle").textContent = hotPaths.length > 0 && runtimeOk ? "标定已热应用，部分配置待下次启动" : "配置已保存，等待下次启动";
+    $("#saveHint").textContent = restartPaths.length > 0
+      ? `${restartPaths.length} 项非标定参数将在停止并重新开始推理后生效`
+      : "推理进程检测到非标定参数变化，将在下次开始推理时生效";
+    $("#saveReadout").textContent = hotPaths.length > 0 && runtimeOk ? "部分生效" : "待启动";
+  } else if (runtimeOk) {
+    const revision = runtimeConfigStatus.calibration_revision;
+    $("#saveTitle").textContent = hotPaths.length > 0 ? "标定参数已热应用" : "运行配置已同步";
+    $("#saveHint").textContent = hotPaths.length > 0 && revision
+      ? `推理正在使用标定版本 ${revision}`
+      : "修改参数后可在这里保存并应用";
+    $("#saveReadout").textContent = hotPaths.length > 0 ? "已热应用" : "已同步";
+  } else {
+    $("#saveTitle").textContent = "配置已保存";
+    $("#saveHint").textContent = "等待推理进程读取配置状态";
+    $("#saveReadout").textContent = "等待确认";
+  }
+}
+
+function updateStartButton(dirty = JSON.stringify(config) !== JSON.stringify(savedConfig)) {
+  const button = $("#startInferenceButton");
+  if (!button) return;
+  const running = Boolean(latestInferenceStatus?.running);
+  const available = Boolean(latestInferenceStatus?.available);
+  button.disabled = running || dirty || isSaving || inferenceStartPending || !available;
+  button.title = !available ? (latestInferenceStatus?.model?.message || "推理程序、配置或模型文件不可用") : "";
+  if (inferenceStartPending) button.textContent = "正在启动…";
+  else if (running) button.textContent = "推理运行中";
+  else if (latestInferenceStatus?.model_available === false) button.textContent = "模型文件不可用";
+  else if (!available) button.textContent = "推理程序不可用";
+  else if (dirty || isSaving) button.textContent = "请先保存配置";
+  else if (latestInferenceStatus?.last_exit_code != null) button.textContent = "重新开始推理";
+  else button.textContent = "开始推理";
 }
 
 async function loadConfig(announce = false) {
@@ -323,6 +459,7 @@ async function loadConfig(announce = false) {
 async function saveConfig() {
   const button = $("#saveButton"); button.disabled = true; button.textContent = "保存中…";
   isSaving = true;
+  updateStartButton();
   clearTimeout(previewTimer);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
@@ -330,10 +467,13 @@ async function saveConfig() {
     const response = await fetch("/api/config", {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(config), signal:controller.signal});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "保存失败");
-    savedConfig = clone(config); updateDirty(); showToast(result.message); button.textContent = "已保存"; loadCalibrationHistory();
-  } catch (error) { showToast(error.name === "AbortError" ? "保存超时：已暂停预览，请检查局域网连接后重试" : error.message, true); button.disabled = false; button.textContent = "保存配置"; }
-  finally { clearTimeout(timeout); isSaving = false; schedulePreviewRefresh(); }
-  setTimeout(() => { button.textContent = "保存配置"; updateDirty(); }, 1200);
+    savedConfig = clone(config);
+    lastConfigApply = result.apply || null;
+    if (runtimeConfigStatus) runtimeConfigStatus.current = false;
+    updateDirty(); showToast(result.message); button.textContent = "已保存"; loadCalibrationHistory();
+  } catch (error) { showToast(error.name === "AbortError" ? "保存超时：已暂停预览，请检查局域网连接后重试" : error.message, true); button.disabled = false; button.textContent = "保存并应用"; }
+  finally { clearTimeout(timeout); isSaving = false; updateStartButton(); schedulePreviewRefresh(); }
+  setTimeout(() => { button.textContent = "保存并应用"; updateDirty(); }, 1200);
 }
 
 function readControl(control) {
@@ -387,7 +527,7 @@ function applyWorldRotationToExtrinsic() {
     bindConfig();
     clearWorldRotationInputs();
     $("#worldRotationLast").textContent = `顺序 ${order.split("").join("→")} · X ${formatRotationAngle(angles[0])} · Y ${formatRotationAngle(angles[1])} · Z ${formatRotationAngle(angles[2])}`;
-    showToast(`已按世界轴 ${order.split("").join("→")} 更新 T_M_C；请检查矩阵后保存配置`);
+    showToast(`已按世界轴 ${order.split("").join("→")} 更新 T_M_C；请检查矩阵后保存并应用`);
   } catch (error) {
     showToast(error.message || "世界轴旋转应用失败", true);
   }
@@ -430,7 +570,7 @@ function suggestedSessionFilename() {
 }
 
 function openSessionModal(session) {
-  if (sessionModalDismissed || !session?.available || !session?.current_run) return;
+  if (sessionModalDismissed || session?.archived || !session?.available || !session?.current_run) return;
   $("#sessionFilename").textContent = suggestedSessionFilename();
   $("#sessionFileMeta").textContent = `${formatBytes(session.bytes)} · 临时会话已完成刷新`;
   $("#sessionModal").hidden = false;
@@ -438,6 +578,7 @@ function openSessionModal(session) {
 
 function updateInferenceStatus(status) {
   const inference = status.inference || {running:false};
+  latestInferenceStatus = inference;
   const session = status.pnp_session || {available:false};
   const stopButton = $("#stopInferenceButton");
   latestSessionStatus = session;
@@ -458,6 +599,46 @@ function updateInferenceStatus(status) {
   if (previousInferenceRunning === true && !inference.running) openSessionModal(session);
   else if (previousInferenceRunning === null && !inference.running) openSessionModal(session);
   previousInferenceRunning = inference.running;
+  updateStartButton();
+}
+
+async function startInference() {
+  if (JSON.stringify(config) !== JSON.stringify(savedConfig)) {
+    showToast("请先保存全部参数，再开始推理", true);
+    return;
+  }
+  inferenceStartPending = true;
+  updateStartButton(false);
+  let discardPreviousSession = false;
+  try {
+    while (true) {
+      const response = await fetch("/api/inference/start", {
+        method:"POST",
+        cache:"no-store",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({discard_previous_session:discardPreviousSession})
+      });
+      const result = await response.json();
+      if (response.status === 409 && result.requires_confirmation && !discardPreviousSession) {
+        const confirmed = window.confirm(`${result.error}\n\n确定开始新一轮并覆盖 AGX 上的临时会话吗？`);
+        if (!confirmed) return;
+        discardPreviousSession = true;
+        continue;
+      }
+      if (!response.ok) throw new Error(result.error || "启动推理失败");
+      $("#sessionModal").hidden = true;
+      sessionModalDismissed = false;
+      previewPairEtag = null;
+      showToast(result.message);
+      await refreshStatus();
+      return;
+    }
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    inferenceStartPending = false;
+    updateStartButton();
+  }
 }
 
 async function stopInferenceOrSave() {
@@ -526,7 +707,8 @@ async function loadCalibrationHistory() {
     const select = $("#calibrationHistorySelect");
     select.innerHTML = calibrationHistory.length ? calibrationHistory.map(entry => {
       const calibration = entry.calibration || {}, matrix = calibration.camera_matrix || [];
-      const summary = matrix.length === 9 ? `fx ${Number(matrix[0]).toFixed(2)} · fy ${Number(matrix[4]).toFixed(2)}` : "标定参数";
+      const pointCount = Array.isArray(calibration.model_keypoints_3d) ? calibration.model_keypoints_3d.length : 0;
+      const summary = matrix.length === 9 ? `fx ${Number(matrix[0]).toFixed(2)} · fy ${Number(matrix[4]).toFixed(2)} · ${pointCount} pts` : "标定参数";
       return `<option value="${entry.id}">${entry.saved_at} · ${summary}</option>`;
     }).join("") : '<option value="">暂无历史记录</option>';
     $("#loadCalibrationHistory").disabled = !calibrationHistory.length;
@@ -541,19 +723,37 @@ function applyCalibrationHistory() {
   const id = $("#calibrationHistorySelect").value;
   const entry = calibrationHistory.find(item => item.id === id);
   if (!entry?.calibration) return;
-  config.calibration = clone(entry.calibration);
+  const restored = clone(entry.calibration);
+  // Old history entries predate web-editable model points. Keep the currently
+  // Keep the current dynamic P0..Pn coordinates for legacy history entries.
+  if (!Array.isArray(restored.model_keypoints_3d)) {
+    restored.model_keypoints_3d = clone(savedConfig.calibration.model_keypoints_3d);
+  }
+  config.calibration = restored;
   bindConfig();
-  showToast(`已载入 ${entry.saved_at} 的标定参数；确认后请保存配置`);
+  showToast(`已载入 ${entry.saved_at} 的标定参数；确认后请保存并应用`);
 }
 
 async function refreshStatus() {
   try {
     const response = await fetch("/api/status", {cache:"no-store"}); if (!response.ok) throw new Error();
     const status = await response.json(); const liveA = setFrame("primary", status.frames.primary); const liveB = setFrame("secondary", status.frames.secondary);
+    runtimeConfigStatus = status.runtime_config?.runtime || null;
+    lastConfigApply = status.runtime_config?.last_save || lastConfigApply;
     updateInferenceStatus(status);
+    updateDirty();
     updateMocapNetworkStatus(status.mocap);
     $("#systemDot").classList.toggle("is-live", Boolean(status.inference?.running));
-    $("#systemText").textContent = status.inference?.running ? (liveA || liveB ? "推理运行中 · 图像流在线" : "推理运行中 · 等待图像") : "推理已停止 · 等待保存";
+    const hasCurrentSession = Boolean(status.pnp_session?.available && status.pnp_session?.current_run);
+    $("#systemText").textContent = status.inference?.running
+      ? (liveA || liveB ? "推理运行中 · 图像流在线" : "推理运行中 · 正在初始化")
+      : status.inference?.model_available === false
+      ? `模型不可用 · ${status.inference?.model?.message || "请检查 ONNX 路径"}`
+      : !status.inference?.available
+      ? "推理程序不可用"
+      : hasCurrentSession
+      ? "推理已停止 · 可保存或重新开始"
+      : "参数就绪 · 点击开始推理";
   } catch { $("#systemDot").classList.remove("is-live"); $("#systemText").textContent = "网页服务连接中断"; }
 }
 
@@ -935,23 +1135,34 @@ function renderOfflineSync(result) {
   $("#offlineSyncResult").hidden = !available;
   if (!available) return;
   const summary = result.summary;
-  $("#offlineCoverage").textContent = `${Number(summary.coverage_percent || 0).toFixed(1)}%`;
-  $("#offlineMatched").textContent = `${summary.matched_samples || 0} / ${summary.detection_samples || 0}`;
-  $("#offlineP95").textContent = summary.p95_abs_error_ms == null ? "--" : `${Number(summary.p95_abs_error_ms).toFixed(2)} ms`;
-  $("#offlineGeneratedAt").textContent = `${summary.generated_at || "报告已生成"} · 偏移 ${Number(summary.offset_ms || 0).toFixed(1)} ms`;
+  const reportUrls = result.report_urls || {};
+  const cameraOnly = Boolean(
+    result.camera_only || summary.report_mode === "camera_only" || !reportUrls.mocap
+  );
+  $("#offlineSyncResult").dataset.mode = cameraOnly ? "camera_only" : "synchronized";
+  $("#offlineCoverage").textContent = cameraOnly ? "--" : `${Number(summary.coverage_percent || 0).toFixed(1)}%`;
+  $("#offlineMatched").textContent = cameraOnly ? "仅相机" : `${summary.matched_samples || 0} / ${summary.detection_samples || 0}`;
+  $("#offlineP95").textContent = cameraOnly || summary.p95_abs_error_ms == null ? "--" : `${Number(summary.p95_abs_error_ms).toFixed(2)} ms`;
+  const modeMessage = summary.report_message || (cameraOnly ? "仅相机检测报告已生成" : "三张同步报告已生成");
+  $("#offlineGeneratedAt").textContent = `${summary.generated_at || "报告已生成"} · ${modeMessage}${cameraOnly ? "" : ` · 偏移 ${Number(summary.offset_ms || 0).toFixed(1)} ms`}`;
   const cacheKey = summary.generated_unix_ns || Date.now();
-  const reportUrls = result.report_urls || {
-    camera: "/api/sync/offline/report/camera.svg",
-    mocap: "/api/sync/offline/report/mocap.svg",
-    composite: result.report_url || "/api/sync/offline/report.svg",
-  };
   for (const [mode, prefix] of [["camera", "camera"], ["mocap", "mocap"], ["composite", "composite"]]) {
-    const reportUrl = `${reportUrls[mode]}?v=${cacheKey}`;
-    $(`#${prefix}ReportImage`).src = reportUrl;
+    const card = $(`.offline-report-card[data-source="${mode}"]`);
+    const rawUrl = reportUrls[mode];
+    card.hidden = !rawUrl;
+    const image = $(`#${prefix}ReportImage`);
+    if (!rawUrl) {
+      image.removeAttribute("src");
+      continue;
+    }
+    const reportUrl = `${rawUrl}?v=${cacheKey}`;
+    image.src = reportUrl;
     $(`#${prefix}ReportLink`).href = reportUrl;
     $(`#open${prefix[0].toUpperCase()}${prefix.slice(1)}Report`).href = reportUrl;
   }
-  $("#downloadSyncedCsv").href = result.csv_url || "/api/sync/offline/download.csv";
+  const csvLink = $("#downloadSyncedCsv");
+  csvLink.hidden = cameraOnly;
+  csvLink.href = result.csv_url || "/api/sync/offline/download.csv";
 }
 
 async function estimateOffset() {
@@ -1004,7 +1215,9 @@ async function generateOfflineSync() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "离线同步报告生成失败");
     renderOfflineSync(result);
-    showToast("同步 CSV 与相机、动捕、合成三张六轴图已生成");
+    showToast(result.summary?.report_mode === "camera_only"
+      ? (result.summary.report_message || "相机检测六轴 PNG 已生成")
+      : "同步 CSV 与相机、动捕、合成三张六轴图已生成");
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -1061,10 +1274,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   $$('input[name="world-rotation-order"]').forEach(control => control.addEventListener("change", renderWorldRotationOrder));
   renderWorldRotationOrder();
   $("#loadCalibrationHistory").addEventListener("click", applyCalibrationHistory);
+  $("#addModelKeypoint").addEventListener("click", addModelKeypoint);
   $$('input[name="mocap-target-mode"]').forEach(control => control.addEventListener("change", () => changeMocapTargetMode(control.value)));
   $("#mocapTargetValue").addEventListener("input", updateMocapTargetEditor);
   $("#mocapDiscoveredBodies").addEventListener("change", selectDiscoveredMocapBody);
   $("#applyMocapTarget").addEventListener("click", applyMocapTarget);
+  $("#startInferenceButton").addEventListener("click", startInference);
   $("#stopInferenceButton").addEventListener("click", stopInferenceOrSave);
   $("#saveSessionButton").addEventListener("click", savePnpSession);
   $("#saveSessionLater").addEventListener("click", () => { $("#sessionModal").hidden = true; sessionModalDismissed = true; });

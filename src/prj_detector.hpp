@@ -14,6 +14,8 @@
 #include <thread>
 #include <queue>
 #include <memory>
+#include <cstdint>
+#include <string>
 #include "IRcamera/IRcamera.h"
 
 using namespace std;
@@ -21,9 +23,11 @@ using namespace std;
 class prj_v8detector
 {
 public:
-    prj_v8detector(string onnxPath, logger::Level level, model::Params params, prj_params p_params);
+    prj_v8detector(string onnxPath, logger::Level level, model::Params params,
+                   prj_params p_params, const std::string &config_path);
     ~prj_v8detector();
     void run();
+    bool ready() const { return _ready; }
     void request_stop();
     void camera();
     void detect_camera_loop();
@@ -33,6 +37,22 @@ public:
     void udp_loop();
 
 private:
+    struct ConfigFileStamp
+    {
+        uint64_t modified_ns = 0;
+        uint64_t size = 0;
+        uint64_t inode = 0;
+        bool valid = false;
+    };
+
+    void maybe_reload_runtime_config();
+    bool read_config_file_stamp(ConfigFileStamp &stamp) const;
+    void write_runtime_config_status(const ConfigFileStamp &stamp,
+                                     const std::string &result,
+                                     const std::string &message,
+                                     bool calibration_changed,
+                                     bool restart_required);
+
     shared_ptr<thread::Worker> _worker;
     std::unique_ptr<IRCamera> _ir_camera_detect;
     std::unique_ptr<IRCamera> _ir_camera_photo;
@@ -76,9 +96,15 @@ private:
     std::condition_variable _udp_cv;
 
     std::atomic<bool> _is_running;
+    bool _ready = false;
 
     client _client;
     prj_params _project_params;
+    std::string _config_path;
+    std::string _runtime_config_status_path;
+    ConfigFileStamp _last_config_stamp;
+    std::chrono::steady_clock::time_point _next_config_check;
+    uint64_t _calibration_revision = 1;
 };
 
 #endif // PRJ_DETECTOR_HPP

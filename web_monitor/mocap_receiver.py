@@ -489,16 +489,11 @@ class MocapReceiver:
         workspace_bridge = (
             project_root / "web_monitor" / "mocap" / "bin" / "MocapBridge"
         )
-        external_bridge = Path(
-            "/home/wts/getViedo/XING_Linux/bin/MocapBridge"
-        )
         environment_bridge = os.environ.get("CVIA_MOCAP_BRIDGE", "").strip()
         if environment_bridge:
             self.bridge_path = Path(environment_bridge).expanduser()
         elif workspace_bridge.is_file():
             self.bridge_path = workspace_bridge
-        elif external_bridge.is_file():
-            self.bridge_path = external_bridge
         else:
             self.bridge_path = workspace_bridge
 
@@ -773,6 +768,9 @@ class MocapReceiver:
                     self._last_error = line[-500:]
 
     def snapshot(self) -> dict:
+        # Explicit initialization also keeps ahead-of-time native compilers from
+        # conservatively treating this local as possibly uninitialized.
+        history_samples = 0
         with self._lock:
             connection = self._connection
             sdk_version = self._sdk_version

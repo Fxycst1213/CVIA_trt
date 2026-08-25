@@ -1,4 +1,4 @@
-"""Offline visual/mocap pairing and dependency-free SVG report generation."""
+"""Offline visual/mocap pairing and dependency-free SVG/PNG report generation."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import csv
 import io
 import json
 import math
+import struct
+import zlib
 from dataclasses import dataclass, replace
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -16,6 +18,7 @@ from mocap_receiver import (
     MocapTimeline,
     align_mocap_poses,
     pose_validity,
+    quaternion_to_euler_xyz_degrees,
 )
 
 
@@ -25,6 +28,7 @@ SYNCED_COLUMNS = (
     "visual_capture_timestamp_ns",
     "visual_publish_timestamp_ns",
     "visual_pipeline_latency_ms",
+    "visual_interpolated",
     "visual_x",
     "visual_y",
     "visual_z",
@@ -45,6 +49,7 @@ SYNCED_COLUMNS = (
 )
 
 MOCAP_COORDINATE_FRAME = "mocap"
+CAMERA_REPORT_HZ = 300.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,7 @@ class DetectionPose:
     capture_timestamp_ns: int = 0
     publish_timestamp_ns: int = 0
     coordinate_frame: str = MOCAP_COORDINATE_FRAME
+    interpolated: bool = False
 
     @property
     def effective_timestamp_ns(self) -> int:
@@ -219,6 +225,253 @@ def _quaternion_angular_distance(
     second = _normalize_quaternion(second)
     dot = abs(sum(a * b for a, b in zip(first, second)))
     return 2 * math.acos(min(1.0, max(-1.0, dot)))
+
+
+def stabilize_detection_poses(
+    poses: list[DetectionPose],
+) -> tuple[list[DetectionPose], int]:
+    """Reject isolated SE(3) jumps while allowing persistent reacquisition.
+
+    This mirrors the runtime gate so reports created from older CSV sessions do
+    not connect one-frame SQPnP branch flips into physically impossible spikes.
+    A genuinely relocated target is accepted after three mutually consistent
+    candidates instead of being rejected forever.
+    """
+    ordered = sorted(poses, key=lambda pose: pose.effective_timestamp_ns)
+    if not ordered:
+        return [], 0
+
+    accepted = ordered[0]
+    stable = [accepted]
+    pending: DetectionPose | None = None
+    pending_count = 0
+    rejected = 0
+
+    def deltas(first: DetectionPose, second: DetectionPose) -> tuple[float, float]:
+        position = math.sqrt(
+            (second.x - first.x) ** 2
+            + (second.y - first.y) ** 2
+            + (second.z - first.z) ** 2
+        )
+        rotation = math.degrees(_quaternion_angular_distance(
+            _euler_xyz_degrees_to_quaternion(first.rx, first.ry, first.rz),
+            _euler_xyz_degrees_to_quaternion(second.rx, second.ry, second.rz),
+        ))
+        return position, rotation
+
+    def elapsed_seconds(first: DetectionPose, second: DetectionPose) -> float:
+        elapsed = (second.effective_timestamp_ns - first.effective_timestamp_ns) / 1e9
+        return max(0.001, min(elapsed, 1.5))
+
+    for pose in ordered[1:]:
+        dt = elapsed_seconds(accepted, pose)
+        position_delta, rotation_delta = deltas(accepted, pose)
+        continuous = (
+            position_delta <= 60.0 + 140.0 * dt
+            and rotation_delta <= 12.0 + 30.0 * dt
+        )
+        if continuous:
+            stable.append(pose)
+            accepted = pose
+            pending = None
+            pending_count = 0
+            continue
+
+        agrees_with_pending = False
+        if pending is not None:
+            pending_dt = elapsed_seconds(pending, pose)
+            pending_position, pending_rotation = deltas(pending, pose)
+            agrees_with_pending = (
+                pending_position <= 100.0 + 300.0 * pending_dt
+                and pending_rotation <= 20.0 + 90.0 * pending_dt
+            )
+        pending_count = pending_count + 1 if agrees_with_pending else 1
+        pending = pose
+        if pending_count >= 3:
+            stable.append(pose)
+            accepted = pose
+            pending = None
+            pending_count = 0
+        else:
+            rejected += 1
+    return stable, rejected
+
+
+def _slerp_quaternions(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+    alpha: float,
+) -> tuple[float, float, float, float]:
+    first = _normalize_quaternion(first)
+    second = _normalize_quaternion(second)
+    dot = sum(a * b for a, b in zip(first, second))
+    if dot < 0.0:
+        second = tuple(-value for value in second)
+        dot = -dot
+    dot = min(1.0, max(-1.0, dot))
+    if dot > 0.9995:
+        return _normalize_quaternion(tuple(
+            a + alpha * (b - a) for a, b in zip(first, second)
+        ))
+    theta = math.acos(dot)
+    sin_theta = math.sin(theta)
+    first_weight = math.sin((1.0 - alpha) * theta) / sin_theta
+    second_weight = math.sin(alpha * theta) / sin_theta
+    return tuple(
+        first_weight * a + second_weight * b
+        for a, b in zip(first, second)
+    )
+
+
+def interpolate_detection_pose_outliers(
+    poses: list[DetectionPose],
+) -> tuple[list[DetectionPose], dict[str, int]]:
+    """Repair bounded rejected runs from their trusted temporal neighbours."""
+    ordered = sorted(poses, key=lambda pose: pose.effective_timestamp_ns)
+    stable, _ = stabilize_detection_poses(ordered)
+    accepted_ids = {id(pose) for pose in stable}
+    repaired: list[DetectionPose] = []
+    interpolated_count = 0
+    dropped_count = 0
+    index = 0
+    while index < len(ordered):
+        pose = ordered[index]
+        if id(pose) in accepted_ids:
+            repaired.append(pose)
+            index += 1
+            continue
+
+        run_start = index
+        while index < len(ordered) and id(ordered[index]) not in accepted_ids:
+            index += 1
+        run_end = index
+        previous = ordered[run_start - 1] if run_start > 0 else None
+        following = ordered[run_end] if run_end < len(ordered) else None
+        if (
+            previous is None
+            or following is None
+            or id(previous) not in accepted_ids
+            or id(following) not in accepted_ids
+            or following.effective_timestamp_ns <= previous.effective_timestamp_ns
+        ):
+            dropped_count += run_end - run_start
+            continue
+
+        first_quaternion = _euler_xyz_degrees_to_quaternion(
+            previous.rx, previous.ry, previous.rz
+        )
+        second_quaternion = _euler_xyz_degrees_to_quaternion(
+            following.rx, following.ry, following.rz
+        )
+        duration_ns = following.effective_timestamp_ns - previous.effective_timestamp_ns
+        for rejected_pose in ordered[run_start:run_end]:
+            alpha = (
+                rejected_pose.effective_timestamp_ns - previous.effective_timestamp_ns
+            ) / duration_ns
+            alpha = min(1.0, max(0.0, alpha))
+            quaternion = _slerp_quaternions(
+                first_quaternion, second_quaternion, alpha
+            )
+            rx, ry, rz = quaternion_to_euler_xyz_degrees(*quaternion)
+            repaired.append(replace(
+                rejected_pose,
+                x=previous.x + (following.x - previous.x) * alpha,
+                y=previous.y + (following.y - previous.y) * alpha,
+                z=previous.z + (following.z - previous.z) * alpha,
+                rx=rx,
+                ry=ry,
+                rz=rz,
+                interpolated=True,
+            ))
+            interpolated_count += 1
+    repaired.sort(key=lambda pose: pose.effective_timestamp_ns)
+    return repaired, {
+        "interpolated": interpolated_count,
+        "dropped": dropped_count,
+        "flagged": len(ordered) - len(stable),
+    }
+
+
+def resample_detection_poses(
+    poses: list[DetectionPose],
+    *,
+    target_hz: float = 300.0,
+    max_samples: int = 1_000_000,
+) -> list[DetectionPose]:
+    """Resample camera poses on a uniform report-only SE(3) timeline.
+
+    Translation is linear in capture time and rotation uses quaternion SLERP.
+    Source samples that coincide with the uniform grid are retained unchanged.
+    The result is used only for synchronization and plotting; the persisted
+    detection CSV remains the original camera-rate measurement stream.
+    """
+    if not math.isfinite(target_hz) or not 1.0 <= target_hz <= 1_000.0:
+        raise ValueError("绘图重采样频率必须在 1～1000 Hz")
+    if max_samples < 2:
+        raise ValueError("绘图重采样最大点数必须至少为 2")
+
+    ordered: list[DetectionPose] = []
+    for pose in sorted(poses, key=lambda item: item.effective_timestamp_ns):
+        if ordered and pose.effective_timestamp_ns == ordered[-1].effective_timestamp_ns:
+            ordered[-1] = pose
+        else:
+            ordered.append(pose)
+    if len(ordered) < 2:
+        return ordered
+
+    start_ns = ordered[0].effective_timestamp_ns
+    end_ns = ordered[-1].effective_timestamp_ns
+    duration_ns = end_ns - start_ns
+    interval_count = int(math.floor(duration_ns * target_hz / 1_000_000_000))
+    sample_times = [
+        start_ns + round(index * 1_000_000_000 / target_hz)
+        for index in range(interval_count + 1)
+    ]
+    if sample_times[-1] < end_ns:
+        sample_times.append(end_ns)
+    else:
+        sample_times[-1] = end_ns
+    if len(sample_times) > max_samples:
+        raise ValueError(
+            f"300 Hz 绘图需要 {len(sample_times)} 个插值点，超过安全上限 {max_samples}；"
+            "请缩短会话后重试"
+        )
+
+    result: list[DetectionPose] = []
+    source_index = 0
+    for timestamp_ns in sample_times:
+        while (
+            source_index + 1 < len(ordered)
+            and ordered[source_index + 1].effective_timestamp_ns <= timestamp_ns
+        ):
+            source_index += 1
+        previous = ordered[source_index]
+        if previous.effective_timestamp_ns == timestamp_ns or source_index + 1 >= len(ordered):
+            result.append(previous)
+            continue
+        following = ordered[source_index + 1]
+        span_ns = following.effective_timestamp_ns - previous.effective_timestamp_ns
+        alpha = (timestamp_ns - previous.effective_timestamp_ns) / span_ns
+        quaternion = _slerp_quaternions(
+            _euler_xyz_degrees_to_quaternion(previous.rx, previous.ry, previous.rz),
+            _euler_xyz_degrees_to_quaternion(following.rx, following.ry, following.rz),
+            alpha,
+        )
+        rx, ry, rz = quaternion_to_euler_xyz_degrees(*quaternion)
+        result.append(DetectionPose(
+            timestamp_ms=round(timestamp_ns / 1_000_000),
+            capture_timestamp_ns=timestamp_ns,
+            publish_timestamp_ns=0,
+            coordinate_frame=previous.coordinate_frame,
+            x=previous.x + (following.x - previous.x) * alpha,
+            y=previous.y + (following.y - previous.y) * alpha,
+            z=previous.z + (following.z - previous.z) * alpha,
+            rx=rx,
+            ry=ry,
+            rz=rz,
+            interpolated=True,
+        ))
+    return result
 
 
 def _moving_average(values: list[float], radius: int = 2) -> tuple[float, ...]:
@@ -499,6 +752,7 @@ def synchronize(
                 if detection.publish_timestamp_ns >= detection.effective_timestamp_ns
                 and detection.publish_timestamp_ns > 0 else ""
             ),
+            "visual_interpolated": int(detection.interpolated),
             "visual_x": detection.x,
             "visual_y": detection.y,
             "visual_z": detection.z,
@@ -632,6 +886,58 @@ def _finite_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _nearest_equivalent_angle(angle: float, reference: float) -> float:
+    return angle + 360.0 * round((reference - angle) / 360.0)
+
+
+def _nearest_equivalent_euler(
+    raw: tuple[float, float, float],
+    previous: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    candidates = (
+        raw,
+        (raw[0] + 180.0, 180.0 - raw[1], raw[2] + 180.0),
+    )
+    expanded = [
+        tuple(_nearest_equivalent_angle(value, reference)
+              for value, reference in zip(candidate, previous))
+        for candidate in candidates
+    ]
+    return min(
+        expanded,
+        key=lambda candidate: sum(
+            (value - reference) ** 2
+            for value, reference in zip(candidate, previous)
+        ),
+    )
+
+
+def continuous_euler_rows(rows: list[dict]) -> list[dict]:
+    """Use the nearest equivalent XYZ Euler representation for plotting."""
+    states: dict[str, tuple[float, float, float]] = {}
+    result = []
+    for source_row in rows:
+        row = dict(source_row)
+        for prefix in ("visual", "mocap"):
+            values = tuple(
+                _finite_number(row.get(f"{prefix}_{axis}"))
+                for axis in ("rx", "ry", "rz")
+            )
+            if any(value is None for value in values):
+                continue
+            raw = tuple(float(value) for value in values)
+            continuous = (
+                _nearest_equivalent_euler(raw, states[prefix])
+                if prefix in states
+                else raw
+            )
+            for axis, value in zip(("rx", "ry", "rz"), continuous):
+                row[f"{prefix}_{axis}"] = value
+            states[prefix] = continuous
+        result.append(row)
+    return result
+
+
 def _polyline_segments(
     rows: list[dict],
     key: str,
@@ -644,12 +950,36 @@ def _polyline_segments(
     time_max_ns: int,
     value_min: float,
     value_max: float,
+    break_on_time_gap: bool = True,
 ) -> list[str]:
-    """Build separate SVG polylines without bridging missing mocap intervals."""
+    """Build SVG polylines, optionally preserving real source outages.
+
+    Visual poses can be intentionally sparse (for example, a folder containing
+    only a dozen test images). Connecting two measured visual poses is the
+    report's piecewise-linear interpolation and must not be confused with a
+    missing sample. Mocap values remain discontinuous across unmatched
+    intervals so the report never invents tracking data.
+    """
     time_span = max(1, time_max_ns - time_min_ns)
     value_span = max(1e-12, value_max - value_min)
     segments: list[str] = []
     points: list[str] = []
+    valid_timestamps = []
+    for row in rows:
+        if _finite_number(row.get(key)) is None:
+            continue
+        try:
+            valid_timestamps.append(int(row.get("visual_capture_timestamp_ns")))
+        except (TypeError, ValueError):
+            pass
+    gaps = sorted(
+        current - previous
+        for previous, current in zip(valid_timestamps, valid_timestamps[1:])
+        if current > previous
+    )
+    median_gap = gaps[len(gaps) // 2] if gaps else 0
+    gap_limit_ns = max(100_000_000, median_gap * 3) if median_gap else None
+    previous_timestamp_ns = None
     for row in rows:
         value = _finite_number(row.get(key))
         try:
@@ -661,12 +991,311 @@ def _polyline_segments(
                 segments.append(" ".join(points))
                 points = []
             continue
+        if (break_on_time_gap and previous_timestamp_ns is not None and
+                gap_limit_ns is not None and
+                timestamp_ns - previous_timestamp_ns > gap_limit_ns):
+            if points:
+                segments.append(" ".join(points))
+                points = []
         x = x0 + (timestamp_ns - time_min_ns) / time_span * width
         y = y0 + height - (value - value_min) / value_span * height
         points.append(f"{x:.2f},{y:.2f}")
+        previous_timestamp_ns = timestamp_ns
     if points:
         segments.append(" ".join(points))
     return segments
+
+
+_FONT_5X7 = {
+    " ": ("00000",) * 7,
+    "A": ("01110","10001","10001","11111","10001","10001","10001"),
+    "B": ("11110","10001","10001","11110","10001","10001","11110"),
+    "C": ("01111","10000","10000","10000","10000","10000","01111"),
+    "D": ("11110","10001","10001","10001","10001","10001","11110"),
+    "E": ("11111","10000","10000","11110","10000","10000","11111"),
+    "F": ("11111","10000","10000","11110","10000","10000","10000"),
+    "G": ("01111","10000","10000","10111","10001","10001","01111"),
+    "H": ("10001","10001","10001","11111","10001","10001","10001"),
+    "I": ("11111","00100","00100","00100","00100","00100","11111"),
+    "J": ("00111","00010","00010","00010","10010","10010","01100"),
+    "K": ("10001","10010","10100","11000","10100","10010","10001"),
+    "L": ("10000","10000","10000","10000","10000","10000","11111"),
+    "M": ("10001","11011","10101","10101","10001","10001","10001"),
+    "N": ("10001","11001","10101","10011","10001","10001","10001"),
+    "O": ("01110","10001","10001","10001","10001","10001","01110"),
+    "P": ("11110","10001","10001","11110","10000","10000","10000"),
+    "Q": ("01110","10001","10001","10001","10101","10010","01101"),
+    "R": ("11110","10001","10001","11110","10100","10010","10001"),
+    "S": ("01111","10000","10000","01110","00001","00001","11110"),
+    "T": ("11111","00100","00100","00100","00100","00100","00100"),
+    "U": ("10001","10001","10001","10001","10001","10001","01110"),
+    "V": ("10001","10001","10001","10001","10001","01010","00100"),
+    "W": ("10001","10001","10001","10101","10101","10101","01010"),
+    "X": ("10001","10001","01010","00100","01010","10001","10001"),
+    "Y": ("10001","10001","01010","00100","00100","00100","00100"),
+    "Z": ("11111","00001","00010","00100","01000","10000","11111"),
+    "0": ("01110","10001","10011","10101","11001","10001","01110"),
+    "1": ("00100","01100","00100","00100","00100","00100","01110"),
+    "2": ("01110","10001","00001","00010","00100","01000","11111"),
+    "3": ("11110","00001","00001","01110","00001","00001","11110"),
+    "4": ("00010","00110","01010","10010","11111","00010","00010"),
+    "5": ("11111","10000","10000","11110","00001","00001","11110"),
+    "6": ("01110","10000","10000","11110","10001","10001","01110"),
+    "7": ("11111","00001","00010","00100","01000","01000","01000"),
+    "8": ("01110","10001","10001","01110","10001","10001","01110"),
+    "9": ("01110","10001","10001","01111","00001","00001","01110"),
+    ".": ("00000","00000","00000","00000","00000","00110","00110"),
+    ",": ("00000","00000","00000","00000","00110","00100","01000"),
+    ":": ("00000","00110","00110","00000","00110","00110","00000"),
+    "+": ("00000","00100","00100","11111","00100","00100","00000"),
+    "-": ("00000","00000","00000","11111","00000","00000","00000"),
+    "/": ("00001","00010","00010","00100","01000","01000","10000"),
+    "%": ("11001","11010","00100","01000","10110","00110","00000"),
+    "(": ("00010","00100","01000","01000","01000","00100","00010"),
+    ")": ("01000","00100","00010","00010","00010","00100","01000"),
+    "=": ("00000","11111","00000","11111","00000","00000","00000"),
+    "_": ("00000","00000","00000","00000","00000","00000","11111"),
+    "?": ("01110","10001","00001","00010","00100","00000","00100"),
+}
+
+
+class _RasterCanvas:
+    """Small RGB canvas used to keep customer PNG generation dependency-free."""
+
+    def __init__(self, width: int, height: int, background: tuple[int, int, int]):
+        self.width = width
+        self.height = height
+        self.pixels = bytearray(bytes(background) * width * height)
+
+    def fill_rect(self, x: int, y: int, width: int, height: int,
+                  color: tuple[int, int, int]) -> None:
+        left, top = max(0, x), max(0, y)
+        right, bottom = min(self.width, x + width), min(self.height, y + height)
+        if left >= right or top >= bottom:
+            return
+        row = bytes(color) * (right - left)
+        for py in range(top, bottom):
+            start = (py * self.width + left) * 3
+            self.pixels[start:start + len(row)] = row
+
+    def line(self, x0: float, y0: float, x1: float, y1: float,
+             color: tuple[int, int, int], thickness: int = 1) -> None:
+        x0i, y0i, x1i, y1i = map(lambda value: int(round(value)), (x0, y0, x1, y1))
+        dx, dy = abs(x1i - x0i), -abs(y1i - y0i)
+        step_x = 1 if x0i < x1i else -1
+        step_y = 1 if y0i < y1i else -1
+        error = dx + dy
+        radius = max(0, thickness // 2)
+        while True:
+            self.fill_rect(x0i - radius, y0i - radius,
+                           max(1, thickness), max(1, thickness), color)
+            if x0i == x1i and y0i == y1i:
+                break
+            doubled = 2 * error
+            if doubled >= dy:
+                error += dy
+                x0i += step_x
+            if doubled <= dx:
+                error += dx
+                y0i += step_y
+
+    def polyline(self, points: list[tuple[float, float]],
+                 color: tuple[int, int, int], thickness: int = 2) -> None:
+        for start, end in zip(points, points[1:]):
+            self.line(start[0], start[1], end[0], end[1], color, thickness)
+
+    def text(self, x: int, y: int, value: str, color: tuple[int, int, int],
+             scale: int = 1) -> None:
+        cursor = x
+        for character in value.upper():
+            glyph = _FONT_5X7.get(character, _FONT_5X7["?"])
+            for row_index, row in enumerate(glyph):
+                for column_index, bit in enumerate(row):
+                    if bit == "1":
+                        self.fill_rect(cursor + column_index * scale,
+                                       y + row_index * scale,
+                                       scale, scale, color)
+            cursor += 6 * scale
+
+    @staticmethod
+    def _chunk(kind: bytes, payload: bytes) -> bytes:
+        checksum = zlib.crc32(kind)
+        checksum = zlib.crc32(payload, checksum) & 0xFFFFFFFF
+        return struct.pack("!I", len(payload)) + kind + payload + struct.pack("!I", checksum)
+
+    def png(self) -> bytes:
+        stride = self.width * 3
+        raw = b"".join(
+            b"\x00" + self.pixels[offset:offset + stride]
+            for offset in range(0, len(self.pixels), stride)
+        )
+        header = struct.pack("!IIBBBBB", self.width, self.height, 8, 2, 0, 0, 0)
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + self._chunk(b"IHDR", header)
+            + self._chunk(b"IDAT", zlib.compress(raw, 6))
+            + self._chunk(b"IEND", b"")
+        )
+
+
+def _numeric_segments(rows: list[dict], key: str, *, x0: float, y0: float,
+                      width: float, height: float, time_min_ns: int,
+                      time_max_ns: int, value_min: float,
+                      value_max: float,
+                      break_on_time_gap: bool = True
+                      ) -> list[list[tuple[float, float]]]:
+    time_span = max(1, time_max_ns - time_min_ns)
+    value_span = max(1e-12, value_max - value_min)
+    segments: list[list[tuple[float, float]]] = []
+    points: list[tuple[float, float]] = []
+    valid_timestamps = []
+    for row in rows:
+        if _finite_number(row.get(key)) is None:
+            continue
+        try:
+            valid_timestamps.append(int(row.get("visual_capture_timestamp_ns")))
+        except (TypeError, ValueError):
+            pass
+    gaps = sorted(
+        current - previous
+        for previous, current in zip(valid_timestamps, valid_timestamps[1:])
+        if current > previous
+    )
+    median_gap = gaps[len(gaps) // 2] if gaps else 0
+    gap_limit_ns = max(100_000_000, median_gap * 3) if median_gap else None
+    previous_timestamp_ns = None
+    for row in rows:
+        value = _finite_number(row.get(key))
+        try:
+            timestamp_ns = int(row.get("visual_capture_timestamp_ns"))
+        except (TypeError, ValueError):
+            timestamp_ns = None
+        if value is None or timestamp_ns is None:
+            if points:
+                segments.append(points)
+                points = []
+            continue
+        if (break_on_time_gap and previous_timestamp_ns is not None and
+                gap_limit_ns is not None and
+                timestamp_ns - previous_timestamp_ns > gap_limit_ns):
+            if points:
+                segments.append(points)
+                points = []
+        points.append((
+            x0 + (timestamp_ns - time_min_ns) / time_span * width,
+            y0 + height - (value - value_min) / value_span * height,
+        ))
+        previous_timestamp_ns = timestamp_ns
+    if points:
+        segments.append(points)
+    return segments
+
+
+def report_png(rows: list[dict], summary: dict, *, mode: str = "composite") -> bytes:
+    """Render a real 1200x990 RGB PNG without optional plotting packages."""
+    modes = {
+        "camera": ("CVIA / CAMERA-DERIVED POSE / MOCAP FRAME", True, False),
+        "mocap": ("CVIA / MOCAP-NATIVE POSE / MOCAP FRAME", False, True),
+        "composite": ("CVIA / TEMPORAL COMPOSITE / MOCAP FRAME", True, True),
+    }
+    if mode not in modes:
+        raise ValueError(f"未知离线报告模式：{mode}")
+    title, show_vision, show_mocap = modes[mode]
+    canvas = _RasterCanvas(1200, 990, (7, 17, 20))
+    colors = {
+        "panel": (9, 22, 26), "frame": (43, 65, 72), "grid": (32, 52, 58),
+        "title": (219, 231, 233), "label": (184, 200, 204),
+        "muted": (96, 118, 125), "vision": (101, 215, 228),
+        "mocap": (157, 140, 242),
+    }
+    sampled = continuous_euler_rows(_sample_rows(rows))
+    time_min_ns = int(summary.get("start_capture_timestamp_ns") or 0)
+    time_max_ns = int(summary.get("end_capture_timestamp_ns") or time_min_ns + 1)
+    duration = max(0.0, (time_max_ns - time_min_ns) / 1_000_000_000)
+    canvas.text(48, 35, title, colors["title"], 2)
+    metrics = (
+        f'SAMPLES {summary.get("detection_samples", 0)}  REPAIRED '
+        f'{summary.get("interpolated_pose_outliers", 0)}  DROPPED '
+        f'{summary.get("unrecoverable_pose_outliers", 0)}  MATCHED '
+        f'{summary.get("matched_samples", 0)}  COVERAGE '
+        f'{float(summary.get("coverage_percent", 0)):.1f}%  DURATION {duration:.2f} S'
+    )
+    canvas.text(48, 67, metrics, colors["muted"])
+    canvas.text(48, 88,
+                f'OFFSET {float(summary.get("offset_ms", 0)):+.1f} MS  '
+                'TIME ZERO = FIRST VALID CAMERA POSE  '
+                f'PLOT {float(summary.get("camera_plot_hz", 0)):.0f} HZ / '
+                f'{summary.get("camera_plot_samples", 0)} PTS', colors["muted"])
+    legend_x = 790
+    if show_vision:
+        canvas.line(legend_x, 49, legend_x + 34, 49, colors["vision"], 2)
+        canvas.text(legend_x + 44, 45, "PNP / T_M_C", colors["muted"])
+        legend_x += 190
+    if show_mocap:
+        canvas.line(legend_x, 49, legend_x + 34, 49, colors["mocap"], 2)
+        canvas.text(legend_x + 44, 45, "NOKOV / NATIVE M", colors["muted"])
+
+    axes = (
+        ("X", "visual_x", "mocap_x", "MOCAP FRAME / MM"),
+        ("RX", "visual_rx", "mocap_rx", "MOCAP FRAME / DEG"),
+        ("Y", "visual_y", "mocap_y", "MOCAP FRAME / MM"),
+        ("RY", "visual_ry", "mocap_ry", "MOCAP FRAME / DEG"),
+        ("Z", "visual_z", "mocap_z", "MOCAP FRAME / MM"),
+        ("RZ", "visual_rz", "mocap_rz", "MOCAP FRAME / DEG"),
+    )
+    panel_width, panel_height = 540, 260
+    for index, (label, visual_key, mocap_key, unit) in enumerate(axes):
+        column, row_index = index % 2, index // 2
+        panel_x, panel_y = 40 + column * 575, 125 + row_index * 285
+        plot_x, plot_y = panel_x + 56, panel_y + 42
+        plot_width, plot_height = panel_width - 76, panel_height - 76
+        canvas.fill_rect(panel_x, panel_y, panel_width, panel_height, colors["panel"])
+        canvas.line(panel_x, panel_y, panel_x + panel_width, panel_y, colors["frame"])
+        canvas.line(panel_x, panel_y + panel_height, panel_x + panel_width,
+                    panel_y + panel_height, colors["frame"])
+        canvas.line(panel_x, panel_y, panel_x, panel_y + panel_height, colors["frame"])
+        canvas.line(panel_x + panel_width, panel_y, panel_x + panel_width,
+                    panel_y + panel_height, colors["frame"])
+        canvas.text(panel_x + 16, panel_y + 14, label, colors["label"], 2)
+        canvas.text(panel_x + 62, panel_y + 18, unit, colors["muted"])
+        visible_keys = ([visual_key] if show_vision else []) + ([mocap_key] if show_mocap else [])
+        values = [number for row in sampled for key in visible_keys
+                  if (number := _finite_number(row.get(key))) is not None]
+        if values:
+            value_min, value_max = min(values), max(values)
+            padding = max((value_max - value_min) * 0.08, 1e-6)
+            value_min -= padding
+            value_max += padding
+        else:
+            value_min, value_max = -1.0, 1.0
+        for grid_index in range(5):
+            grid_y = plot_y + plot_height * grid_index / 4
+            grid_x = plot_x + plot_width * grid_index / 4
+            grid_value = value_max - (value_max - value_min) * grid_index / 4
+            canvas.line(plot_x, grid_y, plot_x + plot_width, grid_y, colors["grid"])
+            canvas.line(grid_x, plot_y, grid_x, plot_y + plot_height, colors["grid"])
+            canvas.text(panel_x + 4, int(grid_y) - 3, f"{grid_value:.3G}", colors["muted"])
+            canvas.text(int(grid_x) - 12, int(plot_y + plot_height + 10),
+                        f"{duration * grid_index / 4:.2F}S", colors["muted"])
+        rendered = 0
+        for enabled, key, color in (
+            (show_vision, visual_key, colors["vision"]),
+            (show_mocap, mocap_key, colors["mocap"]),
+        ):
+            if not enabled:
+                continue
+            segments = _numeric_segments(
+                sampled, key, x0=plot_x, y0=plot_y, width=plot_width,
+                height=plot_height, time_min_ns=time_min_ns,
+                time_max_ns=time_max_ns, value_min=value_min, value_max=value_max,
+                break_on_time_gap=key.startswith("mocap_"),
+            )
+            for points in segments:
+                canvas.polyline(points, color, 2)
+            rendered += len(segments)
+        if rendered == 0:
+            canvas.text(plot_x + 120, plot_y + 88, "NO VALID SAMPLES", colors["muted"])
+    return canvas.png()
 
 
 def report_svg(rows: list[dict], summary: dict, *, mode: str = "composite") -> str:
@@ -698,7 +1327,7 @@ def report_svg(rows: list[dict], summary: dict, *, mode: str = "composite") -> s
         raise ValueError(f"未知离线报告模式：{mode}")
     report = report_modes[mode]
     width, height = 1200, 990
-    sampled = _sample_rows(rows)
+    sampled = continuous_euler_rows(_sample_rows(rows))
     time_min_ns = summary.get("start_capture_timestamp_ns") or 0
     time_max_ns = summary.get("end_capture_timestamp_ns") or time_min_ns + 1
     duration = max(0.0, (time_max_ns - time_min_ns) / 1_000_000_000)
@@ -727,6 +1356,8 @@ def report_svg(rows: list[dict], summary: dict, *, mode: str = "composite") -> s
     if mode == "camera":
         metrics = (
             f'visual samples {summary["detection_samples"]} · '
+            f'plot {float(summary.get("camera_plot_hz", 0)):.0f} Hz / '
+            f'{summary.get("camera_plot_samples", 0)} points · '
             f'duration {duration:.2f} s · t₀ first valid camera pose'
         )
         legend = (
@@ -747,6 +1378,7 @@ def report_svg(rows: list[dict], summary: dict, *, mode: str = "composite") -> s
     else:
         metrics = (
             f'matched {summary["matched_samples"]}/{summary["detection_samples"]} · '
+            f'plot {float(summary.get("camera_plot_hz", 0)):.0f} Hz · '
             f'coverage {summary["coverage_percent"]:.1f}% · '
             f'P95 |Δt| {summary.get("p95_abs_error_ms") if summary.get("p95_abs_error_ms") is not None else "--"} ms · '
             f'duration {duration:.2f} s'
@@ -825,6 +1457,7 @@ def report_svg(rows: list[dict], summary: dict, *, mode: str = "composite") -> s
                 width=plot_width, height=plot_height,
                 time_min_ns=time_min_ns, time_max_ns=time_max_ns,
                 value_min=value_min, value_max=value_max,
+                break_on_time_gap=False,
             )
             elements.extend(
                 f'<polyline class="vision" points="{points}"/>'
@@ -837,6 +1470,7 @@ def report_svg(rows: list[dict], summary: dict, *, mode: str = "composite") -> s
                 width=plot_width, height=plot_height,
                 time_min_ns=time_min_ns, time_max_ns=time_max_ns,
                 value_min=value_min, value_max=value_max,
+                break_on_time_gap=True,
             )
             elements.extend(
                 f'<polyline class="mocap" points="{points}"/>'
@@ -858,7 +1492,7 @@ def report_svg(rows: list[dict], summary: dict, *, mode: str = "composite") -> s
 
 def generate_offline_report(
     detection_path: Path,
-    mocap_path: Path,
+    mocap_path: Path | None,
     *,
     offset_ms: float,
     max_error_ms: float,
@@ -879,16 +1513,22 @@ def generate_offline_report(
 
 def generate_offline_reports(
     detection_path: Path,
-    mocap_path: Path,
+    mocap_path: Path | None,
     *,
     offset_ms: float,
     max_error_ms: float,
     interpolate: bool,
     offset_estimation: dict | None = None,
-) -> tuple[dict, str, dict[str, str]]:
-    """Generate camera, mocap and composite canvases from one synchronized pass."""
-    detections = load_detection_poses(detection_path)
-    mocap = load_mocap_poses(mocap_path)
+    report_format: str = "svg",
+) -> tuple[dict, str, dict[str, str] | dict[str, bytes]]:
+    """Generate source-specific canvases; mocap is optional for camera plots."""
+    raw_detections = load_detection_poses(detection_path)
+    detections, interpolation = interpolate_detection_pose_outliers(raw_detections)
+    mocap = (
+        load_mocap_poses(mocap_path)
+        if mocap_path is not None and mocap_path.is_file()
+        else []
+    )
     rows, summary = synchronize(
         detections,
         mocap,
@@ -897,18 +1537,53 @@ def generate_offline_reports(
         interpolate=interpolate,
         retain_unmatched=True,
     )
+    camera_plot_hz = CAMERA_REPORT_HZ
+    plot_detections = resample_detection_poses(
+        detections,
+        target_hz=camera_plot_hz,
+    )
+    plot_rows, _plot_summary = synchronize(
+        plot_detections,
+        mocap,
+        offset_ms=offset_ms,
+        max_error_ms=max_error_ms,
+        interpolate=interpolate,
+        retain_unmatched=True,
+    )
+    summary["raw_detection_samples"] = len(raw_detections)
+    summary["rejected_pose_outliers"] = interpolation["flagged"]
+    summary["interpolated_pose_outliers"] = interpolation["interpolated"]
+    summary["unrecoverable_pose_outliers"] = interpolation["dropped"]
+    summary["camera_source_samples"] = len(detections)
+    summary["camera_plot_hz"] = camera_plot_hz
+    summary["camera_plot_samples"] = len(plot_detections)
+    source_timestamps = {
+        pose.effective_timestamp_ns for pose in detections
+    }
+    summary["camera_plot_interpolated_samples"] = sum(
+        pose.effective_timestamp_ns not in source_timestamps
+        for pose in plot_detections
+    )
     if offset_estimation is not None:
         summary["offset_estimation"] = offset_estimation
-    reports = {
-        mode: report_svg(rows, summary, mode=mode)
-        for mode in ("camera", "mocap", "composite")
-    }
+    if report_format == "svg":
+        reports = {
+            mode: report_svg(plot_rows, summary, mode=mode)
+            for mode in ("camera", "mocap", "composite")
+        }
+    elif report_format == "png":
+        reports = {
+            mode: report_png(plot_rows, summary, mode=mode)
+            for mode in ("camera", "mocap", "composite")
+        }
+    else:
+        raise ValueError("report_format 只能是 svg 或 png")
     return summary, synced_csv(rows), reports
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="按 Orin 本机时间同步视觉 PnP 与 NOKOV 动捕并生成六轴 SVG"
+        description="按 Orin 本机时间同步视觉 PnP 与 NOKOV 动捕并生成三张六轴 PNG"
     )
     parser.add_argument("--detection", type=Path, required=True, help="视觉 PnP CSV")
     parser.add_argument("--mocap", type=Path, required=True, help="动捕会话 CSV")
@@ -933,7 +1608,9 @@ def main() -> None:
     offset_ms = args.offset_ms
     estimation = None
     if args.estimate_offset:
-        detections = load_detection_poses(args.detection)
+        detections, _ = stabilize_detection_poses(
+            load_detection_poses(args.detection)
+        )
         mocap = load_mocap_poses(args.mocap)
         estimation = estimate_time_offset(
             detections,
@@ -959,7 +1636,7 @@ def main() -> None:
             summary["offset_estimation"] = estimation
         csv_payload = synced_csv(rows)
         reports = {
-            mode: report_svg(rows, summary, mode=mode)
+            mode: report_png(rows, summary, mode=mode)
             for mode in ("camera", "mocap", "composite")
         }
     else:
@@ -969,16 +1646,17 @@ def main() -> None:
             offset_ms=offset_ms,
             max_error_ms=args.max_error_ms,
             interpolate=not args.nearest_only,
+            report_format="png",
         )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "synchronized_session.csv").write_text(csv_payload, encoding="utf-8")
     for filename, mode in (
-        ("synchronized_camera_report.svg", "camera"),
-        ("synchronized_mocap_report.svg", "mocap"),
+        ("synchronized_camera_report.png", "camera"),
+        ("synchronized_mocap_report.png", "mocap"),
         # Preserve the historical filename as the composite canvas.
-        ("synchronized_report.svg", "composite"),
+        ("synchronized_report.png", "composite"),
     ):
-        (args.output_dir / filename).write_text(reports[mode], encoding="utf-8")
+        (args.output_dir / filename).write_bytes(reports[mode])
     (args.output_dir / "synchronized_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

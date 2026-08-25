@@ -7,11 +7,11 @@ CUDA_DEFINES = -D_DEBUG
 
 CUDA_INCLUDES = -I/usr/local/cuda/include -I/usr/include/eigen3 -I/home/wts/CVIA_trt/src/preprocess -I/home/wts/CVIA_trt/src/yolov8_detector -I/home/wts/CVIA_trt/src/yolov8_classifier -I/home/wts/CVIA_trt/src/yolov_pose -I/home/wts/CVIA_trt/src/TensorRT/calibrator -I/home/wts/CVIA_trt/src/TensorRT/CUDA_tools -I/home/wts/CVIA_trt/src/TensorRT/logger -I/home/wts/CVIA_trt/src/TensorRT/model -I/home/wts/CVIA_trt/src/TensorRT/utils -I/home/wts/CVIA_trt/src/lstm -I/home/wts/CVIA_trt/src/time -I/home/wts/CVIA_trt/src/lock -I/home/wts/CVIA_trt/src/worker -I/home/wts/CVIA_trt/src/ZEDX -I/home/wts/CVIA_trt/src/IRcamera -I/home/wts/CVIA_trt/src/communication -I/home/wts/CVIA_trt/src/params -I/home/wts/CVIA_trt/src/algorithms -I/usr/local/zed/include -isystem=/usr/include/opencv4
 
-CUDA_FLAGS = -g --generate-code=arch=compute_87,code=[compute_87,sm_87]
+CUDA_FLAGS =  -Xcompiler=-fPIC -w -g --generate-code=arch=compute_87,code=[compute_87,sm_87] -std=c++14
 
 CXX_DEFINES = -D_DEBUG
 
 CXX_INCLUDES = -I/usr/local/cuda/include -I/usr/include/eigen3 -I/home/wts/CVIA_trt/src/preprocess -I/home/wts/CVIA_trt/src/yolov8_detector -I/home/wts/CVIA_trt/src/yolov8_classifier -I/home/wts/CVIA_trt/src/yolov_pose -I/home/wts/CVIA_trt/src/TensorRT/calibrator -I/home/wts/CVIA_trt/src/TensorRT/CUDA_tools -I/home/wts/CVIA_trt/src/TensorRT/logger -I/home/wts/CVIA_trt/src/TensorRT/model -I/home/wts/CVIA_trt/src/TensorRT/utils -I/home/wts/CVIA_trt/src/lstm -I/home/wts/CVIA_trt/src/time -I/home/wts/CVIA_trt/src/lock -I/home/wts/CVIA_trt/src/worker -I/home/wts/CVIA_trt/src/ZEDX -I/home/wts/CVIA_trt/src/IRcamera -I/home/wts/CVIA_trt/src/communication -I/home/wts/CVIA_trt/src/params -I/home/wts/CVIA_trt/src/algorithms -I/usr/local/zed/include -isystem /usr/include/opencv4
 
-CXX_FLAGS =  -std=c++14 -Wall -O0 -Wfatal-errors -pthread -w -g -g
+CXX_FLAGS =  -Wall -Wfatal-errors -pthread -w -g -std=c++14
 

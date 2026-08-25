@@ -6067,7 +6067,6 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/aarch64-linux-gnu/c++/11/bits/c++config.h \
   /usr/include/aarch64-linux-gnu/c++/11/bits/os_defines.h \
   /usr/include/aarch64-linux-gnu/c++/11/bits/cpu_defines.h \
-  /usr/include/c++/11/pstl/pstl_config.h \
   /usr/include/stdlib.h \
   /usr/include/aarch64-linux-gnu/bits/waitflags.h \
   /usr/include/aarch64-linux-gnu/bits/waitstatus.h \
@@ -6136,35 +6135,6 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/aarch64-linux-gnu/bits/mathcalls.h \
   /usr/include/aarch64-linux-gnu/bits/mathcalls-narrow.h \
   /usr/include/aarch64-linux-gnu/bits/iscanonical.h \
-  /usr/include/c++/11/bits/specfun.h \
-  /usr/include/c++/11/bits/stl_algobase.h \
-  /usr/include/c++/11/bits/functexcept.h \
-  /usr/include/c++/11/bits/exception_defines.h \
-  /usr/include/c++/11/ext/numeric_traits.h \
-  /usr/include/c++/11/bits/stl_pair.h \
-  /usr/include/c++/11/bits/move.h \
-  /usr/include/c++/11/type_traits \
-  /usr/include/c++/11/bits/stl_iterator_base_types.h \
-  /usr/include/c++/11/bits/stl_iterator_base_funcs.h \
-  /usr/include/c++/11/bits/concept_check.h \
-  /usr/include/c++/11/debug/assertions.h \
-  /usr/include/c++/11/bits/stl_iterator.h \
-  /usr/include/c++/11/bits/ptr_traits.h \
-  /usr/include/c++/11/debug/debug.h \
-  /usr/include/c++/11/bits/predefined_ops.h \
-  /usr/include/c++/11/limits \
-  /usr/include/c++/11/tr1/gamma.tcc \
-  /usr/include/c++/11/tr1/special_function_util.h \
-  /usr/include/c++/11/tr1/bessel_function.tcc \
-  /usr/include/c++/11/tr1/beta_function.tcc \
-  /usr/include/c++/11/tr1/ell_integral.tcc \
-  /usr/include/c++/11/tr1/exp_integral.tcc \
-  /usr/include/c++/11/tr1/hypergeometric.tcc \
-  /usr/include/c++/11/tr1/legendre_function.tcc \
-  /usr/include/c++/11/tr1/modified_bessel_func.tcc \
-  /usr/include/c++/11/tr1/poly_hermite.tcc \
-  /usr/include/c++/11/tr1/poly_laguerre.tcc \
-  /usr/include/c++/11/tr1/riemann_zeta.tcc \
   /usr/local/cuda/include/crt/math_functions.hpp \
   /usr/local/cuda/include/crt/device_functions.h \
   /usr/local/cuda/include/crt/device_functions.hpp \
@@ -6200,6 +6170,9 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/local/cuda/include/device_launch_parameters.h \
   /usr/include/c++/11/utility \
   /usr/include/c++/11/bits/stl_relops.h \
+  /usr/include/c++/11/bits/stl_pair.h \
+  /usr/include/c++/11/bits/move.h \
+  /usr/include/c++/11/type_traits \
   /usr/include/c++/11/initializer_list \
   /usr/include/c++/11/iostream \
   /usr/include/c++/11/ostream \
@@ -6215,11 +6188,23 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/aarch64-linux-gnu/bits/types/mbstate_t.h \
   /usr/include/c++/11/exception \
   /usr/include/c++/11/bits/exception_ptr.h \
+  /usr/include/c++/11/bits/exception_defines.h \
   /usr/include/c++/11/bits/cxxabi_init_exception.h \
   /usr/include/c++/11/typeinfo \
   /usr/include/c++/11/bits/hash_bytes.h \
   /usr/include/c++/11/bits/nested_exception.h \
   /usr/include/c++/11/bits/char_traits.h \
+  /usr/include/c++/11/bits/stl_algobase.h \
+  /usr/include/c++/11/bits/functexcept.h \
+  /usr/include/c++/11/ext/numeric_traits.h \
+  /usr/include/c++/11/bits/stl_iterator_base_types.h \
+  /usr/include/c++/11/bits/stl_iterator_base_funcs.h \
+  /usr/include/c++/11/bits/concept_check.h \
+  /usr/include/c++/11/debug/assertions.h \
+  /usr/include/c++/11/bits/stl_iterator.h \
+  /usr/include/c++/11/bits/ptr_traits.h \
+  /usr/include/c++/11/debug/debug.h \
+  /usr/include/c++/11/bits/predefined_ops.h \
   /usr/include/c++/11/cstdint \
   /usr/lib/gcc/aarch64-linux-gnu/11/include/stdint.h \
   /usr/include/stdint.h \
@@ -6257,9 +6242,6 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/c++/11/ext/alloc_traits.h \
   /usr/include/c++/11/bits/alloc_traits.h \
   /usr/include/c++/11/bits/stl_construct.h \
-  /usr/include/c++/11/string_view \
-  /usr/include/c++/11/bits/functional_hash.h \
-  /usr/include/c++/11/bits/string_view.tcc \
   /usr/include/c++/11/ext/string_conversions.h \
   /usr/include/c++/11/cstdio \
   /usr/include/c++/11/cerrno \
@@ -6271,6 +6253,7 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/asm-generic/errno-base.h \
   /usr/include/aarch64-linux-gnu/bits/types/error_t.h \
   /usr/include/c++/11/bits/charconv.h \
+  /usr/include/c++/11/bits/functional_hash.h \
   /usr/include/c++/11/bits/basic_string.tcc \
   /usr/include/c++/11/bits/locale_classes.tcc \
   /usr/include/c++/11/system_error \
@@ -6297,6 +6280,7 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/opencv4/opencv2/core.hpp \
   /usr/include/opencv4/opencv2/core/cvdef.h \
   /usr/include/opencv4/opencv2/core/version.hpp \
+  /usr/include/c++/11/limits \
   /usr/include/opencv4/opencv2/core/hal/interface.h \
   /usr/include/c++/11/cstddef \
   /usr/include/opencv4/opencv2/core/cv_cpu_dispatch.h \
@@ -6309,44 +6293,28 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/c++/11/bits/stl_heap.h \
   /usr/include/c++/11/bits/stl_tempbuf.h \
   /usr/include/c++/11/bits/uniform_int_dist.h \
-  /usr/include/c++/11/pstl/glue_algorithm_defs.h \
-  /usr/include/c++/11/functional \
-  /usr/include/c++/11/tuple \
-  /usr/include/c++/11/bits/uses_allocator.h \
-  /usr/include/c++/11/bits/invoke.h \
-  /usr/include/c++/11/bits/refwrap.h \
-  /usr/include/c++/11/bits/std_function.h \
-  /usr/include/c++/11/unordered_map \
-  /usr/include/c++/11/ext/aligned_buffer.h \
-  /usr/include/c++/11/bits/hashtable.h \
-  /usr/include/c++/11/bits/hashtable_policy.h \
-  /usr/include/c++/11/bits/enable_special_members.h \
-  /usr/include/c++/11/bits/node_handle.h \
-  /usr/include/c++/11/bits/unordered_map.h \
-  /usr/include/c++/11/bits/erase_if.h \
-  /usr/include/c++/11/vector \
-  /usr/include/c++/11/bits/stl_uninitialized.h \
-  /usr/include/c++/11/bits/stl_vector.h \
-  /usr/include/c++/11/bits/stl_bvector.h \
-  /usr/include/c++/11/bits/vector.tcc \
-  /usr/include/c++/11/pstl/execution_defs.h \
   /usr/include/opencv4/opencv2/core/cvstd.hpp \
   /usr/include/c++/11/cstring \
   /usr/include/opencv4/opencv2/core/cvstd_wrapper.hpp \
   /usr/include/c++/11/memory \
+  /usr/include/c++/11/bits/stl_uninitialized.h \
   /usr/include/c++/11/bits/stl_raw_storage_iter.h \
   /usr/include/c++/11/bits/align.h \
   /usr/include/c++/11/bit \
+  /usr/include/c++/11/bits/uses_allocator.h \
   /usr/include/c++/11/bits/unique_ptr.h \
+  /usr/include/c++/11/tuple \
+  /usr/include/c++/11/bits/invoke.h \
   /usr/include/c++/11/bits/shared_ptr.h \
   /usr/include/c++/11/bits/shared_ptr_base.h \
   /usr/include/c++/11/bits/allocated_ptr.h \
+  /usr/include/c++/11/bits/refwrap.h \
+  /usr/include/c++/11/ext/aligned_buffer.h \
   /usr/include/c++/11/ext/concurrence.h \
   /usr/include/c++/11/bits/shared_ptr_atomic.h \
   /usr/include/c++/11/bits/atomic_base.h \
   /usr/include/c++/11/bits/atomic_lockfree_defines.h \
   /usr/include/c++/11/backward/auto_ptr.h \
-  /usr/include/c++/11/pstl/glue_memory_defs.h \
   /usr/include/opencv4/opencv2/core/neon_utils.hpp \
   /usr/include/opencv4/opencv2/core/vsx_utils.hpp \
   /usr/include/opencv4/opencv2/core/check.hpp \
@@ -6357,6 +6325,10 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/opencv4/opencv2/core/types.hpp \
   /usr/include/c++/11/cfloat \
   /usr/lib/gcc/aarch64-linux-gnu/11/include/float.h \
+  /usr/include/c++/11/vector \
+  /usr/include/c++/11/bits/stl_vector.h \
+  /usr/include/c++/11/bits/stl_bvector.h \
+  /usr/include/c++/11/bits/vector.tcc \
   /usr/include/opencv4/opencv2/core/mat.hpp \
   /usr/include/opencv4/opencv2/core/bufferpool.hpp \
   /usr/include/opencv4/opencv2/core/mat.inl.hpp \
@@ -6367,6 +6339,8 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/c++/11/sstream \
   /usr/include/c++/11/bits/sstream.tcc \
   /usr/include/opencv4/opencv2/core/utility.hpp \
+  /usr/include/c++/11/functional \
+  /usr/include/c++/11/bits/std_function.h \
   /usr/include/c++/11/mutex \
   /usr/include/c++/11/chrono \
   /usr/include/c++/11/ratio \
@@ -6391,6 +6365,7 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/c++/11/bits/stl_tree.h \
   /usr/include/c++/11/bits/stl_map.h \
   /usr/include/c++/11/bits/stl_multimap.h \
+  /usr/include/c++/11/bits/erase_if.h \
   /usr/include/opencv4/opencv2/dnn/layer.hpp \
   /usr/include/opencv4/opencv2/dnn/dnn.inl.hpp \
   /usr/include/opencv4/opencv2/dnn/utils/inference_engine.hpp \
@@ -6411,6 +6386,11 @@ CMakeFiles/trt.dir/src/preprocess/preprocess.cu.o: ../src/preprocess/preprocess.
   /usr/include/opencv4/opencv2/flann/dynamic_bitset.h \
   /usr/include/opencv4/opencv2/flann/dist.h \
   /usr/include/opencv4/opencv2/flann/heap.h \
+  /usr/include/c++/11/unordered_map \
+  /usr/include/c++/11/bits/hashtable.h \
+  /usr/include/c++/11/bits/hashtable_policy.h \
+  /usr/include/c++/11/bits/enable_special_members.h \
+  /usr/include/c++/11/bits/unordered_map.h \
   /usr/include/opencv4/opencv2/flann/allocator.h \
   /usr/include/opencv4/opencv2/flann/random.h \
   /usr/include/opencv4/opencv2/flann/kdtree_single_index.h \
@@ -6976,7 +6956,21 @@ CMakeFiles/trt.dir/src/prj_detector.cpp.o: ../src/prj_detector.cpp \
   ../src/params/params.hpp \
   ../src/yolov_pose/pose.hpp \
   ../src/params/params.hpp \
-  ../src/IRcamera/IRcamera.h
+  ../src/IRcamera/IRcamera.h \
+  ../src/params/config.hpp \
+  ../src/params/params.hpp \
+  /usr/include/aarch64-linux-gnu/sys/stat.h \
+  /usr/include/aarch64-linux-gnu/bits/stat.h \
+  /usr/include/aarch64-linux-gnu/bits/struct_stat.h \
+  /usr/include/aarch64-linux-gnu/bits/statx.h \
+  /usr/include/linux/stat.h \
+  /usr/include/linux/types.h \
+  /usr/include/aarch64-linux-gnu/asm/types.h \
+  /usr/include/asm-generic/types.h \
+  /usr/include/asm-generic/int-ll64.h \
+  /usr/include/aarch64-linux-gnu/bits/statx-generic.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct_statx_timestamp.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct_statx.h
 
 CMakeFiles/trt.dir/src/time/time.cpp.o: ../src/time/time.cpp \
   /usr/include/stdc-predef.h \
@@ -9052,7 +9046,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
   /usr/include/aarch64-linux-gnu/c++/11/bits/c++config.h \
   /usr/include/aarch64-linux-gnu/c++/11/bits/os_defines.h \
   /usr/include/aarch64-linux-gnu/c++/11/bits/cpu_defines.h \
-  /usr/include/c++/11/pstl/pstl_config.h \
   /usr/include/stdlib.h \
   /usr/include/aarch64-linux-gnu/bits/waitflags.h \
   /usr/include/aarch64-linux-gnu/bits/waitstatus.h \
@@ -9121,35 +9114,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
   /usr/include/aarch64-linux-gnu/bits/mathcalls.h \
   /usr/include/aarch64-linux-gnu/bits/mathcalls-narrow.h \
   /usr/include/aarch64-linux-gnu/bits/iscanonical.h \
-  /usr/include/c++/11/bits/specfun.h \
-  /usr/include/c++/11/bits/stl_algobase.h \
-  /usr/include/c++/11/bits/functexcept.h \
-  /usr/include/c++/11/bits/exception_defines.h \
-  /usr/include/c++/11/ext/numeric_traits.h \
-  /usr/include/c++/11/bits/stl_pair.h \
-  /usr/include/c++/11/bits/move.h \
-  /usr/include/c++/11/type_traits \
-  /usr/include/c++/11/bits/stl_iterator_base_types.h \
-  /usr/include/c++/11/bits/stl_iterator_base_funcs.h \
-  /usr/include/c++/11/bits/concept_check.h \
-  /usr/include/c++/11/debug/assertions.h \
-  /usr/include/c++/11/bits/stl_iterator.h \
-  /usr/include/c++/11/bits/ptr_traits.h \
-  /usr/include/c++/11/debug/debug.h \
-  /usr/include/c++/11/bits/predefined_ops.h \
-  /usr/include/c++/11/limits \
-  /usr/include/c++/11/tr1/gamma.tcc \
-  /usr/include/c++/11/tr1/special_function_util.h \
-  /usr/include/c++/11/tr1/bessel_function.tcc \
-  /usr/include/c++/11/tr1/beta_function.tcc \
-  /usr/include/c++/11/tr1/ell_integral.tcc \
-  /usr/include/c++/11/tr1/exp_integral.tcc \
-  /usr/include/c++/11/tr1/hypergeometric.tcc \
-  /usr/include/c++/11/tr1/legendre_function.tcc \
-  /usr/include/c++/11/tr1/modified_bessel_func.tcc \
-  /usr/include/c++/11/tr1/poly_hermite.tcc \
-  /usr/include/c++/11/tr1/poly_laguerre.tcc \
-  /usr/include/c++/11/tr1/riemann_zeta.tcc \
   /usr/local/cuda/include/crt/math_functions.hpp \
   /usr/local/cuda/include/crt/device_functions.h \
   /usr/local/cuda/include/crt/device_functions.hpp \
@@ -9185,6 +9149,9 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
   /usr/local/cuda/include/device_launch_parameters.h \
   /usr/include/c++/11/utility \
   /usr/include/c++/11/bits/stl_relops.h \
+  /usr/include/c++/11/bits/stl_pair.h \
+  /usr/include/c++/11/bits/move.h \
+  /usr/include/c++/11/type_traits \
   /usr/include/c++/11/initializer_list
 
 
@@ -9200,11 +9167,13 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 
 ../src/worker/worker.cpp:
 
-/usr/include/c++/11/pstl/glue_memory_defs.h:
+/usr/include/aarch64-linux-gnu/bits/types/struct_statx.h:
 
-/usr/include/c++/11/pstl/execution_defs.h:
+/usr/include/aarch64-linux-gnu/bits/statx-generic.h:
 
-/usr/include/c++/11/bits/string_view.tcc:
+/usr/include/linux/stat.h:
+
+/usr/local/cuda/include/crt/cudacc_ext.h:
 
 /usr/local/cuda/include/surface_indirect_functions.h:
 
@@ -9236,28 +9205,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 
 /usr/local/cuda/include/crt/device_functions.h:
 
-/usr/include/c++/11/tr1/riemann_zeta.tcc:
-
-/usr/include/c++/11/tr1/poly_laguerre.tcc:
-
-/usr/include/c++/11/tr1/poly_hermite.tcc:
-
-/usr/include/c++/11/tr1/legendre_function.tcc:
-
-/usr/include/c++/11/tr1/hypergeometric.tcc:
-
-/usr/include/c++/11/tr1/exp_integral.tcc:
-
-/usr/local/cuda/include/crt/cudacc_ext.h:
-
-/usr/include/c++/11/tr1/ell_integral.tcc:
-
-/usr/include/c++/11/tr1/bessel_function.tcc:
-
-/usr/include/c++/11/tr1/special_function_util.h:
-
-/usr/include/c++/11/tr1/gamma.tcc:
-
 /usr/local/cuda/include/crt/common_functions.h:
 
 ../src/preprocess/preprocess.cu:
@@ -9269,8 +9216,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 /usr/include/aarch64-linux-gnu/bits/types/struct_sigstack.h:
 
 /usr/include/aarch64-linux-gnu/bits/ss_flags.h:
-
-/usr/include/c++/11/string_view:
 
 /usr/include/aarch64-linux-gnu/bits/sigstksz.h:
 
@@ -9291,8 +9236,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 /usr/include/aarch64-linux-gnu/bits/sigevent-consts.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/sigevent_t.h:
-
-/usr/include/c++/11/pstl/glue_algorithm_defs.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/sigval_t.h:
 
@@ -9514,8 +9457,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 
 /usr/include/eigen3/Eigen/src/Core/ReturnByValue.h:
 
-/usr/include/c++/11/tr1/modified_bessel_func.tcc:
-
 /usr/include/eigen3/Eigen/src/Core/NestByValue.h:
 
 /usr/local/cuda/include/sm_32_intrinsics.hpp:
@@ -9714,8 +9655,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 
 /usr/include/aarch64-linux-gnu/c++/11/bits/ctype_inline.h:
 
-/usr/include/c++/11/bits/specfun.h:
-
 /usr/lib/gcc/aarch64-linux-gnu/11/include/stdarg.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/struct_iovec.h:
@@ -9842,6 +9781,8 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 
 /usr/lib/gcc/aarch64-linux-gnu/11/include/limits.h:
 
+/usr/include/aarch64-linux-gnu/sys/stat.h:
+
 /usr/include/opencv4/opencv2/dnn/utils/inference_engine.hpp:
 
 /usr/include/eigen3/Eigen/src/Core/Inverse.h:
@@ -9899,8 +9840,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 /usr/include/eigen3/Eigen/src/Core/Assign.h:
 
 /usr/include/aarch64-linux-gnu/c++/11/bits/basic_file.h:
-
-/usr/include/c++/11/tr1/beta_function.tcc:
 
 /usr/include/aarch64-linux-gnu/bits/waitstatus.h:
 
@@ -9999,6 +9938,8 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 /usr/include/aarch64-linux-gnu/bits/termios-c_cc.h:
 
 /usr/include/opencv4/opencv2/stitching.hpp:
+
+/usr/include/aarch64-linux-gnu/bits/statx.h:
 
 /usr/include/opencv4/opencv2/stitching/warpers.hpp:
 
@@ -10105,8 +10046,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 /usr/lib/gcc/aarch64-linux-gnu/11/include/arm_bf16.h:
 
 /usr/include/aarch64-linux-gnu/bits/struct_rwlock.h:
-
-/usr/include/c++/11/pstl/pstl_config.h:
 
 /usr/include/aarch64-linux-gnu/bits/pthread_stack_min-dynamic.h:
 
@@ -10365,8 +10304,6 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 /usr/include/c++/11/bits/stl_uninitialized.h:
 
 /usr/include/opencv4/opencv2/dnn/layer.hpp:
-
-/usr/include/c++/11/bits/node_handle.h:
 
 /usr/include/opencv4/opencv2/objdetect.hpp:
 
@@ -10667,6 +10604,8 @@ CMakeFiles/trt.dir/src/yolov_pose/yolo_pose_decode.cu.o: ../src/yolov_pose/yolo_
 /usr/include/opencv4/opencv2/core/vsx_utils.hpp:
 
 /usr/include/eigen3/Eigen/src/Core/NumTraits.h:
+
+/usr/include/aarch64-linux-gnu/bits/types/struct_statx_timestamp.h:
 
 /usr/include/eigen3/Eigen/src/plugins/CommonCwiseUnaryOps.h:
 

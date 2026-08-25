@@ -57,7 +57,7 @@ namespace model
             virtual bool preprocess_gpu(const cv::Mat &img) override;
             virtual bool postprocess_cpu(const uint64_t &timestamp) override;
             virtual bool postprocess_gpu(const uint64_t &timestamp) override;
-            void run_pnp_multi_stage();
+            void run_pnp_multi_stage(const uint64_t &timestamp);
             // std::shared_ptr<FrameLookbackEstimator> m_lookback_estimator;
             void run_filter_and_estimation(const uint64_t &timestamp, uint64_t m_frame_counter);
             void run_pnp_single_stage();
@@ -73,13 +73,17 @@ namespace model
             float linear_map(float val, float in_min, float in_max, float out_min, float out_max);
             std::vector<bbox> m_bboxes;
             bool is_current_frame_good = false;
-            void set_calibration(const std::array<double, 9> &camera_matrix,
+            bool set_calibration(const std::array<double, 9> &camera_matrix,
                                  const std::array<double, 5> &distortion,
-                                 const std::array<double, 16> &extrinsic);
+                                 const std::array<double, 16> &extrinsic,
+                                 const ModelKeypoints3D &model_keypoints_3d,
+                                 bool reset_tracking_state = false);
 
         private:
             // [修改] 新增标志位，记录当前颜色检测模式 (false=蓝色/近距离, true=红色/远距离)
             bool m_use_red_mode = false; 
+
+            void reset_tracking_after_calibration_change();
 
             int m_inputSize;
             int m_imgArea;
@@ -87,6 +91,7 @@ namespace model
             int m_outputBoxes = 0;
             int m_outputFeatures = 0;
             int m_outputClasses = 0;
+            int m_numKeypoints = 0;
             // Ultralytics exports may use either [1, boxes, features] or
             // [1, features, boxes]. Keep the engine layout explicit instead
             // of assuming one exporter-specific order in postprocess.
@@ -106,11 +111,18 @@ namespace model
             cv::Mat _T1_prev;
 
             cv::Mat R_mat;
-
-            int _stale_frame_count = 0;
-            double _candidate_z = 0.0;
-            int _candidate_count = 0;
-            int _candidate_limit = 1; // 连续多少帧稳定才更新，默认2
+            // 最近一次通过几何质量与连续性门控的原始相机系 PnP。
+            cv::Mat _accepted_R_mat;
+            cv::Mat _accepted_T1;
+            uint64_t _accepted_timestamp = 0;
+            // 大幅位姿变化必须形成连续候选，避免单帧错点/错误 PnP 分支直接进入输出。
+            cv::Mat _pending_R_mat;
+            cv::Mat _pending_T1;
+            uint64_t _pending_timestamp = 0;
+            int _pending_pose_count = 0;
+            bool _reset_filter_on_next_measurement = false;
+            cv::Vec3d _last_mocap_euler_deg = cv::Vec3d(0.0, 0.0, 0.0);
+            bool _has_last_mocap_euler = false;
             TrajectoryKF m_kf;
             uint64_t _last_timestamp = 0;
             uint64_t m_frame_counter = -1;
