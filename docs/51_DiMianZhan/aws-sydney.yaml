@@ -1,0 +1,30 @@
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+
+proxies:
+  - name: AWS-Sydney
+    type: vless
+    server: 54.206.167.114
+    port: 443
+    uuid: "2ef52f8f-76f7-4425-900f-49c47e090bb1"
+    network: tcp
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    servername: www.microsoft.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: "s29t9K2pyVs8x3-SU_Au0KCr9udzlRwEHrdqRIg-yXY"
+      short-id: "0c062e2005f02b9a"
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - AWS-Sydney
+      - DIRECT
+
+rules:
+  - MATCH,PROXY
