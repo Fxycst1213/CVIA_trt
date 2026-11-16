@@ -2,10 +2,8 @@
 #include <netinet/in.h>
 #include <string>
 #include <vector>
-#include <opencv2/opencv.hpp> // 需要 cv::Mat
+#include <opencv2/core.hpp>
 #include "../params/params.hpp"
-// 假设 bbox 定义在这里，如果在其他地方请 include 对应头文件
-#include "../yolov_pose/pose.hpp" // (假设你的 bbox 定义在这里)
 #include <chrono>
 #include <ratio>
 using namespace std;
@@ -13,26 +11,26 @@ using namespace std;
 class client
 {
 public:
-    client() {};
+    client() = default;
     ~client();
+    client(const client &) = delete;
+    client &operator=(const client &) = delete;
 
     void init(const prj_params &p_params);
     bool pack_and_send(const Resultframe &frame);
 
 private:
-    // 内部使用的发送函数，设为 private 也可以，或者 public 也可以
-    bool SendAll(char *buffer, int size);
+    bool connect_to_server();
+    bool SendAll(const void *buffer, size_t size);
+    void disconnect();
 
     struct sockaddr_in _remoteAddress;
     int _fd = -1;
-    char *_buffer = nullptr;
-
-    // --- 新增：记录每一部分的尺寸 ---
     int _socket_mode = -1;
-    int _total_send_size = 0;
-    int _img_size_bytes = 0;
-    int _kpt_size_bytes = 0;
-    int _pose_size_bytes = 0;
-    int _keyPoint_box = 0;
-    std::string _resolution;
+    int _jpeg_width = 0;
+    int _jpeg_quality = 50;
+    int _send_timeout_ms = 250;
+    std::vector<uchar> _jpeg;
+    std::vector<unsigned char> _packet;
+    std::chrono::steady_clock::time_point _next_connect{};
 };

@@ -13,9 +13,12 @@ set(CMAKE_CUDA_COMPILER "/usr/local/cuda-12.6/bin/nvcc")
 enable_language(CUDA)
 
 
-set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -std=c++14 -Wall -O0 -Wfatal-errors -pthread -w -g")
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -std=c++14 -Wall -Wfatal-errors -pthread -w")
 set(CUDA_GEN_CODE "-gencode=arch=compute_87,code=sm_87")
-set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++14 -O0 -Xcompiler -fPIC -g -w ${CUDA_GEN_CODE}")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++14 -Xcompiler -fPIC -w ${CUDA_GEN_CODE}")
 
 set(TENSORRT_INCLUDE_DIR     "/usr/include/aarch64-linux-gnu/")
 set(TENSORRT_LIB_DIR     "/usr/lib/aarch64-linux-gnu/")
@@ -64,6 +67,8 @@ endif()
 link_libraries(stdc++fs)
 
 file(GLOB_RECURSE srcs ${PROJECT_SOURCE_DIR}/src/*.cpp ${PROJECT_SOURCE_DIR}/src/*.cu)
+# trt uses the wts-nanhang TCP client; the standalone CVIA streamer uses a different API.
+list(REMOVE_ITEM srcs "${PROJECT_SOURCE_DIR}/src/communication/frame_streamer.cpp")
 
 add_executable(trt ${srcs} )
 
@@ -73,3 +78,18 @@ target_link_libraries(trt cudart curand)
 target_link_libraries(trt ${OpenCV_LIBS})
 target_link_libraries(trt ${ZED_LIBS})
 target_link_libraries(trt fftw3)
+
+# Offline dataset evaluation is opt-in and does not start application I/O.
+set(keypoint_eval_srcs ${srcs})
+list(REMOVE_ITEM keypoint_eval_srcs "${PROJECT_SOURCE_DIR}/src/main.cpp")
+add_executable(keypoint_collector EXCLUDE_FROM_ALL tools/collect_keypoints.cpp ${keypoint_eval_srcs})
+target_link_libraries(keypoint_collector ${CUDA_LIBRARIES} nvinfer nvinfer_plugin
+    cudart curand ${OpenCV_LIBS} ${ZED_LIBS} fftw3)
+
+add_executable(keypoint_refinement_eval EXCLUDE_FROM_ALL tools/refine_keypoints_sequence.cpp
+    src/yolov_pose/keypoint_refiner.cpp)
+set_property(TARGET keypoint_refinement_eval PROPERTY LINK_LIBRARIES ${OpenCV_LIBS})
+
+add_executable(keypoint_refinement_tests EXCLUDE_FROM_ALL tests/test_keypoint_refiner.cpp
+    src/yolov_pose/keypoint_refiner.cpp)
+set_property(TARGET keypoint_refinement_tests PROPERTY LINK_LIBRARIES ${OpenCV_LIBS})

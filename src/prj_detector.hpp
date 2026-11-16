@@ -41,7 +41,6 @@ private:
     shared_ptr<thread::Worker> _worker;
     ZEDX *_zed = nullptr;
     std::shared_ptr<timer::Timer> _timer;
-    std::shared_ptr<timer::Timer> _timer_tcp;
 
     std::function<void()> _func_camera;
     std::function<void()> _func_camera_foldimages;
@@ -52,7 +51,11 @@ private:
 
     ZEDframe *_writeframe = nullptr;
 
-    queue<Resultframe> _resultframe_queue;
+    void submit_tcp_frame(Resultframe frame);
+    Resultframe _pending_frame;
+    bool _has_pending_frame = false;
+    uint64_t _tcp_replaced = 0;
+    std::chrono::microseconds _tcp_period{33333};
     std::mutex _queue_mtx;             // 保护队列的互斥锁
     std::condition_variable _queue_cv; // 用于通知"有新数据了"
 
@@ -65,6 +68,7 @@ private:
 
     client _client;
     RS485 _rs485;
+    bool _serial_enabled = false;
     uint64_t m_time;
 };
 

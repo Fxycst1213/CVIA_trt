@@ -1,13 +1,29 @@
 #include "prj_detector.hpp"
+#include <csignal>
+
+namespace
+{
+    static_assert(ATOMIC_BOOL_LOCK_FREE == 2, "Signal handling requires lock-free atomic bool");
+    std::atomic<bool> stop_requested{false};
+    void request_stop(int)
+    {
+        stop_requested.store(true, std::memory_order_relaxed);
+    }
+}
 
 prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Params params, prj_params p_params)
 {
+    std::signal(SIGINT, request_stop);
+    std::signal(SIGTERM, request_stop);
+    if (p_params.t_params.max_fps < 1 || p_params.t_params.max_fps > 120)
+        throw std::invalid_argument("TCP max_fps must be between 1 and 120");
     _worker = thread::create_worker(onnxPath, level, params);
     _timer = make_shared<timer::Timer>(logger::Level::INFO);
-    _timer_tcp = make_shared<timer::Timer>(logger::Level::INFO);
+    _tcp_period = std::chrono::microseconds(1000000 / p_params.t_params.max_fps);
 
     _zed = ZEDX::GetInstance();
-    _zed->init(p_params.cameraID, p_params.resolution);
+    _zed->init(p_params.cameraID, p_params.resolution, 60, false, p_params.camera_eye);
+    _worker->m_pose->set_camera_calibration(_zed->calibration());
 
     preprocess::init_process(p_params.H, p_params.W);
 
@@ -20,15 +36,23 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
     _func_rs485_receive = std::bind(&prj_v8detector::rs485_receive_loop, this);
 
     _client.init(p_params);
-    _rs485.init(p_params);
-    _rs485.setDebug(true);
-    _rs485.setSendIntervalUs(10000);
+    _serial_enabled = p_params.enable_serial && _rs485.init(p_params) == 0;
+    if (p_params.enable_serial)
+        std::cerr << "[serial] " << p_params.rs485_port
+                  << (_serial_enabled ? " opened; TX period=100 ms\n"
+                                      : " unavailable; serial TX disabled\n");
+    _rs485.setDebug(p_params.verbose);
+    // rs485_loop paces frame starts at 10 Hz, including time spent writing.
+    _rs485.setSendIntervalUs(0);
     _is_running = true;
 }
 
 // [新增] RS485 独立线程循环
 void prj_v8detector::rs485_loop()
 {
+    using Clock = std::chrono::steady_clock;
+    const auto send_period = std::chrono::milliseconds(100);
+    auto next_send = Clock::now();
     while (true)
     {
         std::vector<float> data_to_send;
@@ -39,21 +63,22 @@ void prj_v8detector::rs485_loop()
                 return !_rs485_queue.empty() || !_is_running; 
             });
 
-            if (!_is_running && _rs485_queue.empty()) {
+            // Producers may replace the pending result during this wait.
+            _rs485_cv.wait_until(lock, next_send, [this] { return !_is_running; });
+            if (!_is_running) {
                 break;
             }
 
-            if (_rs485_queue.empty()) {
-                continue;
-            }
-
-            data_to_send = _rs485_queue.front();
-            _rs485_queue.pop();
+            data_to_send = std::move(_rs485_queue.back());
+            while (!_rs485_queue.empty())
+                _rs485_queue.pop();
         }
 
         // 发送 2026-4-7 协议二进制帧。
         if (!data_to_send.empty())
         {
+            // Schedule from the actual start: no extra wire-time delay or catch-up bursts.
+            next_send = Clock::now() + send_period;
             _rs485.sendVisionFrame(data_to_send);
         }
 
@@ -107,7 +132,7 @@ void prj_v8detector::rs485_receive_loop()
 
 void prj_v8detector::camera()
 {
-    while (1)
+    while (_is_running && !stop_requested.load(std::memory_order_relaxed))
     {
         Resultframe _resultframe;
         _timer->init();
@@ -134,7 +159,9 @@ void prj_v8detector::camera()
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
         _resultframe.rs485_result = _worker->m_pose->uart_result;
-        // 3. 串口发送 (保持不变)
+        _worker->m_pose->copy_pnp_pose(_resultframe);
+        _resultframe.calibration = _zed->calibration();
+        // 3. 独立串口线程按 10 Hz 发送最新结果。
         // _timer->start_cpu();
         // // _rs485.sendDoubleArray(_resultframe.ose_result.data());
         // float float_temp_pose[3];
@@ -145,10 +172,11 @@ void prj_v8detector::camera()
         // // usleep(600000);
         // _timer->stop_cpu<timer::Timer::ms>("RS485");
         // _timer->start_cpu(); // 如果不需要统计入队耗时，可以注释掉计时
+        if (_serial_enabled)
         {
             std::lock_guard<std::mutex> lock(_rs485_mtx);
-            // 漏桶策略：如果串口发送太慢，丢弃旧数据，保证实时性
-            while (_rs485_queue.size() > 2) 
+            // 仅保留最新结果，避免 100 ms 发送周期内积压旧数据。
+            while (!_rs485_queue.empty())
             {
                 _rs485_queue.pop();
             }
@@ -158,23 +186,7 @@ void prj_v8detector::camera()
 
         // 4. TCP 队列处理
         _timer->start_cpu();
-        {
-            std::lock_guard<std::mutex> lock(_queue_mtx);
-            
-            // 【关键修复2】：实现“漏桶”策略，防止队列堆积
-            // 如果队列里堆积超过 2 帧，说明 TCP 发不过来了，直接把最老的帧扔掉
-            // 保持队列始终很短，确保发送的是较新的数据
-            while (_resultframe_queue.size() > 2) 
-            {
-                // 注意：如果 Resultframe 很大，pop 可能会析构释放内存，这很好
-                _resultframe_queue.pop(); 
-                // 可选：打印个日志提示丢帧了
-                LOGW("TCP queue full, dropping old frame!");
-            }
-            
-            _resultframe_queue.push(_resultframe);
-            _queue_cv.notify_one();
-        }
+        submit_tcp_frame(std::move(_resultframe));
         _timer->stop_cpu<timer::Timer::ms>("Load TCP");
         _timer->show();
     }
@@ -183,12 +195,12 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "/home/cvia/yifei/images10/*.png";
+    cv::String folder = "//home/cvia/nuaa/CVIA_trt/data/frames_left/WIN_20261016_10_52_53_Pro/*.jpg";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
     int current_idx = 0;
-    while (1)
+    while (_is_running && !stop_requested.load(std::memory_order_relaxed))
     {
         auto now = std::chrono::system_clock::now();
         auto mstart = std::chrono::high_resolution_clock::now();
@@ -213,6 +225,8 @@ void prj_v8detector::camera_foldimages()
         _resultframe.bboxes = _worker->m_pose->m_bboxes;
         _resultframe.pose_result = _worker->m_pose->m_result;
         _resultframe.rs485_result = _worker->m_pose->uart_result;
+        _worker->m_pose->copy_pnp_pose(_resultframe);
+        _resultframe.calibration = _zed->calibration();
         // _timer->start_cpu();
         // //
         // // std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
@@ -230,10 +244,11 @@ void prj_v8detector::camera_foldimages()
         // //
         // // _rs485.sendDoubleArray(_resultframe.pose_result.data());
         // _timer->stop_cpu<timer::Timer::ms>("RS485");
+        if (_serial_enabled)
         {
             std::lock_guard<std::mutex> lock(_rs485_mtx);
-            // 同样应用漏桶策略
-            while (_rs485_queue.size() > 2) 
+            // 同样仅保留最新结果，由串口线程按 10 Hz 发送。
+            while (!_rs485_queue.empty())
             {
                 _rs485_queue.pop();
             }
@@ -244,19 +259,31 @@ void prj_v8detector::camera_foldimages()
         }
 
         _timer->start_cpu();
-        {
-            std::lock_guard<std::mutex> lock(_queue_mtx);
-            _resultframe_queue.push(_resultframe);
-            _queue_cv.notify_one();
-        }
+        submit_tcp_frame(std::move(_resultframe));
         _timer->stop_cpu<timer::Timer::ms>("Load TCP");
         _timer->show();
     }
 }
 
+void prj_v8detector::submit_tcp_frame(Resultframe frame)
+{
+    {
+        std::lock_guard<std::mutex> lock(_queue_mtx);
+        if (_has_pending_frame)
+            ++_tcp_replaced;
+        _pending_frame = std::move(frame);
+        _has_pending_frame = true;
+    }
+    _queue_cv.notify_one();
+}
+
 void prj_v8detector::tcp_loop()
 {
-    while (1)
+    using Clock = std::chrono::steady_clock;
+    auto next_send = Clock::now();
+    auto last_report = Clock::now();
+    uint64_t sent = 0, failed = 0;
+    while (true)
     {
         Resultframe frame_to_send;
         {
@@ -264,24 +291,48 @@ void prj_v8detector::tcp_loop()
 
             // 等待条件：有数据 或者 停止运行
             _queue_cv.wait(lock, [this]
-                           { return !_resultframe_queue.empty() || !_is_running; });
-            if (!_is_running && _resultframe_queue.empty())
+                           { return _has_pending_frame || !_is_running; });
+            // Pick the latest frame AFTER pacing; producers can replace it while we wait.
+            _queue_cv.wait_until(lock, next_send, [this] { return !_is_running; });
+            if (!_is_running && !_has_pending_frame)
             {
                 break;
             }
 
-            if (_resultframe_queue.empty())
+            if (!_has_pending_frame)
             {
                 continue;
             }
-            frame_to_send = _resultframe_queue.front();
-            _resultframe_queue.pop();
+            frame_to_send = std::move(_pending_frame);
+            _has_pending_frame = false;
         }
-        _timer_tcp->init();
-        _timer_tcp->start_cpu();
-        _client.pack_and_send(frame_to_send);
-        _timer_tcp->stop_cpu<timer::Timer::ms>("TCP Thread Send");
-        _timer_tcp->show();
+        next_send = Clock::now() + _tcp_period;
+        try
+        {
+            if (_client.pack_and_send(frame_to_send))
+                ++sent;
+            else
+                ++failed;
+        }
+        catch (const std::exception &error)
+        {
+            ++failed;
+            LOGW("TCP frame skipped: %s", error.what());
+        }
+        if (Clock::now() - last_report >= std::chrono::seconds(1))
+        {
+            uint64_t replaced;
+            {
+                std::lock_guard<std::mutex> lock(_queue_mtx);
+                replaced = _tcp_replaced;
+                _tcp_replaced = 0;
+            }
+            LOGV("TCP preview: sent=%llu, skipped=%llu, replaced=%llu",
+                 static_cast<unsigned long long>(sent), static_cast<unsigned long long>(failed),
+                 static_cast<unsigned long long>(replaced));
+            sent = failed = 0;
+            last_report = Clock::now();
+        }
     }
 }
 
@@ -290,8 +341,12 @@ void prj_v8detector::run()
     _is_running = true;
    auto t1 = std::thread(_func_camera);
     // auto t2 = std::thread(_func_camera_foldimages);
-    auto t_rs485 = std::thread(_func_rs485_send);
-    auto t_rs485_rx = std::thread(_func_rs485_receive);
+    std::thread t_rs485, t_rs485_rx;
+    if (_serial_enabled)
+    {
+        t_rs485 = std::thread(_func_rs485_send);
+        t_rs485_rx = std::thread(_func_rs485_receive);
+    }
     auto t3 = std::thread(_func_pack_and_send);
    if (t1.joinable())
    {
@@ -324,6 +379,7 @@ prj_v8detector::~prj_v8detector()
     _is_running = false;
     _queue_cv.notify_all();
     _rs485_cv.notify_all();
+    _zed->close();
     delete _writeframe->rgb_ptr;
     delete _writeframe;
     preprocess::destroy_process();

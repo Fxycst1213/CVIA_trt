@@ -12,8 +12,11 @@ using namespace sl;
     3. int frame: fps
     4. bool enable_fill_mode: enable depth fill mode or not
 */
-void ZEDX::init(int ID, std::string resolution, int frame, bool enable_fill_mode)
+void ZEDX::init(int ID, std::string resolution, int frame, bool enable_fill_mode, const std::string &eye)
 {
+    if (eye != "left" && eye != "right")
+        throw std::invalid_argument("Camera eye must be left or right");
+    _eye = eye;
     if (resolution == "HD1080")
         _init_parameters.camera_resolution = RESOLUTION::HD1080;
     else
@@ -21,6 +24,8 @@ void ZEDX::init(int ID, std::string resolution, int frame, bool enable_fill_mode
     _init_parameters.camera_fps = frame;
     _init_parameters.depth_mode = sl::DEPTH_MODE::NONE;
     _init_parameters.input.setFromCameraID(ID);
+    // Load project-local factory calibration; the SDK also checks its default settings directory.
+    _init_parameters.optional_settings_path = sl::String("models/");
     _runtime_parameters.enable_fill_mode = true;
     _timer = make_shared<timer::Timer>(logger::Level::VERB);
     auto returned_state = _zedx.open(_init_parameters);
@@ -59,12 +64,11 @@ void ZEDX::grab_frame(ZEDframe *frame)
     // _timer->start_cpu();
     if (_zedx.grab(_runtime_parameters) == ERROR_CODE::SUCCESS)
     {
-        _zedx.retrieveImage(img, sl::VIEW::LEFT_UNRECTIFIED);
+        _zedx.retrieveImage(img, _eye == "right" ? sl::VIEW::RIGHT_UNRECTIFIED : sl::VIEW::LEFT_UNRECTIFIED);
         // frame->timestamp = img.timestamp.getMicroseconds();// 微秒
         frame->timestamp = img.timestamp.getMilliseconds();// 毫秒
         cv::Mat tmp = ZEDX::slMat2cvMat(img);
         cv::cvtColor(tmp, *(frame->rgb_ptr), cv::COLOR_BGRA2BGR);
-        cv::rotate(*(frame->rgb_ptr), *(frame->rgb_ptr), cv::ROTATE_180);
         // _timer->show();
     }
     else
@@ -80,9 +84,15 @@ cv::Mat ZEDX::slMat2cvMat(sl::Mat &input)
     return cv::Mat(input.getHeight(), input.getWidth(), getOCVtype(input.getDataType()), input.getPtr<sl::uchar1>(MEM::CPU), input.getStepBytes(sl::MEM::CPU));
 }
 
+void ZEDX::close()
+{
+    if (_zedx.isOpened())
+        _zedx.close();
+}
+
 ZEDX::~ZEDX()
 {
-    _zedx.close();
+    close();
 }
 
 /*
@@ -90,13 +100,18 @@ ZEDX::~ZEDX()
 */
 void ZEDX::setIntrinsic()
 {
-    CalibrationParameters calibration_params = _zedx.getCameraInformation().camera_configuration.calibration_parameters;
-    // Focal length of the left eye in pixels
-    double fx = (double)calibration_params.left_cam.fx;
-    double fy = (double)calibration_params.left_cam.fy;
-    double cx = (double)calibration_params.left_cam.cx;
-    double cy = (double)calibration_params.left_cam.cy;
-    _K = (cv::Mat_<double>(3, 3) << fx, 0.0, cx,
-          0.0, fy, cy,
-          0.0, 0.0, 1.0);
+    const auto info = _zedx.getCameraInformation();
+    const auto &raw = info.camera_configuration.calibration_parameters_raw;
+    const auto &camera = _eye == "right" ? raw.right_cam : raw.left_cam;
+    _calibration.width = info.camera_configuration.resolution.width;
+    _calibration.height = info.camera_configuration.resolution.height;
+    _calibration.right_eye = _eye == "right";
+    _calibration.intrinsics = {{camera.fx, camera.fy, camera.cx, camera.cy}};
+    for (int i = 0; i < 12; ++i)
+        _calibration.distortion[i] = camera.disto[i];
+    _K = (cv::Mat_<double>(3, 3) << camera.fx, 0.0, camera.cx,
+          0.0, camera.fy, camera.cy, 0.0, 0.0, 1.0);
+    std::cerr << "[camera] eye=" << _eye << " raw " << _calibration.width << 'x' << _calibration.height
+              << " fx=" << camera.fx << " fy=" << camera.fy << " cx=" << camera.cx
+              << " cy=" << camera.cy << '\n';
 }

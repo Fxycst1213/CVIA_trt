@@ -1,0 +1,1 @@
+cmd_/home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/ch341.ko := ld -r -EL  -maarch64elf -z noexecstack --build-id=sha1  -T scripts/module.lds -o /home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/ch341.ko /home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/ch341.o /home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/ch341.mod.o;  true

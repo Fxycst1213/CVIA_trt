@@ -10,7 +10,9 @@ namespace model
 {
     namespace pose
     {
-        const int NUM_KEYPOINTS = 7;
+        // x_plane1.onnx: one aircraft class and nine (x, y, confidence) keypoints.
+        constexpr int NUM_KEYPOINTS = 9;
+        constexpr int NUM_CLASSES = 1;
 
         struct keypoint
         {

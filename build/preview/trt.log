@@ -1,0 +1,5 @@
+[1;34m[warn][0mUsing an engine plan file across different models of devices is not recommended and is likely to affect performance or even cause errors.
+[2026-11-16 13:58:15 UTC][ZED][INFO] Logging level INFO
+[2026-11-16 13:58:15 UTC][ZED][ERROR] CAMERA NOT DETECTED in sl::ERROR_CODE sl::Camera::open(sl::InitParameters)
+Error:CAMERA NOT DETECTED.
+[1;31m[error][0mZED INIT ERROR

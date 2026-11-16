@@ -1,0 +1,32 @@
+Consolidate compiler generated dependencies of target keypoint_collector
+[  4%] Building CXX object CMakeFiles/keypoint_collector.dir/src/TensorRT/calibrator/calibrator.cpp.o
+[  8%] Building CXX object CMakeFiles/keypoint_collector.dir/tools/collect_keypoints.cpp.o
+[ 12%] Building CXX object CMakeFiles/keypoint_collector.dir/src/TensorRT/logger/logger.cpp.o
+[ 16%] Building CXX object CMakeFiles/keypoint_collector.dir/src/TensorRT/model/lstm/lstm.cpp.o
+[ 20%] Building CXX object CMakeFiles/keypoint_collector.dir/src/TensorRT/model/model.cpp.o
+[ 24%] Building CXX object CMakeFiles/keypoint_collector.dir/src/TensorRT/utils/utils.cpp.o
+[ 28%] Building CXX object CMakeFiles/keypoint_collector.dir/src/ZEDX/ZEDX.cpp.o
+[ 32%] Building CXX object CMakeFiles/keypoint_collector.dir/src/algorithms/FrameLookbackEstimator.cpp.o
+[ 36%] Building CXX object CMakeFiles/keypoint_collector.dir/src/algorithms/PeriodEstimator.cpp.o
+[ 40%] Building CXX object CMakeFiles/keypoint_collector.dir/src/algorithms/TrajectoryKF.cpp.o
+[ 44%] Building CXX object CMakeFiles/keypoint_collector.dir/src/communication/RS485.cpp.o
+[ 48%] Building CXX object CMakeFiles/keypoint_collector.dir/src/communication/client.cpp.o
+[ 52%] Building CXX object CMakeFiles/keypoint_collector.dir/src/communication/vision_protocol.cpp.o
+[ 56%] Building CXX object CMakeFiles/keypoint_collector.dir/src/lstm/lstm_predictor.cpp.o
+[ 60%] Building CXX object CMakeFiles/keypoint_collector.dir/src/preprocess/preprocess.cpp.o
+[ 64%] Building CUDA object CMakeFiles/keypoint_collector.dir/src/preprocess/preprocess.cu.o
+[ 68%] Building CXX object CMakeFiles/keypoint_collector.dir/src/prj_detector.cpp.o
+[ 72%] Building CXX object CMakeFiles/keypoint_collector.dir/src/time/time.cpp.o
+[ 76%] Building CXX object CMakeFiles/keypoint_collector.dir/src/worker/worker.cpp.o
+[ 80%] Building CXX object CMakeFiles/keypoint_collector.dir/src/yolov8_classifier/classifier.cpp.o
+[ 84%] Building CXX object CMakeFiles/keypoint_collector.dir/src/yolov8_detector/detector.cpp.o
+[ 88%] Building CXX object CMakeFiles/keypoint_collector.dir/src/yolov_pose/keypoint_refiner.cpp.o
+[ 92%] Building CXX object CMakeFiles/keypoint_collector.dir/src/yolov_pose/pose.cpp.o
+[ 96%] Building CUDA object CMakeFiles/keypoint_collector.dir/src/yolov_pose/yolo_pose_decode.cu.o
+[100%] Linking CXX executable keypoint_collector
+[100%] Built target keypoint_collector
+Consolidate compiler generated dependencies of target keypoint_refinement_tests
+[ 33%] Building CXX object CMakeFiles/keypoint_refinement_tests.dir/tests/test_keypoint_refiner.cpp.o
+[ 66%] Building CXX object CMakeFiles/keypoint_refinement_tests.dir/src/yolov_pose/keypoint_refiner.cpp.o
+[100%] Linking CXX executable keypoint_refinement_tests
+[100%] Built target keypoint_refinement_tests

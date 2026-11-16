@@ -7,6 +7,7 @@
 #include <opencv2/opencv.hpp>
 #include "logger.hpp"
 #include "time.hpp"
+#include "../params/params.hpp"
 #ifndef ZEDX_H
 #define ZEDX_H
 using namespace std;
@@ -24,10 +25,12 @@ struct ZEDframe
 class ZEDX
 {
 public:
-    void init(int ID, std::string resolution, int frame = 60, bool enable_fill_mode = false);
+    void init(int ID, std::string resolution, int frame = 60, bool enable_fill_mode = false, const std::string &eye = "right");
     void grab_frame(ZEDframe *frame);
+    void close();
     static ZEDX *GetInstance();
     cv::Mat getK() const;
+    CameraCalibration calibration() const { return _calibration; }
     cv::Mat slMat2cvMat(sl::Mat &input);
 
 private:
@@ -71,6 +74,8 @@ private:
     }
 
     Camera _zedx;
+    std::string _eye = "right";
+    CameraCalibration _calibration;
     InitParameters _init_parameters;
     RuntimeParameters _runtime_parameters;
     cv::Mat _K;

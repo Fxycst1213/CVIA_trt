@@ -1,0 +1,1 @@
+cmd_/home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/Module.symvers := sed 's/\.ko$$/\.o/' /home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/modules.order | scripts/mod/modpost -m   -o /home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/Module.symvers -e -i Module.symvers   -T -

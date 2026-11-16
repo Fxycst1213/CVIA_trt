@@ -1,0 +1,1 @@
+cmd_/home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/ch341.mod := printf '%s\n'   ch341.o | awk '!x[$$0]++ { print("/home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/"$$0) }' > /home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/ch341.mod

@@ -1,0 +1,2 @@
+sequence,image,timestamp,x0,y0,x1,y1,confidence,raw_x1,raw_y1,raw_conf1,raw_x2,raw_y2,raw_conf2,raw_x3,raw_y3,raw_conf3,raw_x4,raw_y4,raw_conf4,raw_x5,raw_y5,raw_conf5,raw_x6,raw_y6,raw_conf6,raw_x7,raw_y7,raw_conf7,raw_x8,raw_y8,raw_conf8,raw_x9,raw_y9,raw_conf9
+cad_smoke,build/plane9_smoke/000001.png,33,22,185,549,414,0.770996094,276,211,0.77734375,351,224,0.691894531,382,229,0,70,268,0.999511719,139,290,1,244,318,1,385,340,1,493,349,0.796386719,306,388,1

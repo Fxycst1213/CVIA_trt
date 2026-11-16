@@ -12,6 +12,7 @@
 #include "../ZEDX/ZEDX.h"
 #include "../params/pose_params.hpp"
 #include "../algorithms/FrameLookbackEstimator.h"
+#include "keypoint_refiner.hpp"
 
 class LSTMPredictor;
 
@@ -60,16 +61,24 @@ namespace model
             void run_pnp_single_stage();
             void run_lstm_predictin();
             void show(string path);
-            void refine_keypoints(std::vector<keypoint> &kpt);
+            void refine_keypoints(std::vector<keypoint> &kpt, uint64_t timestamp_ms = 0);
+            const std::vector<keypoint> &raw_keypoints() const { return m_raw_keypoints; }
             std::vector<float> m_result;
             std::vector<float> uart_result;
             float linear_map(float val, float in_min, float in_max, float out_min, float out_max);
             std::vector<bbox> m_bboxes;
             bool is_current_frame_good = false;
+            void copy_pnp_pose(Resultframe &frame) const;
+            void set_camera_calibration(const CameraCalibration &calibration);
 
         private:
-            // [修改] 新增标志位，记录当前颜色检测模式 (false=蓝色/近距离, true=红色/远距离)
-            bool m_use_red_mode = false; 
+            std::vector<keypoint> m_raw_keypoints;
+            bool has_pnp_model() const
+            {
+                return _p3d.rows == NUM_KEYPOINTS && _p3d.cols == 3;
+            }
+
+            KeypointRefiner m_keypoint_refiner;
 
             int m_inputSize;
             int m_imgArea;

@@ -1,0 +1,17 @@
+# MediaMTX runs on Orin. FFmpeg publishes to loopback; clients read Orin's LAN IPv4.
+logLevel: info
+rtsp: true
+rtspAddress: :8554
+rtspTransports: [tcp]
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+api: false
+metrics: false
+pprof: false
+playback: false
+paths:
+  live:
+    source: publisher

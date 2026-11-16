@@ -1,0 +1,31 @@
+cmake -S . -B build -G "Unix Makefiles"
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/cvia/nuaa/CVIA_trt/build
+make -C build trt
+make[1]: Entering directory '/home/cvia/nuaa/CVIA_trt/build'
+make[2]: Entering directory '/home/cvia/nuaa/CVIA_trt/build'
+make[3]: Entering directory '/home/cvia/nuaa/CVIA_trt/build'
+make[4]: Entering directory '/home/cvia/nuaa/CVIA_trt/build'
+Consolidate compiler generated dependencies of target trt
+make[4]: Leaving directory '/home/cvia/nuaa/CVIA_trt/build'
+make[4]: Entering directory '/home/cvia/nuaa/CVIA_trt/build'
+[  8%] Building CXX object CMakeFiles/trt.dir/src/TensorRT/model/model.cpp.o
+[  8%] Building CXX object CMakeFiles/trt.dir/src/TensorRT/utils/utils.cpp.o
+[ 12%] Building CXX object CMakeFiles/trt.dir/src/ZEDX/ZEDX.cpp.o
+[ 16%] Building CXX object CMakeFiles/trt.dir/src/communication/RS485.cpp.o
+[ 20%] Building CXX object CMakeFiles/trt.dir/src/communication/client.cpp.o
+[ 24%] Building CXX object CMakeFiles/trt.dir/src/main.cpp.o
+[ 28%] Building CXX object CMakeFiles/trt.dir/src/prj_detector.cpp.o
+[ 32%] Building CXX object CMakeFiles/trt.dir/src/worker/worker.cpp.o
+[ 36%] Building CXX object CMakeFiles/trt.dir/src/yolov8_classifier/classifier.cpp.o
+[ 40%] Building CXX object CMakeFiles/trt.dir/src/yolov8_detector/detector.cpp.o
+[ 44%] Building CXX object CMakeFiles/trt.dir/src/yolov_pose/keypoint_refiner.cpp.o
+[ 48%] Building CXX object CMakeFiles/trt.dir/src/yolov_pose/pose.cpp.o
+[ 52%] Linking CXX executable trt
+make[4]: Leaving directory '/home/cvia/nuaa/CVIA_trt/build'
+[100%] Built target trt
+make[3]: Leaving directory '/home/cvia/nuaa/CVIA_trt/build'
+make[2]: Leaving directory '/home/cvia/nuaa/CVIA_trt/build'
+make[1]: Leaving directory '/home/cvia/nuaa/CVIA_trt/build'
+cmake -E copy_if_different build/trt trt

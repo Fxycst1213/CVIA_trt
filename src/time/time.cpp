@@ -14,8 +14,6 @@ namespace timer
 
     Timer::~Timer()
     {
-        cudaFree(_gStart);
-        cudaFree(_gStop);
         cudaEventDestroy(_gStart);
         cudaEventDestroy(_gStop);
     }
