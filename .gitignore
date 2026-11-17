@@ -1,3 +1,4 @@
+/build/
 /CMakeFiles/
 /cmake_install.cmake
 /CMakeCache.txt
@@ -5,3 +6,9 @@
 /Makefile
 /tools/bin/
 /data/
+/models/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo

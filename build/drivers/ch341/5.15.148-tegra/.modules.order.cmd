@@ -1,1 +1,0 @@
-cmd_/home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/modules.order := {   echo /home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/ch341.ko; :; } | awk '!x[$$0]++' - > /home/cvia/nuaa/CVIA_trt/build/drivers/ch341/5.15.148-tegra/modules.order

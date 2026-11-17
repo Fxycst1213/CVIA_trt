@@ -1,6 +1,0 @@
-/home/cvia/nuaa/CVIA_trt/build/CMakeFiles/trt.dir
-/home/cvia/nuaa/CVIA_trt/build/CMakeFiles/keypoint_collector.dir
-/home/cvia/nuaa/CVIA_trt/build/CMakeFiles/keypoint_refinement_eval.dir
-/home/cvia/nuaa/CVIA_trt/build/CMakeFiles/keypoint_refinement_tests.dir
-/home/cvia/nuaa/CVIA_trt/build/CMakeFiles/edit_cache.dir
-/home/cvia/nuaa/CVIA_trt/build/CMakeFiles/rebuild_cache.dir
