@@ -12,6 +12,9 @@ namespace pose
 {
 namespace
 {
+    // HSV V is in [0, 255]; tune this upper limit for the camera exposure.
+    constexpr int kBlackMarkerMaxValue = 100;
+
     float bounded(float value, float low, float high)
     {
         return std::max(low, std::min(value, high));
@@ -43,11 +46,11 @@ namespace
         const cv::Rect roi = requested & cv::Rect(0, 0, image.cols, image.rows);
         if (roi.width < 5 || roi.height < 5)
             return false;
-        cv::Mat hsv, low_red, high_red, mask;
+        cv::Mat hsv, mask;
         cv::cvtColor(image(roi), hsv, cv::COLOR_BGR2HSV);
-        cv::inRange(hsv, cv::Scalar(0, 65, 40), cv::Scalar(15, 255, 255), low_red);
-        cv::inRange(hsv, cv::Scalar(165, 65, 40), cv::Scalar(180, 255, 255), high_red);
-        cv::bitwise_or(low_red, high_red, mask);
+        // Black stickers on the white body are selected by low brightness.
+        // Leave H/S unrestricted because dark pixels can have noisy hue/saturation.
+        cv::inRange(hsv, cv::Scalar(0, 0, 0), cv::Scalar(179, 255, kBlackMarkerMaxValue), mask);
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         const float expected_area = previous_area > 0 ? previous_area :
@@ -59,7 +62,7 @@ namespace
             if (area < std::max(2.0f, expected_area * 0.08f) || area > expected_area * 4.0f)
                 continue;
             const cv::Rect bounds = cv::boundingRect(contour);
-            // A clipped red background/stripe is not a complete marker.
+            // A clipped dark background/stripe is not a complete marker.
             if (bounds.x <= 0 || bounds.y <= 0 || bounds.br().x >= roi.width || bounds.br().y >= roi.height)
                 continue;
             const float aspect = static_cast<float>(std::max(bounds.width, bounds.height)) /

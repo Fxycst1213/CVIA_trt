@@ -51,6 +51,22 @@ def get_json(url):
 
 
 class PoseTests(unittest.TestCase):
+    def test_camera_and_robot_base_coordinates_survive_udp_json_validation(self):
+        frame = viewer.Frame(b"", (), (1, 2, 3, 4, 5, 6), 100, time.monotonic(), True,
+                             (.1, .2, .3), (400, 500, 600), robot_base_valid=True,
+                             robot_base_xyz=(100.25, -200.5, 300.75))
+        message = receiver.validate_message(json.dumps(pose_message(frame)))
+        self.assertEqual(message["camera_xyz_mm"], [400, 500, 600])
+        self.assertEqual(message["filtered_xyz_mm"], [4, 5, 6])
+        self.assertEqual(message["robot_base_xyz_mm"], [100.25, -200.5, 300.75])
+        # Loss of a current PnP measurement still permits a labeled filter estimate.
+        message.update(pnp_valid=False, pnp_rvec_rad=None, pnp_tvec_mm=None, camera_xyz_mm=None)
+        self.assertTrue(receiver.validate_message(json.dumps(message))["robot_base_valid"])
+        for changes in ({"robot_base_valid": False}, {"robot_base_xyz_mm": [1, 2]},
+                        {"robot_base_xyz_mm": [1, float("nan"), 3]}, {"camera_xyz_mm": [4, 5, 6]}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                receiver.validate_message(json.dumps(dict(message, **changes)))
+
     def test_offline_installer_rejects_corrupted_archive(self):
         with tempfile.TemporaryDirectory(prefix="cvia-mediamtx-install-") as directory:
             archive = Path(directory) / "bad.tar.gz"

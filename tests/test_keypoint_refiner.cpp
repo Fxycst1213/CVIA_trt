@@ -25,11 +25,12 @@ namespace
         return result;
     }
 
-    cv::Mat image(const std::vector<cv::Point2f> &points)
+    cv::Mat image(const std::vector<cv::Point2f> &points,
+                  const cv::Scalar &marker_color = cv::Scalar(20, 20, 20))
     {
         cv::Mat frame(360, 640, CV_8UC3, cv::Scalar(220, 220, 220));
         for (const auto &point : points)
-            cv::circle(frame, point, 6, cv::Scalar(15, 15, 210), -1, cv::LINE_AA);
+            cv::circle(frame, point, 6, marker_color, -1, cv::LINE_AA);
         return frame;
     }
 
@@ -59,6 +60,35 @@ int main()
         const auto truth = centers();
         const auto frame = image(truth);
         KeypointRefiner refiner;
+        for (const auto &marker_color : {cv::Scalar(0, 0, 0), cv::Scalar(65, 65, 65), cv::Scalar(75, 20, 10)})
+        {
+            refiner.reset();
+            std::vector<keypoint> points;
+            for (const auto &point : truth)
+                points.emplace_back(point.x + 3, point.y - 2, 0.95f);
+            refiner.refine(image(truth, marker_color), points, box, 33);
+            require(refiner.stats().color_matches == NUM_KEYPOINTS, "Dark stickers were not all localized");
+            for (int i = 0; i < NUM_KEYPOINTS; ++i)
+                require(distance(points[i], truth[i]) < 0.5f, "Dark sticker center was not recovered");
+        }
+        std::cout << "PASS black, dark-gray and tinted-dark stickers on a white body\n";
+
+        for (const auto &marker_color : {cv::Scalar(150, 150, 150), cv::Scalar(15, 15, 210)})
+        {
+            refiner.reset();
+            std::vector<keypoint> points;
+            for (const auto &point : truth)
+                points.emplace_back(point.x + 3, point.y - 2, 0.95f);
+            const auto raw = points;
+            refiner.refine(image(truth, marker_color), points, box, 33);
+            require(refiner.stats().color_matches == 0, "Bright region was treated as a dark sticker");
+            for (int i = 0; i < NUM_KEYPOINTS; ++i)
+                require(distance(points[i], cv::Point2f(raw[i].x, raw[i].y)) < 0.01f,
+                        "Missing dark sticker did not preserve the initial observation");
+        }
+        std::cout << "PASS light-gray and bright-red rejection with raw-point fallback\n";
+
+        refiner.reset();
         double raw_squared = 0, refined_squared = 0;
         for (int t = 1; t <= 80; ++t)
         {
@@ -87,27 +117,27 @@ int main()
         std::cout << "PASS real motion: mean horizontal error=" << lag / (35*NUM_KEYPOINTS) << " px\n";
 
         refiner.reset();
-        double nonred_error = 0, signed_lag = 0;
+        double fallback_error = 0, signed_lag = 0;
         int measured = 0;
         for (int t = 1; t <= 60; ++t)
         {
             auto moving_truth = centers(t * 2.0f);
             auto points = observations(moving_truth, random);
-            cv::Mat grayscale, nonred;
-            cv::cvtColor(image(moving_truth), grayscale, cv::COLOR_BGR2GRAY);
-            cv::cvtColor(grayscale, nonred, cv::COLOR_GRAY2BGR);
-            refiner.refine(nonred, points, cv::Rect2f(20+t*2, 20, 500, 260), t*33);
+            // Bright red provides optical-flow texture without passing the dark mask.
+            refiner.refine(image(moving_truth, cv::Scalar(15, 15, 210)), points,
+                           cv::Rect2f(20+t*2, 20, 500, 260), t*33);
+            require(refiner.stats().color_matches == 0, "Fallback test unexpectedly used dark segmentation");
             if (t > 10)
                 for (int i = 0; i < NUM_KEYPOINTS; ++i)
                 {
-                    nonred_error += distance(points[i], moving_truth[i]);
+                    fallback_error += distance(points[i], moving_truth[i]);
                     signed_lag += points[i].x - moving_truth[i].x;
                     ++measured;
                 }
         }
-        require(nonred_error / measured < 1.8, "Temporal filtering without color matching is too noisy");
+        require(fallback_error / measured < 1.8, "Temporal filtering without color matching is too noisy");
         require(std::abs(signed_lag / measured) < 0.75, "Temporal filtering lags real motion without color matching");
-        std::cout << "PASS motion without red segmentation: mean error=" << nonred_error / measured
+        std::cout << "PASS motion without dark segmentation: mean error=" << fallback_error / measured
                   << ", signed horizontal lag=" << signed_lag / measured << " px\n";
 
         refiner.reset();
@@ -142,13 +172,13 @@ int main()
         std::cout << "PASS timestamp-gap reacquisition\n";
 
         refiner.reset();
-        auto uncolored = observations(truth, random, 0);
-        cv::Mat background(360, 640, CV_8UC3, cv::Scalar(20, 20, 180));
-        refiner.refine(background, uncolored, box, 33);
+        auto unlocalized = observations(truth, random, 0);
+        cv::Mat background(360, 640, CV_8UC3, cv::Scalar(20, 20, 20));
+        refiner.refine(background, unlocalized, box, 33);
         for (int i = 0; i < NUM_KEYPOINTS; ++i)
-            require(distance(uncolored[i], truth[i]) < 0.01f, "Red background was treated as a marker");
-        require(refiner.stats().color_matches == 0, "Clipped red background was accepted");
-        std::cout << "PASS red-background rejection and raw-point fallback\n";
+            require(distance(unlocalized[i], truth[i]) < 0.01f, "Dark background was treated as a marker");
+        require(refiner.stats().color_matches == 0, "Clipped dark background was accepted");
+        std::cout << "PASS dark-background rejection and raw-point fallback\n";
 
         auto missing = observations(truth, random, 0);
         missing[0].conf = 0;

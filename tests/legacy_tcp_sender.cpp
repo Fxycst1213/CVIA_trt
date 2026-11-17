@@ -42,6 +42,8 @@ int main(int argc, char **argv)
     {
         frame.timestamp = 1234567890000ULL + i;
         frame.pnp_valid = i % 2 == 0;
+        frame.robot_base_valid = i % 3 != 2;
+        frame.robot_base_xyz = {{100.25f + i, -200.5f - i, 300.75f + i}};
         const auto start = std::chrono::steady_clock::now();
         if (sender.pack_and_send(frame))
             ++sent;

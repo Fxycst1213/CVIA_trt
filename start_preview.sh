@@ -78,7 +78,7 @@ fi
 if pgrep -x trt >/dev/null; then
     printf '检测到已有 trt 进程，等待它连接本机预览服务。\n'
 else
-    ./trt --preview --calibrated-pose --no-serial "$@" >"$log_dir/trt.log" 2>&1 &
+    ./trt --preview --coordinate-frames --no-serial "$@" >"$log_dir/trt.log" 2>&1 &
     child_pids+=("$!")
 fi
 

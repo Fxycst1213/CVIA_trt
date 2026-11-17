@@ -9,33 +9,35 @@
 #include <opencv2/opencv.hpp>
 #include "pose_params.hpp"
 
-struct CameraCalibration
+struct CameraCalibration//相机参数
 {
-    uint32_t width = 0;
-    uint32_t height = 0;
-    bool right_eye = true;
-    std::array<double, 4> intrinsics{}; // fx, fy, cx, cy, for the raw source image.
-    std::array<double, 12> distortion{}; // OpenCV: k1,k2,p1,p2,k3,k4,k5,k6,s1,s2,s3,s4.
+    uint32_t width = 0;//宽度
+    uint32_t height = 0;//高度
+    bool right_eye = true;//是否用有眼
+    std::array<double, 4> intrinsics{}; // fx, fy, cx, cy, for the raw source image. 内参
+    std::array<double, 12> distortion{}; // OpenCV: k1,k2,p1,p2,k3,k4,k5,k6,s1,s2,s3,s4. 外参
 };
 
-struct Resultframe
+struct Resultframe//推理结果帧参数
 {
-    cv::Mat rgb;
-    std::vector<model::pose::bbox> bboxes;
-    std::vector<float> pose_result;
-    std::vector<float> rs485_result;
-    uint64_t timestamp;
-    bool pnp_valid = false;
-    std::array<float, 3> pnp_rvec{};  // Rodrigues vector: body to camera, radians.
-    std::array<float, 3> pnp_tvec{};  // Unfiltered body origin in camera coordinates, mm.
-    CameraCalibration calibration;
+    cv::Mat rgb;//图片
+    std::vector<model::pose::bbox> bboxes;//检测框 + 关键点
+    std::vector<float> pose_result;//位姿结果
+    std::vector<float> rs485_result;//待通信结果
+    uint64_t timestamp;//时间戳
+    bool pnp_valid = false;//当前帧是否有PNP 解算的结果
+    std::array<float, 3> pnp_rvec{};  // Rodrigues vector: body to camera, radians.R 3 * 3
+    std::array<float, 3> pnp_tvec{};  // Unfiltered body origin in camera coordinates, mm.T 3 * 1
+    bool robot_base_valid = false;  // Filter initialized; may be estimated when PnP is invalid.
+    std::array<float, 3> robot_base_xyz{};  // combined * filtered/compensated camera XYZ, mm.
+    CameraCalibration calibration;//相机参数_见上
 };
 
-struct tcp_params
+struct tcp_params//TCP 通信参数
 {
     // 4. 将常量改为 static constexpr
     // 这样它们只占用一份内存，且可以用作数组长度声明
-    static constexpr int Point_num = model::pose::NUM_KEYPOINTS;
+    static constexpr int Point_num = model::pose::NUM_KEYPOINTS;//关键点的数量
     static constexpr int KeyPoint_box = (Point_num * 3 + 5);
     static constexpr int KEYPOINTS_BUFSIZE = KeyPoint_box * 4;
     static constexpr int POSE_BUFSIZE = 8 * 4;

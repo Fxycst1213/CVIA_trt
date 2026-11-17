@@ -1,7 +1,7 @@
 """Latest-frame image/pose viewer with optional per-frame camera calibration.
 
 Jetson: python3 tools/server.py --host 127.0.0.1 --no-display
-Jetson (another terminal): ./trt --preview --calibrated-pose --no-serial
+Jetson (another terminal): ./trt --preview --coordinate-frames --no-serial
 PC: ssh -N -L 8080:127.0.0.1:8080 cvia@JETSON_IP
 PC browser: http://127.0.0.1:8080
 """
@@ -31,6 +31,7 @@ POINTS = struct.Struct(f"<{NUM_DATA}f")
 POSE = struct.Struct("<6fQ")
 POSE_EXTRA = struct.Struct("<I6f")
 CAMERA = struct.Struct("<III16d")
+ROBOT_BASE = struct.Struct("<I3f")
 SRC_W, SRC_H = 1920, 1080
 # Match Pose's 1920x1080 calibration in src/yolov_pose/pose.cpp.
 K = np.array([[1067.33054757922, 0, 949.935792304770],
@@ -49,6 +50,13 @@ class Frame:
     pnp_rvec: tuple = ()
     pnp_tvec: tuple = ()
     camera: Optional[dict] = None
+    robot_base_valid: Optional[bool] = None  # None for publishers older than IHB.
+    robot_base_xyz: tuple = ()
+
+    def coordinate_status(self):
+        return {"camera_xyz_mm": self.pnp_tvec if self.pnp_valid else None,
+                "robot_base_valid": self.robot_base_valid,
+                "robot_base_xyz_mm": self.robot_base_xyz if self.robot_base_valid else None}
 
 
 def recv_all(sock, count, stop=None):
@@ -73,7 +81,7 @@ def recv_all(sock, count, stop=None):
 
 def receive_frame(sock, mode, stop=None):
     jpeg, points = b"", ()
-    if mode in ("V", "X", "C"):
+    if mode in ("V", "X", "C", "B"):
         length = recv_all(sock, 4, stop)
         if length is None:
             return None
@@ -94,7 +102,7 @@ def receive_frame(sock, mode, stop=None):
         raise ValueError("Unknown protocol mode")
     values = POSE.unpack(data)
     extra = None
-    if mode in ("X", "C"):
+    if mode in ("X", "C", "B"):
         extension = recv_all(sock, POSE_EXTRA.size, stop)
         if extension is None:
             raise EOFError("Incomplete PnP extension")
@@ -102,7 +110,7 @@ def receive_frame(sock, mode, stop=None):
         if extra[0] not in (0, 1) or not all(np.isfinite(value) for value in extra[1:]):
             raise ValueError("Invalid PnP extension")
     camera = None
-    if mode == "C":
+    if mode in ("C", "B"):
         description = recv_all(sock, CAMERA.size, stop)
         if description is None:
             raise EOFError("Incomplete camera calibration")
@@ -116,11 +124,22 @@ def receive_frame(sock, mode, stop=None):
         camera = {"eye": "right" if right_eye else "left", "view": "unrectified",
                   "width": width, "height": height, "intrinsics": list(parameters[:4]),
                   "distortion": list(parameters[4:])}
+    robot_base_valid, robot_base_xyz = None, ()
+    if mode == "B":
+        extension = recv_all(sock, ROBOT_BASE.size, stop)
+        if extension is None:
+            raise EOFError("Incomplete robot-base coordinates")
+        base = ROBOT_BASE.unpack(extension)
+        if base[0] not in (0, 1) or not all(np.isfinite(value) for value in base[1:]):
+            raise ValueError("Invalid robot-base coordinates")
+        robot_base_valid = bool(base[0])
+        robot_base_xyz = base[1:] if robot_base_valid else ()
     if not all(np.isfinite(value) for value in points + values[:6]):
         raise ValueError("Non-finite coordinates in frame")
     return Frame(jpeg, points, values[:6], values[6], time.monotonic(),
                  bool(extra[0]) if extra else None,
-                 extra[1:4] if extra and extra[0] else (), extra[4:] if extra and extra[0] else (), camera)
+                 extra[1:4] if extra and extra[0] else (), extra[4:] if extra and extra[0] else (), camera,
+                 robot_base_valid, robot_base_xyz)
 
 
 class LatestFrames:
@@ -186,6 +205,8 @@ class LatestFrames:
                     "pnp_valid": frame.pnp_valid if frame else None,
                     "pnp_rvec_rad": frame.pnp_rvec if frame and frame.pnp_valid else None,
                     "pnp_tvec_mm": frame.pnp_tvec if frame and frame.pnp_valid else None,
+                    **(frame.coordinate_status() if frame else {
+                        "camera_xyz_mm": None, "robot_base_valid": None, "robot_base_xyz_mm": None}),
                     "camera": frame.camera if frame else None,
                     "rtsp": self.output_status() if self.output_status else None}
 
@@ -206,8 +227,8 @@ def receive_connections(listener, frames, stop, on_frame=None):
             connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             try:
                 handshake = recv_all(connection, 3, stop)
-                if handshake not in (b"IHV", b"IHD", b"IHX", b"IHC"):
-                    raise ValueError("Expected IHV, IHD, IHX or IHC handshake")
+                if handshake not in (b"IHV", b"IHD", b"IHX", b"IHC", b"IHB"):
+                    raise ValueError("Expected IHV, IHD, IHX, IHC or IHB handshake")
                 with frames.condition:
                     frames.connected = True
                     frames.rate_started = time.monotonic()
@@ -292,11 +313,40 @@ PAGE = """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 body{margin:24px;background:#15191f;color:#edf2f7;font:16px system-ui}
 img{max-width:100%;display:block;background:#080a0d;min-height:120px}
 pre{white-space:pre-wrap;line-height:1.6}p{color:#adb8c6}
+table{border-collapse:collapse;width:100%;max-width:1000px;margin:20px 0;font-variant-numeric:tabular-nums}
+th,td{padding:12px;border-bottom:1px solid #3a4554;text-align:right}
+th:first-child{text-align:left}thead{color:#adb8c6}.coordinates{overflow-x:auto}
+#coordinate-state{color:#f5cb80}td{min-width:85px}
 </style><h2>位姿解算实时预览</h2>
 <p>绿点及编号：检测关键点；红点：输出位置投影。位置单位为毫米。</p>
+<div class="coordinates"><table aria-label="相机与机械臂基底坐标">
+<thead><tr><th scope="col">坐标系 / 数据</th><th scope="col">X (mm)</th><th scope="col">Y (mm)</th><th scope="col">Z (mm)</th></tr></thead>
+<tbody>
+<tr><th scope="row">相机坐标系（PnP 原始）</th><td id="camera-x">—</td><td id="camera-y">—</td><td id="camera-z">—</td></tr>
+<tr><th scope="row">相机坐标系（滤波/补偿，外参输入）</th><td id="filtered-x">—</td><td id="filtered-y">—</td><td id="filtered-z">—</td></tr>
+<tr><th scope="row">机械臂基底坐标系（外参变换后）</th><td id="base-x">—</td><td id="base-y">—</td><td id="base-z">—</td></tr>
+</tbody></table></div>
+<p>基底坐标由同帧的滤波/补偿位置乘以工程中的外参矩阵得到。</p>
+<p id="coordinate-state" role="status">等待坐标数据…</p>
 <img id="image" alt="等待图像连接…"><pre id="status">等待数据…</pre>
 <script>
 const image=document.getElementById('image'), status=document.getElementById('status');
+function showXYZ(prefix,values){
+  ['x','y','z'].forEach((axis,i)=>{
+    const value=Array.isArray(values)?values[i]:null;
+    document.getElementById(prefix+'-'+axis).textContent=Number.isFinite(value)?value.toFixed(2):'—';
+  });
+}
+function showCoordinates(s,live){
+  showXYZ('camera',live?s.camera_xyz_mm:null);
+  showXYZ('filtered',live && s.robot_base_valid!==false?s.filtered_xyz_mm:null);
+  showXYZ('base',live?s.robot_base_xyz_mm:null);
+  document.getElementById('coordinate-state').textContent=!live?'数据未连接或已过期':
+    s.robot_base_valid==null?'发送端未提供基底坐标，请重启更新后的启动脚本':
+    !s.robot_base_valid?'等待首次有效位姿解算':
+    s.pnp_valid?'当前帧 PnP 有效；三行数据来自同一帧':
+    '当前帧 PnP 无效；滤波/补偿与基底坐标为估计值';
+}
 async function refresh(){
   let url;
   try {
@@ -315,15 +365,15 @@ async function updateStatus(){
   try {
     const s=await (await fetch('/status.json',{cache:'no-store'})).json();
     const live=s.connected && s.age_ms!==null && s.age_ms<1000;
+    showCoordinates(s,live);
     status.textContent=(live?'实时接收':'等待数据或画面已停止更新')+
       (s.detected===false?'；未检测到目标':'')+
       '\\n接收帧率: '+s.receive_fps+' FPS  已接收: '+s.received+'  已绘制: '+s.rendered+
       '\\n画面距本机收到该帧: '+(s.age_ms===null?'—':s.age_ms+' ms')+
       '\\n源时间戳: '+s.timestamp+
-      '\\n滤波位置 XYZ (mm): '+JSON.stringify(s.filtered_xyz_mm)+
       '\\n预测位置 XYZ (mm): '+JSON.stringify(s.predicted_xyz_mm);
-  } catch(error) { status.textContent='预览服务未连接'; }
-  setTimeout(updateStatus,1000);
+  } catch(error) { status.textContent='预览服务未连接'; showCoordinates({},false); }
+  setTimeout(updateStatus,200);
 }
 refresh(); updateStatus();
 </script></html>""".encode("utf-8")

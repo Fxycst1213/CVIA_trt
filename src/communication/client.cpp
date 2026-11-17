@@ -22,7 +22,7 @@ void client::init(const prj_params &params)
     _jpeg_width = params.t_params.jpeg_width;
     _jpeg_quality = params.t_params.jpeg_quality;
     _send_timeout_ms = params.t_params.send_timeout_ms;
-    if ((_socket_mode < 0 || _socket_mode > 3) || _jpeg_width < 0 ||
+    if ((_socket_mode < 0 || _socket_mode > 4) || _jpeg_width < 0 ||
         _jpeg_quality < 1 || _jpeg_quality > 100 || _send_timeout_ms <= 0 ||
         params.port < 1 || params.port > 65535)
         throw std::invalid_argument("Invalid TCP preview settings");
@@ -67,7 +67,8 @@ bool client::connect_to_server()
         else
             result = 0;
     }
-    const char header[] = {'I', 'H', _socket_mode == 3 ? 'C' : (_socket_mode == 2 ? 'X' : (_socket_mode == 0 ? 'V' : 'D'))};
+    const char modes[] = {'V', 'D', 'X', 'C', 'B'};
+    const char header[] = {'I', 'H', modes[_socket_mode]};
     if (result < 0 || !SendAll(header, sizeof(header)))
     {
         disconnect();
@@ -110,10 +111,12 @@ bool client::pack_and_send(const Resultframe &frame)
     // IHD: [6 floats + uint64]. Keep pose units/order and timestamp unchanged.
     // IHX appends [uint32 valid][3 float rvec radians][3 float tvec mm], little endian.
     // IHC also appends <III16d>: JPEG width/height, right-eye flag, fx/fy/cx/cy, 12 distortion values.
+    // IHB appends <I3f> to IHC: initialized flag and robot-base XYZ in mm, before serial axis/offset mapping.
     const size_t prefix = _socket_mode != 1 ? sizeof(uint32_t) + image_bytes + tcp_params::KEYPOINTS_BUFSIZE : 0;
     const size_t extra = _socket_mode >= 2 ? sizeof(uint32_t) + 6 * sizeof(float) : 0;
-    const size_t calibration_bytes = _socket_mode == 3 ? 3 * sizeof(uint32_t) + 16 * sizeof(double) : 0;
-    _packet.assign(prefix + tcp_params::POSE_BUFSIZE + extra + calibration_bytes, 0);
+    const size_t calibration_bytes = _socket_mode >= 3 ? 3 * sizeof(uint32_t) + 16 * sizeof(double) : 0;
+    const size_t base_bytes = _socket_mode == 4 ? sizeof(uint32_t) + 3 * sizeof(float) : 0;
+    _packet.assign(prefix + tcp_params::POSE_BUFSIZE + extra + calibration_bytes + base_bytes, 0);
     if (_socket_mode != 1)
     {
         uint32_t length = htonl(static_cast<uint32_t>(image_bytes));
@@ -174,6 +177,19 @@ bool client::pack_and_send(const Resultframe &frame)
         std::copy(calibration.distortion.begin(), calibration.distortion.end(), parameters.begin() + 4);
         memcpy(destination, description.data(), sizeof(description));
         memcpy(destination + sizeof(description), parameters.data(), sizeof(parameters));
+    }
+    if (base_bytes)
+    {
+        auto *destination = _packet.data() + prefix + tcp_params::POSE_BUFSIZE + extra + calibration_bytes;
+        const uint32_t valid = frame.robot_base_valid ? 1 : 0;
+        memcpy(destination, &valid, sizeof(valid));
+        if (valid)
+        {
+            if (!std::all_of(frame.robot_base_xyz.begin(), frame.robot_base_xyz.end(),
+                             [](float value) { return std::isfinite(value); }))
+                throw std::invalid_argument("Non-finite robot-base coordinates");
+            memcpy(destination + sizeof(valid), frame.robot_base_xyz.data(), 3 * sizeof(float));
+        }
     }
     if (!SendAll(_packet.data(), _packet.size()))
     {

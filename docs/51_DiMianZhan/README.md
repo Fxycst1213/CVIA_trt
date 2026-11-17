@@ -21,7 +21,7 @@ ZED → TensorRT / PnP → Orin 本机 MediaMTX :8554/live → 天空端 / 无�
 
 参数 `192.168.2.61` **仅是 UDP 位姿接收电脑的地址**。视频始终发布到 Orin 回环地址 `rtsp://127.0.0.1:8554/live`，由 Orin MediaMTX 统一提供给接收端。不填参数时不发独立 UDP，只输出带位姿叠加的 RTSP 视频。
 
-脚本自动启动 Orin 上的 MediaMTX、图像/位姿桥接服务和 `trt --preview --calibrated-pose --camera-eye right`。默认启用 `/dev/ttyUSB0` 串口，9600 波特率、8N1；新解算数据充足时按 10 Hz 发送，每个周期只取最新结果，帧校验取累加和低 8 位。所有进程在后台运行，关闭终端或断开 SSH 不影响服务。旧模式会自动切换；本项目的旧网页预览会正常停止、释放相机后被接管，不影响其他项目或独立串口控制任务。启动成功前会确认 Orin `/live` 已返回有效 RTSP 描述。串口设备不存在或无法打开时，C++ 会在 `trt.log` 中报错，视频推流继续运行。
+脚本自动启动 Orin 上的 MediaMTX、图像/位姿桥接服务和 `trt --preview --coordinate-frames --camera-eye right`。默认启用 `/dev/ttyUSB0` 串口，9600 波特率、8N1；新解算数据充足时按 10 Hz 发送，每个周期只取最新结果，帧校验取累加和低 8 位。所有进程在后台运行，关闭终端或断开 SSH 不影响服务。旧模式会自动切换；本项目的旧网页预览会正常停止、释放相机后被接管，不影响其他项目或独立串口控制任务。启动成功前会确认 Orin `/live` 已返回有效 RTSP 描述。串口设备不存在或无法打开时，C++ 会在 `trt.log` 中报错，视频推流继续运行。
 
 ## 相机右目与标定
 
@@ -133,11 +133,18 @@ CVIA_VIDEO_WIDTH=1280 CVIA_BITRATE=2M ./start_groundstation.sh 192.168.2.61
 |---|---|
 | `detected` | 此帧是否检测到目标；不代表 PnP 已成功 |
 | `predicted_xyz_mm` | 现有预测 XYZ，毫米 |
-| `filtered_xyz_mm` | 现有滤波/补偿后的 XYZ 输出，毫米 |
+| `filtered_xyz_mm` | 相机系滤波/补偿后的 XYZ，外参变换的输入，毫米 |
+| `camera_xyz_mm` | 相机系原始 PnP XYZ，与 `pnp_tvec_mm` 相同；当前帧 PnP 无效时为 `null` |
+| `robot_base_xyz_mm` | 同帧 `combined * [filtered_xyz_mm, 1]` 的前三项，即机械臂基底 XYZ，毫米 |
+| `robot_base_valid` | 是否已有可用的滤波/变换结果；首次解算前为 `false`，旧协议为 `null` |
 | `pnp_valid` | 此帧 PnP 是否成功；旧 IHV 协议没有该标志，返回 `null` |
 | `pnp_rvec_rad` | 当前帧 Rodrigues 旋转向量，弧度；不是欧拉角。无效时为 `null` |
 | `pnp_tvec_mm` | 当前帧未经滤波的 PnP 平移，毫米。无效时为 `null` |
 | `camera` | 同帧相机标定：`eye`、原始视图、图像尺寸、`intrinsics=[fx,fy,cx,cy]` 和 12 项 `distortion`；旧协议为 `null` |
+
+网页分别显示相机系原始 PnP、相机系滤波/补偿、机械臂基底系三行 XYZ，保留两位小数，单位均为毫米。后两行是外参变换前后的同一位置：`robot_base_xyz_mm = (combined * [filtered_xyz_mm, 1])[:3]`。外参由 C++ 使用现有矩阵计算，网页不保存另一份矩阵。`filtered_xyz_mm` 包含现有卡尔曼滤波及绕 X 轴 -0.18° 的补偿；基底值为串口换轴/偏移前的结果，串口仍使用 `[base_y + 220, base_x + 250, -base_z + 90]`。这些数值对应飞机模型中央蓝色标记定义的原点。
+
+当前帧 PnP 无效时，原始相机坐标显示“—”；已有滤波结果时，滤波与基底位置明确标为估计值。首次解算前或网页数据超过一秒未更新时，相应坐标显示“—”。网页接口及独立 UDP 均提供上述新增字段，PC 的 `receive_pose.py` 网页也显示相同坐标表。
 
 完整 PnP 约定为 `camera_point = Rodrigues(pnp_rvec_rad) * body_point + pnp_tvec_mm`，机体轴为 X 指向机头、Y 指向右侧、Z 指向下方，原点为白色飞机机身中央蓝色标记的中心（仅作原点，不参与 PnP）。当前使用 `models/onnx/x_plane1.onnx` 的 9 个关键点，三维坐标来自 `data/plane9/points_body_mm.json`，按翼展 3445 mm 缩放。滤波输出经过现有补偿，与原始 PnP 平移分别提供，不混用。PnP 失败时不发送上一次的旋转向量冒充当前有效结果。视频中坐标轴仅在当前帧 PnP 有效时绘制，轴长 200 mm。
 
@@ -145,7 +152,9 @@ CVIA_VIDEO_WIDTH=1280 CVIA_BITRATE=2M ./start_groundstation.sh 192.168.2.61
 
 `receive_pose.py --csv results/pose.csv` 可保存数值。图像模式沿用 IHV 握手，发送端与接收端均使用上述 9 点数据长度；IHD 纯数据格式不变。`--extended-pose` 使用 IHX 握手，在图像、关键点和 32 字节位置区之后追加 28 字节：`<I6f`，分别为有效标志、三维旋转向量和三维平移。仅在接收端支持 IHX 时启用。
 
-当前一键脚本使用 `--calibrated-pose` / IHC：在 IHX 内容后追加 `<III16d>`，分别是 JPEG 宽/高、右目标志、4 个内参和 12 个畸变系数。缩小传输图像时同时缩放内参，畸变系数保持不变，推理仍使用原始帧。旧接收端不支持 IHC 时需要同步更新 `tools/server.py`。
+`--calibrated-pose` / IHC：在 IHX 内容后追加 `<III16d>`，分别是 JPEG 宽/高、右目标志、4 个内参和 12 个畸变系数。缩小传输图像时同时缩放内参，畸变系数保持不变，推理仍使用原始帧。旧接收端不支持 IHC 时需要同步更新 `tools/server.py`。
+
+当前一键脚本使用 `--coordinate-frames` / IHB：在 IHC 内容后追加 16 字节 `<I3f>`，依次为 `robot_base_valid` 和三维基底坐标（float、毫米）。无效时坐标区置零，由接收端输出 `null`。IHB 的有效标志表示滤波器已初始化，与当前帧 `pnp_valid` 分开；旧 IHV/IHD/IHX/IHC 解析仍受支持。更新后需重新编译并重启发送端与网页服务；地面站网页通过 `CVIA_WEB_ENABLE=1 ./start_groundstation.sh 192.168.2.61` 开启。
 
 发布接口参照 [MediaMTX FFmpeg 发布文档](https://mediamtx.org/docs/publish/ffmpeg)；视频使用 [FFmpeg RTSP/TCP](https://www.ffmpeg.org/ffmpeg-protocols.html#rtsp) 发布到服务端，不需要 Windows 相机采集程序参与。
 

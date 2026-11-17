@@ -30,7 +30,6 @@ find_package(OpenCV REQUIRED)
 include_directories(${TENSORRT_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${CUDA_INCLUDE_DIRS})
-include_directories("/usr/include/eigen3")
 include_directories(
     ${PROJECT_SOURCE_DIR}/src/preprocess
     ${PROJECT_SOURCE_DIR}/src/yolov8_detector
@@ -77,14 +76,13 @@ target_link_libraries(trt nvinfer nvinfer_plugin)
 target_link_libraries(trt cudart curand)
 target_link_libraries(trt ${OpenCV_LIBS})
 target_link_libraries(trt ${ZED_LIBS})
-target_link_libraries(trt fftw3)
 
 # Offline dataset evaluation is opt-in and does not start application I/O.
 set(keypoint_eval_srcs ${srcs})
 list(REMOVE_ITEM keypoint_eval_srcs "${PROJECT_SOURCE_DIR}/src/main.cpp")
 add_executable(keypoint_collector EXCLUDE_FROM_ALL tools/collect_keypoints.cpp ${keypoint_eval_srcs})
 target_link_libraries(keypoint_collector ${CUDA_LIBRARIES} nvinfer nvinfer_plugin
-    cudart curand ${OpenCV_LIBS} ${ZED_LIBS} fftw3)
+    cudart curand ${OpenCV_LIBS} ${ZED_LIBS})
 
 add_executable(keypoint_refinement_eval EXCLUDE_FROM_ALL tools/refine_keypoints_sequence.cpp
     src/yolov_pose/keypoint_refiner.cpp)

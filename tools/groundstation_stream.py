@@ -22,7 +22,7 @@ def pose_message(frame):
             "pnp_valid": frame.pnp_valid,
             "pnp_rvec_rad": list(frame.pnp_rvec) if frame.pnp_valid else None,
             "pnp_tvec_mm": list(frame.pnp_tvec) if frame.pnp_valid else None,
-            "camera": frame.camera}
+            "camera": frame.camera, **frame.coordinate_status()}
 
 
 class PoseSender:

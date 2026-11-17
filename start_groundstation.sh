@@ -57,12 +57,12 @@ if (($# > 1)); then
     exit 1
 fi
 groundstation_ip="${1:-}"
-camera_eye="${CVIA_CAMERA_EYE:-right}"
+camera_eye="${CVIA_CAMERA_EYE:-left}"
 rtsp_port="${CVIA_RTSP_PORT:-8554}"
 video_fps="${CVIA_VIDEO_FPS:-20}"
 video_width="${CVIA_VIDEO_WIDTH:-1920}"
 web_width="${CVIA_WEB_WIDTH:-1280}"
-web_enabled="${CVIA_WEB_ENABLE:-0}"
+web_enabled="${CVIA_WEB_ENABLE:-1}"
 web_port=0
 if [[ "$web_enabled" == 1 ]]; then web_port=8080; fi
 bitrate="${CVIA_BITRATE:-4M}"
@@ -71,7 +71,7 @@ mediamtx_bin="${CVIA_MEDIAMTX_BIN:-$project_dir/tools/bin/mediamtx}"
 rtsp_url="rtsp://127.0.0.1:$rtsp_port/live"
 
 if [[ ! -x ./trt ]]; then printf '找不到 trt，请先运行 make。\n' >&2; exit 1; fi
-if ! trt_help="$(./trt --help 2>/dev/null)" || [[ "$trt_help" != *--calibrated-pose* ]]; then
+if ! trt_help="$(./trt --help 2>/dev/null)" || [[ "$trt_help" != *--coordinate-frames* ]]; then
     printf 'trt 需要重新编译，请运行：./start_groundstation.sh --stop && make -j2 && ./start_groundstation.sh 192.168.2.61\n' >&2
     exit 1
 fi
@@ -109,7 +109,7 @@ fi
 mediamtx_bin="$(realpath "$mediamtx_bin")"
 "$mediamtx_bin" --version >/dev/null
 mkdir -p "$log_dir"
-configuration="orin-local-v5-serial|$groundstation_ip|$rtsp_port|$video_fps|$video_width|$web_width|$web_enabled|$bitrate|$pose_port|$camera_eye|$mediamtx_bin"
+configuration="orin-local-v6-coordinates|$groundstation_ip|$rtsp_port|$video_fps|$video_width|$web_width|$web_enabled|$bitrate|$pose_port|$camera_eye|$mediamtx_bin"
 
 print_endpoints() {
     python3 - "$groundstation_ip" "$rtsp_port" "$pose_port" "$web_enabled" <<'PY'
@@ -251,7 +251,7 @@ nice -n 10 python3 -u tools/server.py --host 127.0.0.1 --no-display --web-host 0
     --video-width "$video_width" --web-width "$web_width" \
     >"$log_dir/server.log" 2>&1 &
 child_pids+=("$!")
-./trt --preview --calibrated-pose --camera-eye "$camera_eye" \
+./trt --preview --coordinate-frames --camera-eye "$camera_eye" \
     --stream-fps "$video_fps" --jpeg-width "$video_width" >"$log_dir/trt.log" 2>&1 &
 child_pids+=("$!")
 for ((attempt = 0; attempt < 120; attempt++)); do

@@ -96,40 +96,6 @@ void prj_v8detector::rs485_receive_loop()
     }
 }
 
-
-// void prj_v8detector::camera()
-// {
-//     while (1)
-//     {
-//         Resultframe _resultframe;
-//         _timer->init();
-//         _timer->start_cpu();
-//         _zed->grab_frame(_writeframe);
-//         // *(_writeframe->rgb_ptr) = cv::imread(("data/source/00590.png"));
-//         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
-//         // _resultframe.rgb = *(_writeframe->rgb_ptr);
-//         _resultframe.rgb = _writeframe->rgb_ptr->clone();
-//         _resultframe.timestamp = _writeframe->timestamp;
-//         _timer->start_cpu();
-//         _worker->inference(_resultframe);
-//         _timer->stop_cpu<timer::Timer::ms>("inference");
-//         _resultframe.bboxes = _worker->m_pose->m_bboxes;
-//         _resultframe.pose_result = _worker->m_pose->m_result;
-//         _timer->start_cpu();
-//         _rs485.sendDoubleArray(_resultframe.pose_result.data());
-//         _timer->stop_cpu<timer::Timer::ms>("RS485");
-
-//         _timer->start_cpu();
-//         {
-//             std::lock_guard<std::mutex> lock(_queue_mtx);
-//             _resultframe_queue.push(_resultframe);
-//             _queue_cv.notify_one();
-//         }
-//         _timer->stop_cpu<timer::Timer::ms>("Load TCP");
-//         _timer->show();
-//     }
-// }
-
 void prj_v8detector::camera()
 {
     while (_is_running && !stop_requested.load(std::memory_order_relaxed))

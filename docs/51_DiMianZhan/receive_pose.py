@@ -32,6 +32,19 @@ def validate_message(data):
         if not isinstance(value, list) or len(value) != 3 or not all(
                 type(number) in (int, float) and math.isfinite(number) for number in value):
             raise ValueError(f"Invalid {key}")
+    # Optional fields allow receivers to keep accepting older publishers.
+    if "camera_xyz_mm" in message and message["camera_xyz_mm"] != message.get("pnp_tvec_mm"):
+        raise ValueError("Camera XYZ must match the current raw PnP translation")
+    if "robot_base_valid" in message or "robot_base_xyz_mm" in message:
+        valid, xyz = message.get("robot_base_valid"), message.get("robot_base_xyz_mm")
+        if valid is not None and type(valid) is not bool:
+            raise ValueError("Invalid robot_base_valid")
+        if valid is True:
+            if not isinstance(xyz, list) or len(xyz) != 3 or not all(
+                    type(number) in (int, float) and math.isfinite(number) for number in xyz):
+                raise ValueError("Invalid robot_base_xyz_mm")
+        elif xyz is not None:
+            raise ValueError("Uninitialized robot-base coordinates must be null")
     return message
 
 
@@ -67,14 +80,42 @@ class PoseStore:
 PAGE = """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>地面站位姿结果</title>
 <style>body{font:17px system-ui;background:#15191f;color:#edf2f7;margin:24px}
-pre{white-space:pre-wrap;line-height:1.7}</style><h2>地面站位姿结果</h2>
+pre{white-space:pre-wrap;line-height:1.7}
+table{border-collapse:collapse;width:100%;max-width:1000px;font-variant-numeric:tabular-nums}
+th,td{padding:12px;border-bottom:1px solid #3a4554;text-align:right}th:first-child{text-align:left}
+.coordinates{overflow-x:auto}td{min-width:85px}#coordinate-state{color:#f5cb80}
+</style><h2>地面站位姿结果</h2>
 <p>视频用地面站播放器或 VLC 打开 MediaMTX 的 /live RTSP 地址。</p>
 <p>位置单位：毫米；旋转向量单位：弧度。PnP 无效时不使用其旋转和平移结果。</p>
+<div class="coordinates"><table aria-label="相机与机械臂基底坐标">
+<thead><tr><th scope="col">坐标系 / 数据</th><th scope="col">X (mm)</th><th scope="col">Y (mm)</th><th scope="col">Z (mm)</th></tr></thead>
+<tbody>
+<tr><th scope="row">相机坐标系（PnP 原始）</th><td id="camera-x">—</td><td id="camera-y">—</td><td id="camera-z">—</td></tr>
+<tr><th scope="row">相机坐标系（滤波/补偿，外参输入）</th><td id="filtered-x">—</td><td id="filtered-y">—</td><td id="filtered-z">—</td></tr>
+<tr><th scope="row">机械臂基底坐标系（外参变换后）</th><td id="base-x">—</td><td id="base-y">—</td><td id="base-z">—</td></tr>
+</tbody></table></div><p id="coordinate-state" role="status">等待坐标数据…</p>
 <pre id="data">等待 Jetson UDP 数据…</pre><script>
+function showXYZ(prefix,values){
+  ['x','y','z'].forEach((axis,i)=>{
+    const value=Array.isArray(values)?values[i]:null;
+    document.getElementById(prefix+'-'+axis).textContent=Number.isFinite(value)?value.toFixed(2):'—';
+  });
+}
+function showCoordinates(s,live){
+  showXYZ('camera',live?s.camera_xyz_mm:null);
+  showXYZ('filtered',live && s.robot_base_valid!==false?s.filtered_xyz_mm:null);
+  showXYZ('base',live?s.robot_base_xyz_mm:null);
+  document.getElementById('coordinate-state').textContent=!live?'数据未连接或已过期':
+    s.robot_base_valid==null?'发送端未提供基底坐标':
+    !s.robot_base_valid?'等待首次有效位姿解算':
+    s.pnp_valid?'当前帧 PnP 有效；三行数据来自同一帧':
+    '当前帧 PnP 无效；滤波/补偿与基底坐标为估计值';
+}
 async function refresh(){try{
 const s=await(await fetch('/pose.json',{cache:'no-store'})).json();
+showCoordinates(s.pose||{},s.live);
 document.getElementById('data').textContent=(s.live?'实时接收':'等待数据 / 数据已过期')+'\\n'+JSON.stringify(s,null,2);
-}catch(e){document.getElementById('data').textContent='服务连接失败';}setTimeout(refresh,200);}refresh();
+}catch(e){document.getElementById('data').textContent='服务连接失败';showCoordinates({},false);}setTimeout(refresh,200);}refresh();
 </script></html>""".encode("utf-8")
 
 

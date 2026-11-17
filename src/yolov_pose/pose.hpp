@@ -8,10 +8,8 @@
 #include "logger.hpp"
 #include "model.hpp"
 #include "../algorithms/TrajectoryKF.h"
-#include "../algorithms/PeriodEstimator.h"
 #include "../ZEDX/ZEDX.h"
 #include "../params/pose_params.hpp"
-#include "../algorithms/FrameLookbackEstimator.h"
 #include "keypoint_refiner.hpp"
 
 class LSTMPredictor;
@@ -56,10 +54,8 @@ namespace model
             virtual bool postprocess_cpu(const uint64_t &timestamp) override;
             virtual bool postprocess_gpu(const uint64_t &timestamp) override;
             void run_pnp_multi_stage();
-            std::shared_ptr<FrameLookbackEstimator> m_lookback_estimator;
             void run_filter_and_estimation(const uint64_t &timestamp, uint64_t m_frame_counter);
             void run_pnp_single_stage();
-            void run_lstm_predictin();
             void show(string path);
             void refine_keypoints(std::vector<keypoint> &kpt, uint64_t timestamp_ms = 0);
             const std::vector<keypoint> &raw_keypoints() const { return m_raw_keypoints; }
@@ -72,6 +68,7 @@ namespace model
             void set_camera_calibration(const CameraCalibration &calibration);
 
         private:
+            std::array<float, 3> m_robot_base_xyz{};
             std::vector<keypoint> m_raw_keypoints;
             bool has_pnp_model() const
             {

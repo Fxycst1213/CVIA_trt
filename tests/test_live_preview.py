@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import shutil
 import signal
 import socket
 import struct
@@ -36,6 +37,12 @@ def packet(timestamp=1234567890000, jpeg=None):
             + viewer.POSE.pack(1, 2, 3, 4, 5, 6, timestamp))
 
 
+def coordinate_packet(timestamp=1, pnp_valid=True, base_valid=True, xyz=(100.25, -200.5, 300.75)):
+    return (packet(timestamp) + viewer.POSE_EXTRA.pack(int(pnp_valid), .1, .2, .3, 400, 500, 600)
+            + viewer.CAMERA.pack(160, 90, 1, 100, 110, 80, 45, *([0] * 12))
+            + viewer.ROBOT_BASE.pack(int(base_valid), *xyz))
+
+
 class FragmentedSocket:
     def __init__(self, data):
         self.data = data
@@ -48,6 +55,32 @@ class FragmentedSocket:
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_coordinate_frames_preserve_estimates_and_discard_uninitialized_positions(self):
+        stream = FragmentedSocket(coordinate_packet(11) + coordinate_packet(12, pnp_valid=False)
+                                  + coordinate_packet(13, pnp_valid=False, base_valid=False))
+        frame = viewer.receive_frame(stream, "B")
+        self.assertEqual(frame.timestamp, 11)
+        self.assertEqual(frame.coordinate_status()["camera_xyz_mm"], (400, 500, 600))
+        self.assertEqual(frame.robot_base_xyz, (100.25, -200.5, 300.75))
+        frame = viewer.receive_frame(stream, "B")
+        self.assertEqual(frame.timestamp, 12)
+        self.assertIsNone(frame.coordinate_status()["camera_xyz_mm"])
+        self.assertTrue(frame.robot_base_valid)  # Filter prediction remains available.
+        self.assertEqual(frame.robot_base_xyz, (100.25, -200.5, 300.75))
+        frame = viewer.receive_frame(stream, "B")
+        self.assertEqual(frame.timestamp, 13)
+        self.assertFalse(frame.robot_base_valid)
+        self.assertEqual(frame.robot_base_xyz, ())
+        self.assertIsNone(frame.coordinate_status()["robot_base_xyz_mm"])
+        self.assertIsNone(viewer.receive_frame(stream, "B"))
+        prefix = coordinate_packet()[:-viewer.ROBOT_BASE.size]
+        for invalid in (viewer.ROBOT_BASE.pack(2, 0, 0, 0),
+                        viewer.ROBOT_BASE.pack(1, 0, float("nan"), 0)):
+            with self.assertRaises(ValueError):
+                viewer.receive_frame(FragmentedSocket(prefix + invalid), "B")
+        with self.assertRaises(EOFError):
+            viewer.receive_frame(FragmentedSocket(coordinate_packet()[:-1]), "B")
+
     def test_legacy_preview_fallback_matches_solver_defaults(self):
         source = (ROOT / "src/yolov_pose/pose.cpp").read_text()
         camera = re.search(r"_K = \(cv::Mat_<double>\(3, 3\) <<(.*?)\);", source, re.S)
@@ -220,6 +253,21 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(frame.timestamp, 1234567890000)
         self.assertEqual(self.finish()["sent"], 1)
 
+    def test_production_client_sends_base_coordinates_without_scaling_or_stale_values(self):
+        self.start_sender(width=960, mode=4, count=3)
+        with self.accept(b"IHB") as connection:
+            first, estimated, invalid = (viewer.receive_frame(connection, "B") for _ in range(3))
+        self.assertEqual(first.camera["width"], 960)
+        self.assertEqual(first.pnp_tvec, (400, 500, 600))
+        self.assertEqual(first.robot_base_xyz, (100.25, -200.5, 300.75))
+        self.assertFalse(estimated.pnp_valid)
+        self.assertTrue(estimated.robot_base_valid)
+        self.assertEqual(estimated.robot_base_xyz, (101.25, -201.5, 301.75))
+        self.assertFalse(invalid.robot_base_valid)
+        self.assertEqual(invalid.robot_base_xyz, ())
+        self.assertEqual(invalid.timestamp, first.timestamp + 2)
+        self.assertEqual(self.finish()["sent"], 3)
+
     def test_nonreading_peer_cannot_block_sender_indefinitely(self):
         self.start_sender(count=2, pressure=True)
         with self.accept():
@@ -230,6 +278,41 @@ class ClientTests(unittest.TestCase):
 
 
 class BrowserTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node is required to exercise the page JavaScript")
+    def test_coordinate_table_formats_axes_and_clears_invalid_or_stale_data(self):
+        # Execute the actual browser functions against a small DOM stub.
+        # Both the Orin preview and the optional PC receiver must follow the same semantics.
+        remote_source = (ROOT / "docs/51_DiMianZhan/receive_pose.py").read_text()
+        pages = [viewer.PAGE.decode(), remote_source]
+        for page in pages:
+            script = re.search(r"<script>(.*?)</script>", page, re.S).group(1)
+            functions = script[script.index("function showXYZ"):script.index("async function refresh")]
+            check = r'''
+const assert=require('assert');
+const cells={};
+const document={getElementById(id){return cells[id]||(cells[id]={textContent:''});}};
+''' + functions + r'''
+const source={camera_xyz_mm:[1.234,-2.345,3000],filtered_xyz_mm:[4,5,6],
+              robot_base_xyz_mm:[100.25,-200.5,300.75],robot_base_valid:true,pnp_valid:true};
+showCoordinates(source,true);
+assert.strictEqual(cells['camera-x'].textContent,'1.23');
+assert.strictEqual(cells['camera-y'].textContent,'-2.35');
+assert.strictEqual(cells['filtered-z'].textContent,'6.00');
+assert.strictEqual(cells['base-y'].textContent,'-200.50');
+showCoordinates({...source,pnp_valid:false,camera_xyz_mm:null},true);
+assert.strictEqual(cells['camera-x'].textContent,'—');
+assert.strictEqual(cells['base-x'].textContent,'100.25');
+assert(cells['coordinate-state'].textContent.includes('估计值'));
+showCoordinates({...source,robot_base_valid:false,robot_base_xyz_mm:null},true);
+assert.strictEqual(cells['base-x'].textContent,'—');
+assert.strictEqual(cells['filtered-x'].textContent,'—');
+showCoordinates(source,false);
+for(const prefix of ['camera','filtered','base'])
+  for(const axis of ['x','y','z']) assert.strictEqual(cells[prefix+'-'+axis].textContent,'—');
+'''
+            result = subprocess.run(["node", "-e", check], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_headless_preview_keeps_latest_frame_and_accepts_reconnect(self):
         def unused_port():
             with socket.socket() as candidate:
@@ -262,7 +345,9 @@ class BrowserTests(unittest.TestCase):
                 urlopen(base + "/snapshot.jpg", timeout=1)
             self.assertEqual(error.exception.code, 503)
             with urlopen(base, timeout=1) as response:
-                self.assertIn("位姿解算".encode(), response.read())
+                page = response.read().decode()
+                self.assertIn("相机坐标系（PnP 原始）", page)
+                self.assertIn("机械臂基底坐标系（外参变换后）", page)
             with socket.create_connection(("127.0.0.1", tcp_port), timeout=2) as connection:
                 connection.sendall(b"IHV")
                 connection.sendall(b"".join(packet(i) for i in range(1, 101)))
@@ -282,6 +367,20 @@ class BrowserTests(unittest.TestCase):
                 connection.sendall(b"IHD" + viewer.POSE.pack(7, 8, 9, 10, 11, 12, 200))
                 status = wait_status(lambda s: s["timestamp"] == 200)
                 self.assertEqual(status["filtered_xyz_mm"], [10, 11, 12])
+                self.assertIsNone(status["robot_base_xyz_mm"])
+            with socket.create_connection(("127.0.0.1", tcp_port), timeout=2) as connection:
+                connection.sendall(b"IHB" + coordinate_packet(300))
+                status = wait_status(lambda s: s["timestamp"] == 300)
+                self.assertEqual(status["camera_xyz_mm"], [400, 500, 600])
+                self.assertEqual(status["filtered_xyz_mm"], [4, 5, 6])
+                self.assertEqual(status["robot_base_xyz_mm"], [100.25, -200.5, 300.75])
+                connection.sendall(coordinate_packet(301, pnp_valid=False))
+                status = wait_status(lambda s: s["timestamp"] == 301)
+                self.assertIsNone(status["camera_xyz_mm"])
+                self.assertTrue(status["robot_base_valid"])
+                connection.sendall(coordinate_packet(302, pnp_valid=False, base_valid=False))
+                status = wait_status(lambda s: s["timestamp"] == 302)
+                self.assertIsNone(status["robot_base_xyz_mm"])
         finally:
             process.send_signal(signal.SIGINT)
             try:

@@ -33,7 +33,7 @@ int main(int argc, char const *argv[])
     p_params.port = 1234;
     p_params.socket_mode = 0;
     p_params.rs485_port = "/dev/ttyUSB0";
-    p_params.rs485_baudrate = B115200;
+    p_params.rs485_baudrate = B9600;
     try
     {
         for (int i = 1; i < argc; ++i)
@@ -44,8 +44,10 @@ int main(int argc, char const *argv[])
                 std::cout << "Usage: ./trt [--preview] [--tcp-ip IPv4] [--tcp-port PORT]\n"
                              "             [--jpeg-width WIDTH] [--jpeg-quality 1..100]\n"
                              "             [--stream-fps 1..120] [--extended-pose] [--calibrated-pose]\n"
+                             "             [--coordinate-frames]\n"
                              "             [--camera-eye right|left] [--no-serial] [--verbose]\n"
                              "--preview: send a 1280px-wide preview to 127.0.0.1:1234.\n"
+                             "--coordinate-frames: include camera calibration and robot-base XYZ (IHB).\n"
                              "--jpeg-width 0: original image size. Inference always uses full size.\n";
                 return 0;
             }
@@ -73,6 +75,11 @@ int main(int argc, char const *argv[])
             if (arg == "--calibrated-pose")
             {
                 p_params.socket_mode = 3;
+                continue;
+            }
+            if (arg == "--coordinate-frames")
+            {
+                p_params.socket_mode = 4;
                 continue;
             }
             if (i + 1 >= argc)
