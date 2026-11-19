@@ -60,7 +60,9 @@ int main()
         const auto truth = centers();
         const auto frame = image(truth);
         KeypointRefiner refiner;
-        for (const auto &marker_color : {cv::Scalar(0, 0, 0), cv::Scalar(65, 65, 65), cv::Scalar(75, 20, 10)})
+        for (const auto &marker_color : {cv::Scalar(0, 0, 0), cv::Scalar(65, 65, 65),
+                                        cv::Scalar(75, 20, 10), cv::Scalar(150, 150, 150),
+                                        cv::Scalar(205, 205, 145)})
         {
             refiner.reset();
             std::vector<keypoint> points;
@@ -71,9 +73,10 @@ int main()
             for (int i = 0; i < NUM_KEYPOINTS; ++i)
                 require(distance(points[i], truth[i]) < 0.5f, "Dark sticker center was not recovered");
         }
-        std::cout << "PASS black, dark-gray and tinted-dark stickers on a white body\n";
+        std::cout << "PASS black, gray and reflective cyan stickers on a white body\n";
 
-        for (const auto &marker_color : {cv::Scalar(150, 150, 150), cv::Scalar(15, 15, 210)})
+        for (const auto &marker_color : {cv::Scalar(215, 215, 215), cv::Scalar(245, 245, 245),
+                                        cv::Scalar(15, 15, 210)})
         {
             refiner.reset();
             std::vector<keypoint> points;
@@ -86,7 +89,54 @@ int main()
                 require(distance(points[i], cv::Point2f(raw[i].x, raw[i].y)) < 0.01f,
                         "Missing dark sticker did not preserve the initial observation");
         }
-        std::cout << "PASS light-gray and bright-red rejection with raw-point fallback\n";
+        std::cout << "PASS low-contrast, bright and saturated-red rejection with raw-point fallback\n";
+
+        // Match the supplied 1920-pixel view: a roughly 1170-pixel aircraft box,
+        // flat 28x6 stickers, exposure variation, and network errors beyond 16 px.
+        const cv::Rect2f large_box(20, 40, 1170, 600);
+        std::vector<cv::Point2f> ellipse_truth;
+        for (int i = 0; i < NUM_KEYPOINTS; ++i)
+            ellipse_truth.emplace_back(120 + (i % 5) * 210, 180 + (i / 5) * 230);
+        cv::Mat reflective_frame(720, 1280, CV_8UC3);
+        for (int y = 0; y < reflective_frame.rows; ++y)
+        {
+            const int brightness = 225 + y / 36;
+            reflective_frame.row(y).setTo(cv::Scalar(brightness, brightness, brightness));
+        }
+        std::vector<keypoint> offset_points;
+        for (int i = 0; i < NUM_KEYPOINTS; ++i)
+        {
+            const cv::Scalar color = i % 2 ? cv::Scalar(205, 205, 145) : cv::Scalar(155, 155, 155);
+            cv::ellipse(reflective_frame, ellipse_truth[i], cv::Size(14, 3),
+                        (i % 3) * 25.0, 0, 360, color, -1, cv::LINE_AA);
+            offset_points.emplace_back(ellipse_truth[i].x + 18, ellipse_truth[i].y - 10, 0.95f);
+        }
+        refiner.reset();
+        refiner.refine(reflective_frame, offset_points, large_box, 33);
+        require(refiner.stats().color_matches == NUM_KEYPOINTS, "Reflective ellipses were missed in the expanded search");
+        for (int i = 0; i < NUM_KEYPOINTS; ++i)
+            require(distance(offset_points[i], ellipse_truth[i]) < 1.5f,
+                    "Foreshortened sticker center was not recovered from a 21-pixel error");
+        std::cout << "PASS reflective, rotated thin ellipses with illumination gradients and 21-pixel offsets\n";
+
+        refiner.reset();
+        cv::Mat clutter(720, 1280, CV_8UC3, cv::Scalar(235, 235, 235));
+        const cv::Point2f isolated(300, 300);
+        // A cable crosses the expanded window; a real sticker lies inside the
+        // search window but outside the allowed correction distance.
+        cv::line(clutter, cv::Point(310, 220), cv::Point(310, 380), cv::Scalar(30, 30, 30), 2);
+        cv::ellipse(clutter, cv::Point(330, 300), cv::Size(8, 5), 0, 0, 360,
+                    cv::Scalar(65, 65, 65), -1, cv::LINE_AA);
+        std::vector<keypoint> clutter_points{keypoint(isolated.x, isolated.y, 0.95f)};
+        refiner.refine(clutter, clutter_points, large_box, 33);
+        require(refiner.stats().color_matches == 0 && distance(clutter_points[0], isolated) < 0.01f,
+                "Expanded search snapped to a cable or a marker beyond the correction limit");
+        refiner.reset();
+        clutter_points[0].x = 309;
+        refiner.refine(clutter, clutter_points, large_box, 33);
+        require(refiner.stats().color_matches == 1 && distance(clutter_points[0], cv::Point2f(330, 300)) < 1.5f,
+                "Cable clutter prevented localization inside the correction limit");
+        std::cout << "PASS expanded-window cable rejection and bounded correction\n";
 
         refiner.reset();
         double raw_squared = 0, refined_squared = 0;

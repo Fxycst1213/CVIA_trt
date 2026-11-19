@@ -23,7 +23,7 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
 
     _zed = ZEDX::GetInstance();
     _zed->init(p_params.cameraID, p_params.resolution, 60, false, p_params.camera_eye);
-    _worker->m_pose->set_camera_calibration(_zed->calibration());
+    // _worker->m_pose->set_camera_calibration(_zed->calibration());
 
     preprocess::init_process(p_params.H, p_params.W);
 
@@ -161,7 +161,7 @@ void prj_v8detector::camera()
 void prj_v8detector::camera_foldimages()
 {
     std::vector<cv::String> filenames;
-    cv::String folder = "//home/cvia/nuaa/CVIA_trt/data/frames_left/WIN_20261016_10_52_53_Pro/*.jpg";
+    cv::String folder = "/home/cvia/nuaa/CVIA_trt/data/val/*.jpg";
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
@@ -305,8 +305,8 @@ void prj_v8detector::tcp_loop()
 void prj_v8detector::run()
 {
     _is_running = true;
-   auto t1 = std::thread(_func_camera);
-    // auto t2 = std::thread(_func_camera_foldimages);
+//    auto t1 = std::thread(_func_camera);
+    auto t2 = std::thread(_func_camera_foldimages);
     std::thread t_rs485, t_rs485_rx;
     if (_serial_enabled)
     {
@@ -314,15 +314,15 @@ void prj_v8detector::run()
         t_rs485_rx = std::thread(_func_rs485_receive);
     }
     auto t3 = std::thread(_func_pack_and_send);
-   if (t1.joinable())
-   {
-       t1.join();
-   }
+//    if (t1.joinable())
+//    {
+//        t1.join();
+//    }
     
-    //  if (t2.joinable())
-    //  {
-    //      t2.join();
-    //  }
+     if (t2.joinable())
+     {
+         t2.join();
+     }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
     _rs485_cv.notify_all(); // 唤醒 RS485

@@ -13,7 +13,7 @@ using namespace std;
 int main(int argc, char const *argv[])
 {
     // White aircraft: nine keypoints, ordered to match Pose's CAD points.
-    string onnxPath = "models/onnx/x_plane1.onnx";
+    string onnxPath = "models/onnx/X_1118.onnx";
     auto params = model::Params();
     params.img = {640, 640, 3};
 

@@ -23,7 +23,7 @@ import cv2
 import numpy as np
 
 # Must match src/params/pose_params.hpp and the x_plane1.onnx publisher.
-NUM_KEYPOINTS = 9
+NUM_KEYPOINTS = 11
 NUM_DATA = NUM_KEYPOINTS * 3 + 5
 POSE_DAT_NUM = 8
 MAX_JPEG_BYTES = 16 * 1024 * 1024
@@ -34,9 +34,14 @@ CAMERA = struct.Struct("<III16d")
 ROBOT_BASE = struct.Struct("<I3f")
 SRC_W, SRC_H = 1920, 1080
 # Match Pose's 1920x1080 calibration in src/yolov_pose/pose.cpp.
-K = np.array([[1067.33054757922, 0, 949.935792304770],
-              [0, 1067.37400981335, 525.523361276358], [0, 0, 1]], dtype=np.float64)
-DIST = np.array([-0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686], dtype=np.float64)
+# K = np.array([[1067.33054757922, 0, 949.935792304770],
+#               [0, 1067.37400981335, 525.523361276358], [0, 0, 1]], dtype=np.float64)
+# DIST = np.array([-0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686], dtype=np.float64)
+
+
+K = np.array([[1075.46954757922, 0.0, 969.05085792304770],
+              [0.0, 1081.0180981335, 539.313361276358], [0, 0, 1]], dtype=np.float64)
+DIST = np.array([-0.0909, 0.1061, -0.0014, -0.0011, -0.0332], dtype=np.float64)
 
 
 @dataclass(frozen=True)
@@ -264,14 +269,17 @@ def get_pixel_location(x, y, z, camera_matrix, dist_coeffs):
     return tuple(pixels[0, 0].astype(int))
 
 
-def projection_calibration(calibration, width, height):
-    if calibration is None:
-        return scale_camera_matrix(K, SRC_W, SRC_H, width, height), DIST
-    fx, fy, cx, cy = calibration["intrinsics"]
-    camera = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
-    return (scale_camera_matrix(camera, calibration["width"], calibration["height"], width, height),
-            np.asarray(calibration["distortion"], dtype=np.float64))
+# def projection_calibration(calibration, width, height):
+#     if calibration is None:
+#         return scale_camera_matrix(K, SRC_W, SRC_H, width, height), DIST
+#     fx, fy, cx, cy = calibration["intrinsics"]
+#     camera = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
+#     return (scale_camera_matrix(camera, calibration["width"], calibration["height"], width, height),
+#             np.asarray(calibration["distortion"], dtype=np.float64))
 
+def projection_calibration(calibration, width, height):
+    # 固定使用文件顶部的左目 K、DIST，忽略 TCP 传来的标定参数。
+    return scale_camera_matrix(K, SRC_W, SRC_H, width, height), DIST
 
 def draw_result_image(image, points, pose, pnp_valid=None, pnp_rvec=(), pnp_tvec=(), calibration=None):
     h, w = image.shape[:2]

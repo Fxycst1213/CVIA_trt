@@ -11,6 +11,8 @@ namespace pose
 {
     struct KeypointRefinementStats
     {
+        // Appearance matches include reflective gray/cyan stickers localized by
+        // their contrast against the body, not just absolutely black pixels.
         int color_matches = 0;
         int flow_matches = 0;
         int rejected_jumps = 0;

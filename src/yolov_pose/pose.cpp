@@ -192,23 +192,28 @@ namespace model
             uart_result.resize(3,0.0f);
 
             //  一飞院
-            _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
-                  0.0, 1067.37400981335, 525.523361276358,
+            // _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
+            //       0.0, 1067.37400981335, 525.523361276358,
+            //       0.0, 0.0, 1.0);
+
+            // _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
+            
+            _K = (cv::Mat_<double>(3, 3) << 1075.46954757922, 0.0, 969.05085792304770,
+                  0.0, 1081.0180981335, 539.313361276358,
                   0.0, 0.0, 1.0);
 
-            _diff = (cv::Mat_<float>(1, 5) << -0.0898188725781947, 0.0570779357792198, 0, 0, 0.0421749060858686);
-            
-            static_assert(NUM_KEYPOINTS == 9, "The x_plane1 CAD model requires nine keypoints");
+            _diff = (cv::Mat_<float>(1, 5) << -0.0909, 0.1061, -0.0014, -0.0011, -0.0332);
+            static_assert(NUM_KEYPOINTS == 11, "The x_plane1 CAD model requires nine keypoints");
             _p3d = (cv::Mat_<double>(NUM_KEYPOINTS, 3) <<
-                    -1140.185415, 320.541651, -171.623864, // 0: right tail
-                    -1138.122218, -252.807144, -183.293752, // 1: middle tail
-                    -1138.495437, -498.770342, -186.186855, // 2: left tail
-                    -308.380553, 1442.940719, 139.316616, // 3: right wing, outer
-                    -128.699448, 965.301400, 118.095040, // 4: right wing, middle
-                    98.100843, 303.114333, 73.843701, // 5: right wing, inner
-                    65.599679, -567.305239, 74.178759, // 6: left wing, inner
-                    -186.631200, -1250.437034, 114.774628, // 7: left wing, outer
-                    820.107631, -125.717101, 34.994809); // 8: nose
+                    -1298.178555, 390.302125, -146.34303, // 0: right tail
+                    -1320.014862, -130.679327, -115.960107,// 1: middle tail
+                    -1327.385123, -341.073521, -106.967758, // 2: left tail
+                    -529.742539, 1606.000809, 77.685003, // 3: right wing, outer
+                    -388.164682, 1116.515352, 88.559047, // 4: right wing, middle
+                    -268.51011, 419.768867, 103.807179, // 5: right wing, inner
+                    -337.448481, -413.907372, 150.899049, // 6: left wing, inner
+                    -519.734637, -1087.041527, 203.050124, // 7: left wing, outer
+                    340.730021, -13.814498, 47.352457); // 8: nose
 
             combined = (cv::Mat_<float>(4, 4) <<
                              0.01303241,   0.69184523,  0.7219282,   200.5658,
@@ -355,7 +360,7 @@ namespace model
             if (has_pnp_model())
             {
                 run_pnp_multi_stage();
-                run_filter_and_estimation(timestamp, m_frame_counter);
+                // run_filter_and_estimation(timestamp, m_frame_counter);
                 cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[3],
                                              m_result[4],
                                              m_result[5],
