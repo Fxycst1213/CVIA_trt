@@ -10,6 +10,27 @@
 #include "cudatools.hpp"
 namespace timer
 {
+    using Clock = std::chrono::steady_clock;
+
+    inline double elapsed_ms(Clock::time_point start)
+    {
+        return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+    }
+
+    // Separate clocks allow nested stages without overwriting the parent timer.
+    class ScopedCpuTimer
+    {
+    public:
+        explicit ScopedCpuTimer(double &duration_ms)
+            : duration_ms_(duration_ms), start_(Clock::now()) {}
+        ~ScopedCpuTimer() { duration_ms_ = elapsed_ms(start_); }
+        ScopedCpuTimer(const ScopedCpuTimer &) = delete;
+        ScopedCpuTimer &operator=(const ScopedCpuTimer &) = delete;
+
+    private:
+        double &duration_ms_;
+        Clock::time_point start_;
+    };
 
     class Timer
     {
@@ -25,7 +46,7 @@ namespace timer
 
     public:
         void start_cpu();
-        void start_gpu();
+        void start_gpu(cudaStream_t stream = nullptr);
         void start_cpu_1();
 
         void stop_cpu();
@@ -38,12 +59,14 @@ namespace timer
 
         void show();
         void init();
+        float elapsed_gpu_ms() const { return _timeElasped; }
 
     private:
         std::chrono::time_point<std::chrono::high_resolution_clock> _cStart;
         std::chrono::time_point<std::chrono::high_resolution_clock> _cStop;
         cudaEvent_t _gStart;
         cudaEvent_t _gStop;
+        cudaStream_t _gStream = nullptr;
         float _timeElasped;
         std::vector<std::string> _timeMsgs;
         logger::Level m_LOG_LEVEL = logger::Level::VERB;

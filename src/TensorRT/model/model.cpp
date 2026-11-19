@@ -5,6 +5,7 @@
 #include "NvInfer.h"
 #include "NvOnnxParser.h"
 #include "../calibrator/calibrator.hpp"
+#include <cstdio>
 #include <string>
 
 using namespace std;
@@ -110,7 +111,7 @@ namespace model
 
     bool Model::enqueue_bindings()
     {
-        m_timer->start_gpu();
+        m_timer->start_gpu(m_stream);
         if (m_useCudaGraph && m_isGraphCaptured)
         {
             cudaError_t ret = cudaGraphLaunch(m_cudaGraphExec, m_stream);
@@ -145,6 +146,7 @@ namespace model
         }
 
         m_timer->stop_gpu("trt-inference(GPU)");
+        m_frame_timings.inference_gpu_ms = m_timer->elapsed_gpu_ms();
         return true;
     }
 
@@ -173,27 +175,70 @@ namespace model
 
     void Model::inference(const Resultframe &resultframe)
     {
+        const auto frame_start = timer::Clock::now();
+        m_frame_timings = FrameTimings{};
         m_timer->init();
         reset_task();
-        if (m_params->dev == CPU)
         {
-            preprocess_cpu(resultframe.rgb);
-        }
-        else
-        {
-            preprocess_gpu(resultframe.rgb);
+            timer::ScopedCpuTimer stage(m_frame_timings.preprocess_ms);
+            if (m_params->dev == CPU)
+            {
+                preprocess_cpu(resultframe.rgb);
+                // Include the CPU path's asynchronous input upload in preprocessing.
+                CUDA_CHECK(cudaStreamSynchronize(m_stream));
+            }
+            else
+            {
+                preprocess_gpu(resultframe.rgb);
+            }
         }
 
-        enqueue_bindings();
+        {
+            timer::ScopedCpuTimer stage(m_frame_timings.inference_ms);
+            enqueue_bindings(); // Existing GPU timer waits for the inference stream.
+        }
+        {
+            timer::ScopedCpuTimer stage(m_frame_timings.postprocess_ms);
+            if (m_params->dev == CPU)
+            {
+                postprocess_cpu(resultframe.timestamp);
+            }
+            else
+            {
+                postprocess_gpu(resultframe.timestamp);
+            }
+        }
+        m_frame_timings.total_ms = timer::elapsed_ms(frame_start);
+        // Format/write the log after all measured stages; no per-frame flush or delay.
+        log_frame_timings(resultframe.timestamp);
+    }
 
-        if (m_params->dev == CPU)
-        {
-            postprocess_cpu(resultframe.timestamp);
-        }
-        else
-        {
-            postprocess_gpu(resultframe.timestamp);
-        }
+    void Model::log_frame_timings(uint64_t timestamp)
+    {
+        ++m_timing_frame;
+        if (m_timing_frame == 1)
+            std::printf("[timing-info] units=ms warmup_frames=20 opencv_threads=%d "
+                        "input=%dx%d; postprocess contains output_copy/decode/nms/refine/pnp/filter/transform; "
+                        "off=not_called; inference_gpu is part of inference, not additional time\n",
+                        cv::getNumThreads(), m_inputImage.cols, m_inputImage.rows);
+        const auto value = [](double ms) {
+            if (ms < 0)
+                return std::string("off");
+            char buffer[32];
+            std::snprintf(buffer, sizeof(buffer), "%.3f", ms);
+            return std::string(buffer);
+        };
+        const auto &t = m_frame_timings;
+        std::printf("[timing] frame=%llu timestamp=%llu warmup=%d "
+                    "total_ms=%.3f preprocess_ms=%.3f inference_ms=%.3f postprocess_ms=%.3f "
+                    "output_copy_ms=%s decode_ms=%s nms_ms=%s refine_ms=%s "
+                    "pnp_ms=%s filter_ms=%s transform_ms=%s inference_gpu_ms=%s\n",
+                    static_cast<unsigned long long>(m_timing_frame),
+                    static_cast<unsigned long long>(timestamp), m_timing_frame <= 20 ? 1 : 0,
+                    t.total_ms, t.preprocess_ms, t.inference_ms, t.postprocess_ms,
+                    value(t.output_copy_ms).c_str(), value(t.decode_ms).c_str(), value(t.nms_ms).c_str(),
+                    value(t.refine_ms).c_str(), value(t.pnp_ms).c_str(), value(t.filter_ms).c_str(),
+                    value(t.transform_ms).c_str(), value(t.inference_gpu_ms).c_str());
     }
 
     void Model::print_network(INetworkDefinition &network, bool optimized)

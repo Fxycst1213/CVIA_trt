@@ -73,7 +73,7 @@ startup_timeout=600
 camera_eye="${CVIA_CAMERA_EYE:-left}"
 rtsp_port="${CVIA_RTSP_PORT:-8554}"
 # Rendering/RTSP encoding only; this does not limit inference or TCP sending.
-video_fps="${CVIA_VIDEO_FPS:-10}"
+video_fps="${CVIA_VIDEO_FPS:-50}"
 video_width="${CVIA_VIDEO_WIDTH:-1920}"
 web_width="${CVIA_WEB_WIDTH:-1280}"
 web_enabled="${CVIA_WEB_ENABLE:-1}"

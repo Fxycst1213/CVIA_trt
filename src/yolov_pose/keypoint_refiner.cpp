@@ -454,9 +454,11 @@ void KeypointRefiner::refine(const cv::Mat &image, std::vector<keypoint> &points
     }
     const float expected = bounded(std::max(box.width, box.height)*0.045f, 8.0f, 180.0f);
     std::vector<unsigned char> ambiguous(points.size(), 0);
-    for (size_t i = 0; i < points.size(); ++i)
+    // Each job reads the same YOLO seeds and writes only its own result slot.
+    // Neighbor association uses seeds, never another job's unfinished fit.
+    const auto refine_point = [&](size_t i)
     {
-        if (!valid[i]) continue;
+        if (!valid[i]) return;
         for (float expansion : {1.6f, 2.8f})
         {
             const float radius = bounded(expected*expansion, 18.0f, 260.0f);
@@ -540,7 +542,13 @@ void KeypointRefiner::refine(const cv::Mat &image, std::vector<keypoint> &points
             selected.ellipse.center += origin;
             break; // A measured or ambiguous candidate must not trigger a wider search.
         }
-    }
+    };
+    // Reuse OpenCV's worker pool; one task per keypoint, no per-frame threads.
+    cv::parallel_for_(cv::Range(0, static_cast<int>(points.size())), [&](const cv::Range &range) {
+        for (int i = range.start; i < range.end; ++i)
+            refine_point(static_cast<size_t>(i));
+    }, static_cast<double>(points.size()));
+
     // One physical ellipse cannot be assigned to two keypoint identities.
     std::vector<unsigned char> duplicate(points.size(), 0);
     for (size_t i = 0; i < points.size(); ++i)

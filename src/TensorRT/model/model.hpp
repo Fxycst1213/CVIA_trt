@@ -59,6 +59,23 @@ namespace model
         bool keypoints_only = false; // 2D detections without pose estimation or LSTM.
     };
 
+    // Negative means the stage was not called in this frame, not a zero-cost stage.
+    struct FrameTimings
+    {
+        double preprocess_ms = -1;
+        double inference_ms = -1;
+        double inference_gpu_ms = -1;
+        double postprocess_ms = -1;
+        double total_ms = -1;
+        double output_copy_ms = -1;
+        double decode_ms = -1;
+        double nms_ms = -1;
+        double refine_ms = -1;
+        double pnp_ms = -1;
+        double filter_ms = -1;
+        double transform_ms = -1;
+    };
+
     /* 构建一个针对trt的shared pointer. 所有的trt指针的释放都是通过ptr->destroy完成*/
     template <typename T>
     void destroy_trt_ptr(T *ptr)
@@ -103,6 +120,13 @@ namespace model
         virtual bool preprocess_gpu(const cv::Mat &img) = 0;
         virtual bool postprocess_cpu(const uint64_t &timestamp) = 0;
         virtual bool postprocess_gpu(const uint64_t &timestamp) = 0;
+
+    protected:
+        FrameTimings m_frame_timings;
+
+    private:
+        void log_frame_timings(uint64_t timestamp);
+        uint64_t m_timing_frame = 0;
 
     public:
         std::string m_imagePath;

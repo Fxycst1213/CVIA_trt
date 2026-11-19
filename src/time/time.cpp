@@ -18,24 +18,25 @@ namespace timer
         cudaEventDestroy(_gStop);
     }
 
-    void Timer::start_gpu()
+    void Timer::start_gpu(cudaStream_t stream)
     {
-        cudaEventRecord(_gStart, 0);
+        _gStream = stream;
+        CUDA_CHECK(cudaEventRecord(_gStart, _gStream));
     }
 
     void Timer::stop_gpu()
     {
-        cudaEventRecord(_gStop, 0);
+        CUDA_CHECK(cudaEventRecord(_gStop, _gStream));
     }
 
     void Timer::stop_gpu(std::string msg)
     {
-        cudaEventRecord(_gStop, 0);
+        CUDA_CHECK(cudaEventRecord(_gStop, _gStream));
         char buff[100];
 
         CUDA_CHECK(cudaEventSynchronize(_gStart));
         CUDA_CHECK(cudaEventSynchronize(_gStop));
-        cudaEventElapsedTime(&_timeElasped, _gStart, _gStop);
+        CUDA_CHECK(cudaEventElapsedTime(&_timeElasped, _gStart, _gStop));
 
         sprintf(buff, "\t%-60s uses %.6lf ms", msg.c_str(), _timeElasped);
         this->_timeMsgs.emplace_back(buff);

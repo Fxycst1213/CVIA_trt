@@ -141,7 +141,7 @@ namespace model
 
         bool Pose::preprocess_gpu(const cv::Mat &img)
         {
-            m_timer->start_gpu();
+            m_timer->start_gpu(m_stream);
             m_inputImage = img;
             if (m_inputImage.data == nullptr)
             {
@@ -150,7 +150,7 @@ namespace model
             }
             m_timer->stop_gpu("preprocess(clone)");
 
-            m_timer->start_gpu();
+            m_timer->start_gpu(m_stream);
 
             preprocess::preprocess_resize_gpu(m_inputImage, m_inputMemory[1],
                                               m_params->img.h, m_params->img.w,
@@ -267,10 +267,13 @@ namespace model
         {
 
             m_timer->start_cpu();
+            auto stage_start = timer::Clock::now();
             int output_size = m_outputDims.d[1] * m_outputDims.d[2] * sizeof(float);
             CUDA_CHECK(cudaMemcpyAsync(m_outputMemory[0], m_outputMemory[1], output_size, cudaMemcpyKind::cudaMemcpyDeviceToHost, m_stream));
             CUDA_CHECK(cudaStreamSynchronize(m_stream));
+            m_frame_timings.output_copy_ms = timer::elapsed_ms(stage_start);
 
+            stage_start = timer::Clock::now();
             float conf_threshold = 0.25;
             float nms_threshold = 0.45;
             float kpt_conf_threshold = 0.5f;
@@ -328,7 +331,9 @@ namespace model
                 m_bboxes.emplace_back(std::move(pose_box));
             }
             LOGD("the count of decoded bbox is %d", m_bboxes.size());
+            m_frame_timings.decode_ms = timer::elapsed_ms(stage_start);
 
+            stage_start = timer::Clock::now();
             vector<bbox> final_bboxes;
             final_bboxes.reserve(m_bboxes.size());
             std::sort(m_bboxes.begin(), m_bboxes.end(),
@@ -358,6 +363,7 @@ namespace model
             m_raw_keypoints.clear();
             if (!m_bboxes.empty())
                 m_raw_keypoints = m_bboxes[0].keypoints;
+            m_frame_timings.nms_ms = timer::elapsed_ms(stage_start);
 
             m_frame_counter++;
             // 2D 点精修：直接修改后续发送的 m_bboxes，不依赖 PnP 是否启用。
@@ -370,6 +376,7 @@ namespace model
             {
                 run_pnp_multi_stage();
                 // run_filter_and_estimation(timestamp, m_frame_counter);
+                timer::ScopedCpuTimer transform_timer(m_frame_timings.transform_ms);
                 cv::Mat point_homogeneous = (cv::Mat_<float>(4, 1) << m_result[3],
                                              m_result[4],
                                              m_result[5],
@@ -412,6 +419,7 @@ namespace model
 
         void Pose::refine_keypoints(std::vector<keypoint> &keypoints, uint64_t timestamp_ms)
         {
+            timer::ScopedCpuTimer stage(m_frame_timings.refine_ms);
             if (m_bboxes.empty())
             {
                 m_keypoint_refiner.reset();
@@ -452,6 +460,7 @@ namespace model
 
         void Pose::run_pnp_multi_stage()
         {
+            timer::ScopedCpuTimer stage(m_frame_timings.pnp_ms);
             is_current_frame_good = false; // 重置标记位
             if (!has_pnp_model())
                 return;
@@ -503,6 +512,7 @@ namespace model
 
         void Pose::run_filter_and_estimation(const uint64_t &timestamp, uint64_t frame_id)
         {
+            timer::ScopedCpuTimer stage(m_frame_timings.filter_ms);
             double dt = 0.0;
             if (_last_timestamp != 0)
             {

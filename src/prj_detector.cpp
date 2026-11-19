@@ -175,7 +175,7 @@ void prj_v8detector::camera_foldimages()
     size_t current_idx = 0;
     while (_is_running && !stop_requested.load(std::memory_order_relaxed))
     {
-        usleep(200000); // 仅控制照片读取间隔（微秒）；设为 0 可取消，不影响 TCP/相机线程。
+        usleep(20000); // 仅控制照片读取间隔（微秒）；设为 0 可取消，不影响 TCP/相机线程。
         auto now = std::chrono::system_clock::now();
         Resultframe _resultframe;
         _timer->init();
@@ -316,8 +316,8 @@ void prj_v8detector::tcp_loop()
 void prj_v8detector::run()
 {
     _is_running = true;
-//    auto t1 = std::thread(_func_camera);
-    auto t2 = std::thread(_func_camera_foldimages);
+   auto t1 = std::thread(_func_camera);
+    // auto t2 = std::thread(_func_camera_foldimages);
     std::thread t_rs485, t_rs485_rx;
     if (_serial_enabled)
     {
@@ -325,15 +325,15 @@ void prj_v8detector::run()
         t_rs485_rx = std::thread(_func_rs485_receive);
     }
     auto t3 = std::thread(_func_pack_and_send);
-//    if (t1.joinable())
-//    {
-//        t1.join();
-//    }
+   if (t1.joinable())
+   {
+       t1.join();
+   }
     
-     if (t2.joinable())
-     {
-         t2.join();
-     }
+    // if (t2.joinable())
+    // {
+    //     t2.join();
+    // }
     _is_running = false;
     _queue_cv.notify_all(); // 唤醒 TCP 线程让它检查 _is_running 并退出
     _rs485_cv.notify_all(); // 唤醒 RS485

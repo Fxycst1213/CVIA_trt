@@ -178,6 +178,66 @@ namespace
                 "Result depends on frame order or timestamps");
         std::cout << "PASS unordered-photo and timestamp independence\n";
     }
+
+    void parallel_cases()
+    {
+        const int original_threads = cv::getNumThreads();
+        const auto truth = centers();
+        const cv::Rect2f box(20, 20, 500, 260);
+        for (int scenario = 0; scenario < 3; ++scenario)
+        {
+            auto frame = image(truth);
+            std::vector<keypoint> raw;
+            for (const auto &center : truth)
+                raw.emplace_back(center.x + 3, center.y - 2, 0.95f);
+            if (scenario == 1)
+            {
+                raw[1] = raw[0]; // Two jobs must still reject one shared marker.
+                cv::rectangle(frame, cv::Rect(190, 50, 20, 40), cv::Scalar::all(220), -1);
+            }
+            if (scenario == 2)
+            {
+                raw[0].conf = 0;
+                raw[1].x = -5;
+                raw[2].x = std::numeric_limits<float>::quiet_NaN();
+            }
+            cv::setNumThreads(1);
+            KeypointRefiner serial;
+            auto expected = raw;
+            serial.refine(frame, expected, box, 0);
+            const auto expected_stats = serial.stats();
+            const auto expected_measurements = serial.measurements();
+            for (int threads : {2, 4, 12})
+            {
+                cv::setNumThreads(threads);
+                KeypointRefiner parallel;
+                for (int repeat = 0; repeat < 8; ++repeat)
+                {
+                    auto actual = raw;
+                    parallel.refine(frame, actual, box, repeat);
+                    for (size_t i = 0; i < actual.size(); ++i)
+                    {
+                        require(actual[i].x == expected[i].x && actual[i].y == expected[i].y &&
+                                actual[i].conf == expected[i].conf,
+                                "Parallel refinement changed a point or confidence");
+                        const auto &a = parallel.measurements()[i], &e = expected_measurements[i];
+                        require(a.valid == e.valid && a.ellipse.center == e.ellipse.center &&
+                                a.coverage == e.coverage && a.inlier_fraction == e.inlier_fraction &&
+                                a.edge_rms_px == e.edge_rms_px && a.contrast == e.contrast &&
+                                a.center_spread_px == e.center_spread_px,
+                                "Parallel refinement changed measurement quality/validity");
+                    }
+                    const auto &stats = parallel.stats();
+                    require(stats.color_matches == expected_stats.color_matches &&
+                            stats.ambiguous_matches == expected_stats.ambiguous_matches &&
+                            stats.unrefined == expected_stats.unrefined,
+                            "Parallel refinement lost result counts or duplicate detection");
+                }
+            }
+        }
+        cv::setNumThreads(original_threads);
+        std::cout << "PASS parallel/serial equivalence at 2/4/12 threads, including duplicate and invalid points\n";
+    }
 }
 
 int main()
@@ -186,6 +246,7 @@ int main()
     {
         cv::setNumThreads(2);
         ellipse_cases();
+        parallel_cases();
         std::mt19937 random(42);
         const cv::Rect2f box(20, 20, 500, 260);
         const auto truth = centers();

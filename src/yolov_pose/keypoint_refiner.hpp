@@ -43,6 +43,8 @@ namespace pose
         // Confidence is never promoted. No prediction/smoothing is returned
         // as a measurement. Frames are independent, including unordered photos;
         // timestamp_ms is accepted only for source compatibility.
+        // Per-point searches share the OpenCV thread pool; identity conflicts
+        // and statistics are resolved after all searches finish.
         void refine(const cv::Mat &image, std::vector<keypoint> &points,
                     const cv::Rect2f &box, uint64_t timestamp_ms);
         const KeypointRefinementStats &stats() const { return stats_; }
