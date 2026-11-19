@@ -1,8 +1,7 @@
 #include "keypoint_refiner.hpp"
-#include <opencv2/calib3d.hpp>
 #include <opencv2/imgproc.hpp>
-#include <opencv2/video/tracking.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -12,348 +11,556 @@ namespace pose
 {
 namespace
 {
-    // Sunlit black stickers can be gray/cyan with V well above 100. Use local
-    // contrast for segmentation; V only exempts genuinely dark, tinted pixels
-    // from the saturation check.
-    constexpr int kBlackMarkerMaxValue = 100;
-    constexpr int kMarkerMaxSaturation = 140;
-    constexpr float kSearchRadiusScale = 1.6f;
-    constexpr float kSearchRadiusMax = 48.0f;
-    constexpr float kCorrectionLimitMax = 24.0f;
+    // Adapted from EllipseMarkerDetector in tools/extract_split_video.py:
+    // threshold proposals -> positive normal-gradient edges -> robust ellipse
+    // fit -> coverage/contrast/leave-quarter-out stability checks. Work stays
+    // inside YOLO-seeded ROIs; no full-frame optical-flow pyramids.
+    // Fewer angular samples than the offline annotator, with subpixel normal
+    // profiles and the same geometric validation, keep per-frame CPU work bounded.
+    constexpr int kSamples = 64;
+    constexpr float kMinConfidence = 0.5f;
 
     float bounded(float value, float low, float high)
     {
         return std::max(low, std::min(value, high));
     }
 
-    bool inside(const cv::Point2f &point, const cv::Size &size)
+    bool inside(const cv::Point2f &p, const cv::Size &size)
     {
-        return std::isfinite(point.x) && std::isfinite(point.y) &&
-               point.x >= 0 && point.y >= 0 && point.x < size.width && point.y < size.height;
+        return std::isfinite(p.x) && std::isfinite(p.y) &&
+               p.x >= 0 && p.y >= 0 && p.x < size.width && p.y < size.height;
+    }
+
+    float major(const cv::RotatedRect &e) { return std::max(e.size.width, e.size.height); }
+    float minor(const cv::RotatedRect &e) { return std::min(e.size.width, e.size.height); }
+
+    bool valid_ellipse(const cv::RotatedRect &e)
+    {
+        return std::isfinite(e.center.x) && std::isfinite(e.center.y) &&
+               std::isfinite(e.size.width) && std::isfinite(e.size.height) &&
+               std::isfinite(e.angle) && minor(e) >= 3 && major(e) <= 400 &&
+               major(e) <= minor(e) * 12;
     }
 
     float median(std::vector<float> values)
     {
+        if (values.empty()) return 0;
         const auto middle = values.begin() + values.size() / 2;
         std::nth_element(values.begin(), middle, values.end());
-        return *middle;
+        const float upper = *middle;
+        return values.size() % 2 ? upper : (upper + *std::max_element(values.begin(), middle)) * 0.5f;
     }
 
-    bool marker_center(const cv::Mat &image, const cv::Mat &gray, const cv::Point2f &raw,
-                       const cv::Point2f &prediction, bool tracked,
-                       float diameter, float previous_area,
-                       cv::Point2f &center, float &selected_area)
+    struct EllipseGeometry
     {
-        // Leave room for the entire ellipse when the network lands on its rim.
-        const float radius = bounded(diameter * kSearchRadiusScale, 12.0f, kSearchRadiusMax);
-        const float correction_limit = bounded(diameter * 1.05f, 6.0f, kCorrectionLimitMax);
-        const cv::Point2f anchor = tracked ? prediction * 0.6f + raw * 0.4f : raw;
-        const cv::Rect requested(cvFloor(anchor.x - radius), cvFloor(anchor.y - radius),
-                                 cvCeil(radius * 2 + 1), cvCeil(radius * 2 + 1));
-        const cv::Rect roi = requested & cv::Rect(0, 0, image.cols, image.rows);
-        if (roi.width < 5 || roi.height < 5)
-            return false;
-        cv::Mat hsv, smooth, contrast, eligible, dark;
-        cv::cvtColor(image(roi), hsv, cv::COLOR_BGR2HSV);
-        cv::Mat channels[3];
-        cv::split(image(roi), channels);
-        cv::min(channels[0], channels[1], smooth);
-        cv::min(smooth, channels[2], smooth);
-        // Cyan reflections are still dark in the red channel. Blending the
-        // darkest channel with luminance retains that contrast without relying
-        // on one particular marker hue.
-        cv::addWeighted(gray(roi), 0.5, smooth, 0.5, 0, smooth);
-        cv::GaussianBlur(smooth, smooth, cv::Size(3, 3), 0);
-        // Closing estimates the surrounding body brightness without assuming a
-        // white exposure level. Subtraction preserves compact dark stickers but
-        // removes broad illumination gradients. A rectangular kernel is separable.
-        const int background_size = cvCeil(bounded(diameter * 1.8f, 9.0f, 65.0f)) | 1;
-        cv::morphologyEx(smooth, contrast, cv::MORPH_BLACKHAT,
-                        cv::getStructuringElement(cv::MORPH_RECT, cv::Size(background_size, background_size)));
-        cv::inRange(hsv, cv::Scalar(0, 0, 0), cv::Scalar(179, kMarkerMaxSaturation, 255), eligible);
-        cv::inRange(hsv, cv::Scalar(0, 0, 0), cv::Scalar(179, 255, kBlackMarkerMaxValue), dark);
-        cv::bitwise_or(eligible, dark, eligible);
-        const cv::Mat cleanup = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
-        const float expected_area = previous_area > 0 ? previous_area :
-                                    static_cast<float>(CV_PI) * diameter * diameter * 0.25f;
-        float best_score = std::numeric_limits<float>::infinity();
-        // A single threshold either loses reflective stickers or merges them
-        // with a nearby shadow. Compare complete ellipses at several contrasts.
-        for (int threshold : {18, 30, 48, 72})
+        cv::Point2f center;
+        float a, b, c, s;
+        explicit EllipseGeometry(const cv::RotatedRect &e) : center(e.center),
+            a(e.size.width * 0.5f), b(e.size.height * 0.5f),
+            c(std::cos(e.angle * CV_PI / 180)), s(std::sin(e.angle * CV_PI / 180)) {}
+
+        cv::Point2f rotate(float x, float y) const { return {c*x - s*y, s*x + c*y}; }
+
+        void sample(int i, cv::Point2f &p, cv::Point2f &normal) const
         {
-            cv::Mat mask;
-            cv::compare(contrast, threshold, mask, cv::CMP_GE);
-            cv::bitwise_and(mask, eligible, mask);
-            // Disconnect thin cables/shadow edges, but retain tiny distant marks.
-            if (diameter >= 12.0f)
-                cv::morphologyEx(mask, mask, cv::MORPH_OPEN, cleanup);
-            cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, cleanup);
+            static const std::array<cv::Point2f, kSamples> unit = [] {
+                std::array<cv::Point2f, kSamples> points;
+                for (int j = 0; j < kSamples; ++j)
+                    points[j] = {float(std::cos(j * 2 * CV_PI / kSamples)),
+                                 float(std::sin(j * 2 * CV_PI / kSamples))};
+                return points;
+            }();
+            p = center + rotate(a * unit[i].x, b * unit[i].y);
+            normal = rotate(unit[i].x / a, unit[i].y / b);
+            normal *= 1.0f / float(cv::norm(normal));
+        }
+
+        float residual(const cv::Point2f &p) const
+        {
+            const cv::Point2f d = p - center;
+            const float x = (c*d.x + s*d.y) / a, y = (-s*d.x + c*d.y) / b;
+            return (x*x + y*y - 1) / std::max(1e-6f, 2 * std::sqrt(x*x/(a*a) + y*y/(b*b)));
+        }
+    };
+
+    float pixel(const cv::Mat &image, const cv::Point2f &p)
+    {
+        const float x = bounded(p.x, 0, image.cols - 1.001f);
+        const float y = bounded(p.y, 0, image.rows - 1.001f);
+        const int ix = int(x), iy = int(y);
+        const float dx = x - ix, dy = y - iy;
+        const float *top = image.ptr<float>(iy), *bottom = image.ptr<float>(iy + 1);
+        return (1-dy) * ((1-dx)*top[ix] + dx*top[ix+1]) +
+               dy * ((1-dx)*bottom[ix] + dx*bottom[ix+1]);
+    }
+
+    bool fit(const std::vector<cv::Point2f> &points, cv::RotatedRect &ellipse)
+    {
+        if (points.size() < 5) return false;
+        ellipse = cv::fitEllipse(points);
+        return valid_ellipse(ellipse);
+    }
+
+    bool refine_edges(const cv::Mat &smooth, const cv::RotatedRect &initial,
+                      KeypointRefinementMeasurement &result)
+    {
+        if (!valid_ellipse(initial)) return false;
+        cv::RotatedRect ellipse = initial;
+        const float radius = bounded(major(initial) * 0.10f, 5.0f, 11.0f);
+        const int half_steps = cvCeil(radius / 0.25f);
+        const int columns = half_steps * 2 + 1;
+        const float step = radius / half_steps;
+        cv::Mat map_x(kSamples, columns, CV_32F), map_y(kSamples, columns, CV_32F), profiles;
+        std::vector<cv::Point2f> edges, inliers;
+        std::vector<int> indices, inlier_indices;
+        int supported = 0;
+        for (int iteration = 0; iteration < 3; ++iteration)
+        {
+            const cv::RotatedRect before = ellipse;
+            const EllipseGeometry geometry(ellipse);
+            std::array<cv::Point2f, kSamples> boundary, normals;
+            for (int i = 0; i < kSamples; ++i)
+            {
+                geometry.sample(i, boundary[i], normals[i]);
+                float *mx = map_x.ptr<float>(i), *my = map_y.ptr<float>(i);
+                for (int j = 0; j < columns; ++j)
+                {
+                    const cv::Point2f p = boundary[i] + normals[i] * ((j - half_steps) * step);
+                    mx[j] = p.x; my[j] = p.y;
+                }
+            }
+            cv::remap(smooth, profiles, map_x, map_y, cv::INTER_LINEAR, cv::BORDER_REPLICATE);
+            edges.clear(); indices.clear();
+            for (int i = 0; i < kSamples; ++i)
+            {
+                const float *row = profiles.ptr<float>(i);
+                int peak = 2;
+                float strength = -std::numeric_limits<float>::infinity();
+                for (int j = 2; j < columns - 2; ++j)
+                {
+                    const float gradient = (row[j+1] - row[j-1]) / (2*step);
+                    if (gradient > strength) { strength = gradient; peak = j; }
+                }
+                if (strength < 6 || peak <= 2 || peak >= columns - 3) continue;
+                const float left = (row[peak] - row[peak-2]) / (2*step);
+                const float right = (row[peak+2] - row[peak]) / (2*step);
+                const float denominator = left - 2*strength + right;
+                const float fraction = std::abs(denominator) > 1e-6f ?
+                    bounded(0.5f*(left-right)/denominator, -0.5f, 0.5f) : 0;
+                const cv::Point2f edge = boundary[i] + normals[i] * ((peak-half_steps+fraction)*step);
+                // Replicated image/ROI borders must never become measured edges.
+                if (edge.x < 2 || edge.y < 2 || edge.x >= smooth.cols-2 || edge.y >= smooth.rows-2) continue;
+                edges.push_back(edge); indices.push_back(i);
+            }
+            supported = int(edges.size());
+            if (supported < kSamples * 0.65f || !fit(edges, ellipse)) return false;
+            std::vector<int> fitted_indices = indices;
+            for (int trim = 0; trim < 2; ++trim)
+            {
+                const EllipseGeometry fitted(ellipse);
+                std::vector<float> errors, deviations;
+                for (const auto &p : edges) errors.push_back(fitted.residual(p));
+                const float middle = median(errors);
+                for (float error : errors) deviations.push_back(std::abs(error-middle));
+                const float limit = std::max(0.85f, 3 * 1.4826f * median(deviations));
+                inliers.clear(); inlier_indices.clear();
+                for (size_t j = 0; j < edges.size(); ++j)
+                    if (std::abs(errors[j]-middle) < limit)
+                    {
+                        inliers.push_back(edges[j]); inlier_indices.push_back(indices[j]);
+                    }
+                if (inliers.size() < kSamples * 0.55f) return false;
+                // Re-fitting an unchanged inlier set gives the same answer.
+                // Clean edges usually need just the initial fit in this pass.
+                if (inlier_indices == fitted_indices) break;
+                if (!fit(inliers, ellipse)) return false;
+                fitted_indices = inlier_indices;
+            }
+            if (cv::norm(ellipse.center-initial.center) > std::max(6.0f, major(initial)*0.32f) ||
+                minor(ellipse)/minor(initial) < 0.65f || minor(ellipse)/minor(initial) > 1.55f ||
+                major(ellipse)/major(initial) < 0.65f || major(ellipse)/major(initial) > 1.55f) return false;
+            float angle_change = std::abs(ellipse.angle-before.angle);
+            angle_change = std::min(angle_change, std::abs(180.0f-angle_change));
+            if (iteration >= 1 && cv::norm(ellipse.center-before.center) < 0.03f &&
+                std::abs(major(ellipse)-major(before)) < 0.08f &&
+                std::abs(minor(ellipse)-minor(before)) < 0.08f && angle_change < 0.1f)
+                break;
+        }
+        const EllipseGeometry geometry(ellipse);
+        float squared = 0, spread = 0;
+        for (const auto &p : inliers) squared += std::pow(geometry.residual(p), 2);
+        const float rms = std::sqrt(squared / inliers.size());
+        if (rms > std::max(1.2f, major(ellipse)*0.035f)) return false;
+        std::vector<float> differences;
+        const float contrast_offset = bounded(minor(ellipse)*0.25f, 1.0f, 3.0f);
+        for (int i : inlier_indices)
+        {
+            cv::Point2f p, normal;
+            geometry.sample(i, p, normal);
+            const auto inner = p - normal*contrast_offset, outer = p + normal*contrast_offset;
+            if (!inside(inner, smooth.size()) || !inside(outer, smooth.size())) continue;
+            const float outside = pixel(smooth, outer);
+            differences.push_back(outside - pixel(smooth, inner));
+        }
+        // Specular glare may whiten most of the interior. YOLO identifies the
+        // marker; the remaining dark-to-light OUTER rim supplies its geometry.
+        const float contrast = median(differences);
+        if (contrast < 24) return false;
+        for (int sector = 0; sector < 4; ++sector)
+        {
+            std::vector<cv::Point2f> subset;
+            for (size_t j = 0; j < inliers.size(); ++j)
+                if (inlier_indices[j] / (kSamples/4) != sector) subset.push_back(inliers[j]);
+            cv::RotatedRect alternate;
+            if (subset.size() < kSamples*0.35f || !fit(subset, alternate)) return false;
+            spread = std::max(spread, float(cv::norm(alternate.center-ellipse.center)));
+        }
+        if (spread > std::max(6.0f, major(ellipse)*0.16f)) return false;
+        result.ellipse = ellipse;
+        result.coverage = float(supported)/kSamples;
+        result.inlier_fraction = float(inliers.size())/kSamples;
+        result.edge_rms_px = rms;
+        result.contrast = contrast;
+        result.center_spread_px = spread;
+        return true;
+    }
+
+    bool stable(const KeypointRefinementMeasurement &m)
+    {
+        return m.center_spread_px <= std::max(0.9f, major(m.ellipse)*0.025f);
+    }
+
+    bool complete(const KeypointRefinementMeasurement &m)
+    {
+        return m.coverage >= 0.95f && m.inlier_fraction >= 0.95f && m.contrast >= 30 &&
+               m.edge_rms_px <= std::max(0.8f, major(m.ellipse)*0.02f);
+    }
+
+    bool consensus(const KeypointRefinementMeasurement &m,
+                   const std::vector<KeypointRefinementMeasurement> &observations)
+    {
+        if (!complete(m)) return false;
+        for (const auto &other : observations)
+            if (&other != &m && complete(other) && cv::norm(m.ellipse.center-other.ellipse.center) <= 0.65f)
+                return true;
+        return false;
+    }
+
+    bool dark_color(const cv::Mat &image, const cv::RotatedRect &ellipse)
+    {
+        const EllipseGeometry geometry(ellipse);
+        cv::Vec3f mean(0, 0, 0);
+        int count = 0;
+        for (int i = 0; i < kSamples; i += 8)
+        {
+            cv::Point2f p, normal; geometry.sample(i, p, normal);
+            p = ellipse.center + (p-ellipse.center)*0.55f;
+            if (!inside(p, image.size())) continue;
+            mean += cv::Vec3f(image.at<cv::Vec3b>(int(p.y), int(p.x))); ++count;
+        }
+        if (count < kSamples/16) return false;
+        mean *= 1.0f/count;
+        const float value = std::max({mean[0], mean[1], mean[2]});
+        const float low = std::min({mean[0], mean[1], mean[2]});
+        return value <= 100 || (value-low)*255 <= value*140;
+    }
+
+    struct Candidate { cv::RotatedRect ellipse; float score; };
+
+    float correction_limit(const cv::RotatedRect &ellipse, float expected, float radius)
+    {
+        return std::min(radius*0.8f, std::max(8.0f, major(ellipse)*0.8f + expected*0.25f));
+    }
+
+    bool belongs_to_seed(const cv::Point2f &center, size_t id, const std::vector<cv::Point2f> &seeds,
+                         const std::vector<unsigned char> &valid)
+    {
+        const float distance = cv::norm(center-seeds[id]);
+        for (size_t j = 0; j < seeds.size(); ++j)
+            if (j != id && valid[j] && cv::norm(center-seeds[j])+2 < distance*0.8f) return false;
+        return true;
+    }
+
+    std::vector<Candidate> candidates(const cv::Mat &gray, const cv::Point2f &seed,
+                                      float expected, float radius, bool quick)
+    {
+        cv::Mat mask;
+        std::vector<int> thresholds;
+        if (!quick)
+            for (int value = 70; value <= 225; value += 15) thresholds.push_back(value);
+        thresholds.push_back(cvRound(cv::threshold(gray, mask, 0, 255, cv::THRESH_BINARY_INV | cv::THRESH_OTSU)));
+        std::sort(thresholds.begin(), thresholds.end());
+        thresholds.erase(std::unique(thresholds.begin(), thresholds.end()), thresholds.end());
+        std::vector<Candidate> proposals;
+        for (int threshold : thresholds)
+        {
+            cv::threshold(gray, mask, threshold, 255, cv::THRESH_BINARY_INV);
             std::vector<std::vector<cv::Point>> contours;
             cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
             for (const auto &contour : contours)
             {
-                const double area = cv::contourArea(contour);
-                if (contour.size() < 5 || area < std::max(3.0f, expected_area * 0.08f) || area > expected_area * 4.0f)
-                    continue;
+                const float area = cv::contourArea(contour);
+                if (contour.size() < 8 || area < 8) continue;
                 const cv::Rect bounds = cv::boundingRect(contour);
-                // A clipped dark background/stripe is not a complete marker.
-                if (bounds.x <= 0 || bounds.y <= 0 || bounds.br().x >= roi.width || bounds.br().y >= roi.height)
-                    continue;
-                const cv::RotatedRect ellipse = cv::fitEllipse(contour);
-                const float major = std::max(ellipse.size.width, ellipse.size.height);
-                const float minor = std::min(ellipse.size.width, ellipse.size.height);
-                const double ellipse_area = CV_PI * major * minor * 0.25;
-                if (!std::isfinite(ellipse_area) || minor < 2.0f || major < diameter * 0.6f ||
-                    major > diameter * 1.8f || major > minor * 6.0f ||
-                    area < ellipse_area * 0.72 || area > ellipse_area * 1.15)
-                    continue;
-                // Penalize irregular contours while allowing strongly
-                // foreshortened circular stickers at any image rotation.
-                const float angle = ellipse.angle * static_cast<float>(CV_PI) / 180.0f;
-                const float cosine = std::cos(angle), sine = std::sin(angle);
-                float shape_error = 0;
-                for (const auto &pixel : contour)
-                {
-                    const cv::Point2f p = cv::Point2f(pixel) - ellipse.center;
-                    const float x = (p.x * cosine + p.y * sine) * 2 / ellipse.size.width;
-                    const float y = (-p.x * sine + p.y * cosine) * 2 / ellipse.size.height;
-                    shape_error += std::abs(std::sqrt(x * x + y * y) - 1.0f);
-                }
-                shape_error /= contour.size();
-                if (shape_error > 0.18f)
-                    continue;
-                const cv::Point2f candidate = ellipse.center + cv::Point2f(roi.x, roi.y);
-                if (!inside(candidate, image.size()))
-                    continue;
-                const float raw_distance = cv::norm(candidate - raw);
-                const float predicted_distance = cv::norm(candidate - prediction);
-                if (raw_distance > correction_limit && (!tracked || predicted_distance > correction_limit * 0.5f))
-                    continue;
-                cv::Mat filled = cv::Mat::zeros(mask.size(), CV_8U);
-                cv::drawContours(filled, std::vector<std::vector<cv::Point>>{contour}, 0, cv::Scalar(255), cv::FILLED);
-                const cv::Scalar color = cv::mean(hsv, filled);
-                // Do not accept the low-saturation antialiased rim of a bright
-                // colored object as a dark marker with a hole in its middle.
-                if (color[1] > kMarkerMaxSaturation && color[2] > kBlackMarkerMaxValue)
-                    continue;
-                const float score = std::min(4.0f, raw_distance / correction_limit) +
-                                    (tracked ? 0.7f * predicted_distance / correction_limit : 0.0f) +
-                                    0.2f * std::abs(std::log(area / expected_area)) +
-                                    0.4f * std::abs(std::log(major / diameter)) + 3.0f * shape_error;
-                if (score < best_score)
-                {
-                    best_score = score;
-                    center = candidate;
-                    selected_area = area;
-                }
+                if (bounds.x <= 0 || bounds.y <= 0 || bounds.br().x >= gray.cols || bounds.br().y >= gray.rows) continue;
+                std::vector<cv::Point2f> boundary;
+                const size_t stride = std::max(size_t(1), (contour.size()+95)/96);
+                for (size_t j = 0; j < contour.size(); j += stride) boundary.emplace_back(contour[j]);
+                const cv::RotatedRect ellipse = cv::fitEllipse(boundary);
+                if (!valid_ellipse(ellipse) || major(ellipse) > expected*3.5f) continue;
+                const float ellipse_area = float(CV_PI)*ellipse.size.area()*0.25f;
+                if (area < ellipse_area*0.65f || area > ellipse_area*1.2f) continue;
+                const float distance = cv::norm(ellipse.center-seed);
+                const float limit = correction_limit(ellipse, expected, radius);
+                if (distance > limit) continue;
+                const EllipseGeometry geometry(ellipse);
+                float squared = 0;
+                for (const auto &p : boundary) squared += std::pow(geometry.residual(p), 2);
+                const float rms = std::sqrt(squared/boundary.size());
+                if (rms > std::max(1.2f, major(ellipse)*0.04f)) continue;
+                const float score = distance + rms*3 + 0.5f*std::abs(std::log(major(ellipse)/expected));
+                proposals.push_back({ellipse, score});
             }
         }
-        return std::isfinite(best_score);
+        std::sort(proposals.begin(), proposals.end(), [](const Candidate &a, const Candidate &b) { return a.score < b.score; });
+        std::vector<Candidate> distinct;
+        for (const auto &proposal : proposals)
+        {
+            bool duplicate = false;
+            for (const auto &old : distinct)
+            {
+                const float distance = cv::norm(proposal.ellipse.center-old.ellipse.center);
+                if (distance < 0.1f && std::abs(major(proposal.ellipse)-major(old.ellipse)) < 0.3f &&
+                    std::abs(minor(proposal.ellipse)-minor(old.ellipse)) < 0.3f) duplicate = true;
+            }
+            // A reflective/curved sticker can have several misleading inner
+            // contours with similar centers. Preserve different axis estimates
+            // so its complete outer boundary remains available for consensus.
+            if (!duplicate) distinct.push_back(proposal);
+            if (distinct.size() >= 7) break;
+        }
+        return distinct;
+    }
+
+    std::vector<Candidate> arc_candidates(const cv::Mat &gray, const cv::Point2f &seed,
+                                          float expected, float radius)
+    {
+        // A glare patch or image boundary can cut the silhouette with a straight
+        // chord. Fit its remaining arcs instead of requiring a closed ellipse.
+        // This bounded fallback supplies initial shapes only; every proposal
+        // must still pass the normal-gradient checks in the current image.
+        cv::Mat mask;
+        const int otsu = cvRound(cv::threshold(gray, mask, 0, 255, cv::THRESH_BINARY_INV | cv::THRESH_OTSU));
+        std::vector<Candidate> proposals;
+        std::vector<cv::Rect> seen;
+        cv::RNG random(0x5eed1234);
+        int attempted = 0;
+        for (int threshold : {otsu, std::max(20, otsu-25), std::min(235, otsu+25)})
+        {
+            cv::threshold(gray, mask, threshold, 255, cv::THRESH_BINARY_INV);
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+            std::sort(contours.begin(), contours.end(), [&](const std::vector<cv::Point> &a, const std::vector<cv::Point> &b) {
+                const auto ra = cv::boundingRect(a), rb = cv::boundingRect(b);
+                return cv::norm(cv::Point2f(ra.x+ra.width*0.5f, ra.y+ra.height*0.5f)-seed) <
+                       cv::norm(cv::Point2f(rb.x+rb.width*0.5f, rb.y+rb.height*0.5f)-seed);
+            });
+            for (const auto &contour : contours)
+            {
+                if (contour.size() < 18 || cv::contourArea(contour) < 16) continue;
+                const cv::Rect bounds = cv::boundingRect(contour);
+                if (bounds.width < 4 || bounds.height < 4 ||
+                    std::min(bounds.width, bounds.height) > expected*3.5f) continue;
+                bool duplicate = false;
+                for (const auto &old : seen)
+                    if (cv::norm(old.tl()-bounds.tl()) < 3 && cv::norm(old.br()-bounds.br()) < 3) duplicate = true;
+                if (duplicate) continue;
+                seen.push_back(bounds);
+                std::vector<cv::Point2f> arc;
+                const size_t stride = std::max(size_t(1), contour.size()/128);
+                for (size_t j = 0; j < contour.size(); j += stride)
+                {
+                    const auto &p = contour[j];
+                    if (p.x > 1 && p.y > 1 && p.x < gray.cols-2 && p.y < gray.rows-2) arc.emplace_back(p);
+                }
+                if (arc.size() < 18) continue;
+                std::vector<cv::Point2f> best_inliers;
+                float best_score = -std::numeric_limits<float>::infinity();
+                for (int attempt = 0; attempt < 64; ++attempt)
+                {
+                    std::vector<cv::Point2f> sample;
+                    std::array<int, 6> ids;
+                    for (int j = 0; j < 6; ++j)
+                    {
+                        int id;
+                        do { id = random.uniform(0, int(arc.size())); }
+                        while (std::find(ids.begin(), ids.begin()+j, id) != ids.begin()+j);
+                        ids[j] = id; sample.push_back(arc[id]);
+                    }
+                    cv::RotatedRect ellipse;
+                    if (!fit(sample, ellipse) || major(ellipse) > expected*3.5f ||
+                        cv::norm(ellipse.center-seed) > correction_limit(ellipse, expected, radius)) continue;
+                    const EllipseGeometry geometry(ellipse);
+                    std::vector<cv::Point2f> inliers;
+                    float error = 0;
+                    for (const auto &p : arc)
+                    {
+                        const float residual = std::abs(geometry.residual(p));
+                        if (residual < 1.25f) { inliers.push_back(p); error += residual; }
+                    }
+                    if (inliers.size() < arc.size()*0.55f) continue;
+                    const float score = inliers.size() - error*0.2f;
+                    if (score > best_score) { best_score = score; best_inliers = std::move(inliers); }
+                }
+                cv::RotatedRect ellipse;
+                if (fit(best_inliers, ellipse) && major(ellipse) <= expected*3.5f &&
+                    cv::norm(ellipse.center-seed) <= correction_limit(ellipse, expected, radius))
+                    proposals.push_back({ellipse, float(cv::norm(ellipse.center-seed))/radius});
+                if (++attempted >= 3) return proposals;
+            }
+        }
+        return proposals;
     }
 }
 
 void KeypointRefiner::reset()
 {
-    previous_gray_.release();
-    previous_points_.clear();
-    previous_valid_.clear();
-    marker_areas_.clear();
-    rejected_frames_.clear();
-    pending_points_.clear();
-    previous_size_ = {};
-    previous_box_ = {};
-    previous_timestamp_ = 0;
+    measurements_.clear();
     stats_ = {};
 }
 
 void KeypointRefiner::refine(const cv::Mat &image, std::vector<keypoint> &points,
-                            const cv::Rect2f &box, uint64_t timestamp_ms)
+                            const cv::Rect2f &box, uint64_t /*timestamp_ms*/)
 {
     stats_ = {};
-    if (image.empty() || image.type() != CV_8UC3 || points.empty() || box.width <= 0 || box.height <= 0)
+    if (image.empty() || image.type() != CV_8UC3 || points.empty() ||
+        !std::isfinite(box.x) || !std::isfinite(box.y) || !std::isfinite(box.width) ||
+        !std::isfinite(box.height) || box.width <= 0 || box.height <= 0)
     {
         reset();
+        measurements_.resize(points.size());
         return;
     }
-    const float scale = std::min(1.0f, 960.0f / image.cols);
-    cv::Mat gray, reduced;
-    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-    cv::resize(gray, reduced, cv::Size(), scale, scale, cv::INTER_AREA);
-    const bool gap = previous_timestamp_ &&
-                     (timestamp_ms <= previous_timestamp_ || timestamp_ms - previous_timestamp_ > 500);
-    const float box_ratio = previous_box_.width > 0 ? box.width / previous_box_.width : 1.0f;
-    const cv::Point2f box_center = box.tl() + cv::Point2f(box.width, box.height) * 0.5f;
-    const cv::Point2f old_center = previous_box_.tl() + cv::Point2f(previous_box_.width, previous_box_.height) * 0.5f;
-    const bool new_target = previous_box_.width > 0 &&
-                            (box_ratio < 0.4f || box_ratio > 2.5f ||
-                             cv::norm(box_center - old_center) > std::max(100.0f, box.width * 0.65f));
-    if (gap || new_target || image.size() != previous_size_ || previous_points_.size() != points.size())
-        reset();
-    const float dt = previous_timestamp_ && timestamp_ms > previous_timestamp_ ?
-                     bounded((timestamp_ms - previous_timestamp_) / 1000.0f, 1.0f / 120, 0.2f) : 1.0f / 30;
-    const bool have_history = !previous_gray_.empty();
-    if (!have_history)
+    measurements_.assign(points.size(), {});
+    std::vector<cv::Point2f> seeds;
+    std::vector<unsigned char> valid;
+    for (auto &point : points)
     {
-        previous_points_.resize(points.size());
-        previous_valid_.assign(points.size(), 0);
-        marker_areas_.assign(points.size(), 0);
-        rejected_frames_.assign(points.size(), 0);
-        pending_points_.resize(points.size());
+        // Non-finite high-confidence coordinates must not leak into solvePnP.
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.conf))
+            point = keypoint();
+        seeds.emplace_back(point.x, point.y);
+        valid.push_back(std::isfinite(point.conf) && point.conf >= kMinConfidence && inside(seeds.back(), image.size()));
     }
-    std::vector<cv::Point2f> predictions(points.size());
-    std::vector<unsigned char> prediction_valid(points.size(), 0), input_valid(points.size(), 0);
+    const float expected = bounded(std::max(box.width, box.height)*0.045f, 8.0f, 180.0f);
+    std::vector<unsigned char> ambiguous(points.size(), 0);
     for (size_t i = 0; i < points.size(); ++i)
-        input_valid[i] = std::isfinite(points[i].conf) && points[i].conf >= 0.5f &&
-                         inside(cv::Point2f(points[i].x, points[i].y), image.size());
-
-    if (have_history)
     {
-        std::vector<cv::Point2f> before, forward, backward;
-        std::vector<size_t> ids;
-        for (size_t i = 0; i < points.size(); ++i)
-            if (previous_valid_[i] && input_valid[i])
-            {
-                before.push_back(previous_points_[i] * scale);
-                ids.push_back(i);
-            }
-        if (!before.empty())
+        if (!valid[i]) continue;
+        for (float expansion : {1.6f, 2.8f})
         {
-            std::vector<unsigned char> forward_status, backward_status;
-            std::vector<float> forward_error, backward_error;
-            const cv::TermCriteria stop(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 20, 0.01);
-            cv::calcOpticalFlowPyrLK(previous_gray_, reduced, before, forward, forward_status,
-                                    forward_error, cv::Size(21, 21), 3, stop);
-            for (size_t j = 0; j < forward.size(); ++j)
-                if (!forward_status[j] || !inside(forward[j], reduced.size()))
+            const float radius = bounded(expected*expansion, 18.0f, 260.0f);
+            const cv::Rect roi = cv::Rect(cvFloor(seeds[i].x-radius), cvFloor(seeds[i].y-radius),
+                cvCeil(radius*2+1), cvCeil(radius*2+1)) & cv::Rect(0, 0, image.cols, image.rows);
+            if (roi.width < 10 || roi.height < 10) continue;
+            const cv::Point2f origin(roi.x, roi.y), local_seed = seeds[i]-origin;
+            cv::Mat gray, smooth, contour_gray;
+            cv::cvtColor(image(roi), gray, cv::COLOR_BGR2GRAY);
+            gray.convertTo(smooth, CV_32F);
+            cv::GaussianBlur(smooth, smooth, cv::Size(5, 5), 0.8);
+            auto acceptable = [&](KeypointRefinementMeasurement &m) {
+                const cv::Point2f center = m.ellipse.center+origin;
+                return inside(center, image.size()) &&
+                    cv::norm(center-seeds[i]) <= correction_limit(m.ellipse, expected, radius) &&
+                    belongs_to_seed(center, i, seeds, valid) && dark_color(image(roi), m.ellipse);
+            };
+            cv::GaussianBlur(gray, contour_gray, cv::Size(3, 3), 0.7);
+            std::vector<KeypointRefinementMeasurement> observations;
+            auto measure_proposals = [&](const std::vector<Candidate> &proposals)
+            {
+                for (const auto &proposal : proposals)
                 {
-                    forward_status[j] = 0;
-                    forward[j] = before[j];
-                }
-            cv::calcOpticalFlowPyrLK(reduced, previous_gray_, forward, backward, backward_status,
-                                    backward_error, cv::Size(21, 21), 3, stop);
-            for (size_t j = 0; j < ids.size(); ++j)
-                if (forward_status[j] && backward_status[j] && forward_error[j] < 30 &&
-                    cv::norm(backward[j] - before[j]) / scale < 1.5f && inside(forward[j], reduced.size()))
-                {
-                    predictions[ids[j]] = forward[j] / scale;
-                    prediction_valid[ids[j]] = 1;
-                }
-        }
-
-        // Coherent whole-target movement must not be mistaken for 17 outliers.
-        std::vector<float> dx, dy;
-        for (size_t i = 0; i < points.size(); ++i)
-            if (prediction_valid[i])
-            {
-                dx.push_back(points[i].x - predictions[i].x);
-                dy.push_back(points[i].y - predictions[i].y);
-            }
-        if (dx.size() >= 6)
-        {
-            const cv::Point2f shift(median(dx), median(dy));
-            std::vector<float> deviations;
-            for (size_t i = 0; i < dx.size(); ++i)
-                deviations.push_back(cv::norm(cv::Point2f(dx[i], dy[i]) - shift));
-            if (cv::norm(shift) > std::max(10.0f, box.width * 0.012f) &&
-                median(deviations) < cv::norm(shift) * 0.5f)
-                std::fill(prediction_valid.begin(), prediction_valid.end(), 0);
-        }
-        std::vector<cv::Point2f> source, destination;
-        for (size_t i = 0; i < points.size(); ++i)
-            if (prediction_valid[i])
-            {
-                source.push_back(previous_points_[i]);
-                destination.push_back(predictions[i]);
-            }
-        if (source.size() >= 4)
-        {
-            cv::Mat inliers;
-            const cv::Mat motion = cv::estimateAffinePartial2D(source, destination, inliers,
-                                                               cv::RANSAC, 3.0, 200, 0.99);
-            if (!motion.empty() && cv::countNonZero(inliers) >= std::max(3, static_cast<int>(source.size() * 0.6)))
-                for (size_t i = 0; i < points.size(); ++i)
-                    if (!prediction_valid[i] && previous_valid_[i] && input_valid[i])
+                    if (!belongs_to_seed(proposal.ellipse.center+origin, i, seeds, valid)) continue;
+                    bool already_measured = false;
+                    for (const auto &old : observations)
+                        if (stable(old) && cv::norm(old.ellipse.center-proposal.ellipse.center) < 1) already_measured = true;
+                    if (already_measured) continue;
+                    KeypointRefinementMeasurement m;
+                    if (refine_edges(smooth, proposal.ellipse, m) && acceptable(m))
                     {
-                        const auto &p = previous_points_[i];
-                        predictions[i] = cv::Point2f(motion.at<double>(0, 0)*p.x + motion.at<double>(0, 1)*p.y + motion.at<double>(0, 2),
-                                                      motion.at<double>(1, 0)*p.x + motion.at<double>(1, 1)*p.y + motion.at<double>(1, 2));
-                        prediction_valid[i] = inside(predictions[i], image.size()) ? 2 : 0;
+                        observations.push_back(m);
+                        if (consensus(observations.back(), observations))
+                        {
+                            const bool competitor = std::any_of(proposals.begin(), proposals.end(), [&](const Candidate &other) {
+                                return cv::norm(other.ellipse.center-m.ellipse.center) > std::max(3.0f, major(m.ellipse)*0.25f) &&
+                                    other.score <= proposal.score+5 && belongs_to_seed(other.ellipse.center+origin, i, seeds, valid);
+                            });
+                            if (!competitor) break;
+                        }
                     }
+                }
+            };
+            // YOLO already localizes a small bimodal region. An Otsu proposal with
+            // strong measured support avoids exhaustive thresholds on easy markers.
+            measure_proposals(candidates(contour_gray, local_seed, expected, radius, true));
+            const bool strong = std::any_of(observations.begin(), observations.end(), [](const KeypointRefinementMeasurement &m) {
+                return stable(m) && m.coverage >= 0.95f && m.inlier_fraction >= 0.85f;
+            });
+            if (!strong) measure_proposals(candidates(contour_gray, local_seed, expected, radius, false));
+            const bool full_consensus = std::any_of(observations.begin(), observations.end(),
+                [&](const KeypointRefinementMeasurement &m) { return consensus(m, observations); });
+            if (!full_consensus && std::none_of(observations.begin(), observations.end(), stable))
+                for (const auto &proposal : arc_candidates(contour_gray, local_seed, expected, radius))
+                {
+                    if (!belongs_to_seed(proposal.ellipse.center+origin, i, seeds, valid)) continue;
+                    KeypointRefinementMeasurement m;
+                    if (refine_edges(smooth, proposal.ellipse, m) && acceptable(m)) observations.push_back(m);
+                }
+            float best_score = std::numeric_limits<float>::infinity();
+            for (auto &m : observations)
+            {
+                // A repeatable complete silhouette takes precedence over a low-
+                // residual fit to only part of a curved-surface sticker.
+                const bool agreed = consensus(m, observations);
+                if (full_consensus ? !agreed : !stable(m)) continue;
+                m.valid = true;
+                const float score = float(cv::norm(m.ellipse.center-local_seed))/correction_limit(m.ellipse, expected, radius) +
+                    m.edge_rms_px*0.2f + (1-m.inlier_fraction)*0.3f;
+                if (score < best_score) { best_score = score; measurements_[i] = m; }
+            }
+            auto &selected = measurements_[i];
+            if (!selected.valid) continue;
+            for (const auto &other : observations)
+            {
+                if (!other.valid || cv::norm(other.ellipse.center-selected.ellipse.center) < 2) continue;
+                const float score = float(cv::norm(other.ellipse.center-local_seed))/correction_limit(other.ellipse, expected, radius) +
+                    other.edge_rms_px*0.2f + (1-other.inlier_fraction)*0.3f;
+                if (score < best_score+0.12f) { selected.valid = false; ambiguous[i] = 1; break; }
+            }
+            selected.ellipse.center += origin;
+            break; // A measured or ambiguous candidate must not trigger a wider search.
         }
     }
-    const float diameter = bounded(box.width * 0.022f, 3.0f, 36.0f);
-    const float jump_limit = bounded(diameter * 0.5f, 3.0f, 12.0f);
+    // One physical ellipse cannot be assigned to two keypoint identities.
+    std::vector<unsigned char> duplicate(points.size(), 0);
+    for (size_t i = 0; i < points.size(); ++i)
+        for (size_t j = i+1; j < points.size(); ++j)
+            if (measurements_[i].valid && measurements_[j].valid &&
+                cv::norm(measurements_[i].ellipse.center-measurements_[j].ellipse.center) <
+                    std::max(1.5f, std::min(minor(measurements_[i].ellipse), minor(measurements_[j].ellipse))*0.25f))
+                duplicate[i] = duplicate[j] = 1;
     for (size_t i = 0; i < points.size(); ++i)
     {
-        auto &point = points[i];
-        if (!input_valid[i])
+        stats_.ambiguous_matches += ambiguous[i];
+        if (duplicate[i]) { measurements_[i].valid = false; ++stats_.ambiguous_matches; }
+        if (measurements_[i].valid)
         {
-            previous_valid_[i] = 0;
-            rejected_frames_[i] = 0;
-            if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.conf))
-            {
-                point.x = point.y = point.conf = 0;
-            }
-            continue;
-        }
-        const cv::Point2f raw(point.x, point.y);
-        const bool tracked = prediction_valid[i] != 0;
-        const cv::Point2f prediction = tracked ? predictions[i] : raw;
-        cv::Point2f measurement = raw;
-        float area = 0;
-        const bool localized = marker_center(image, gray, raw, prediction, tracked, diameter,
-                                             marker_areas_[i], measurement, area);
-        if (localized)
-        {
+            points[i].x = measurements_[i].ellipse.center.x;
+            points[i].y = measurements_[i].ellipse.center.y;
             ++stats_.color_matches;
         }
-        cv::Point2f filtered = measurement;
-        bool rejected = false;
-        if (tracked)
-        {
-            ++stats_.flow_matches;
-            const float innovation = cv::norm(measurement - prediction);
-            if (innovation > jump_limit)
-            {
-                rejected_frames_[i] = rejected_frames_[i] && cv::norm(measurement - pending_points_[i]) < jump_limit ?
-                                      rejected_frames_[i] + 1 : 1;
-                pending_points_[i] = measurement;
-                if (rejected_frames_[i] < 3)
-                {
-                    filtered = prediction;
-                    point.conf = std::min(point.conf, 0.74f);
-                    rejected = true;
-                    ++stats_.rejected_jumps;
-                }
-                else
-                    rejected_frames_[i] = 0;
-            }
-            else
-            {
-                rejected_frames_[i] = 0;
-                const float cutoff = 1.5f + std::min(8.0f, innovation * 0.3f);
-                float gain = prediction_valid[i] == 2 ? 0.7f :
-                             1.0f - std::exp(-2.0f * static_cast<float>(CV_PI) * cutoff * dt);
-                // A visible marker is stronger evidence than an off-center flow
-                // prediction. Keep the existing smoothing for network-only input.
-                if (localized)
-                    gain = std::max(gain, 0.65f);
-                filtered = prediction + (measurement - prediction) * gain;
-            }
-        }
-        else
-            rejected_frames_[i] = 0;
-        if (localized && !rejected)
-            marker_areas_[i] = marker_areas_[i] > 0 ? 0.8f * marker_areas_[i] + 0.2f * area : area;
-        point.x = filtered.x;
-        point.y = filtered.y;
-        previous_points_[i] = filtered;
-        previous_valid_[i] = 1;
+        else if (valid[i]) ++stats_.unrefined;
     }
-    previous_gray_ = reduced;
-    previous_size_ = image.size();
-    previous_box_ = box;
-    previous_timestamp_ = timestamp_ms;
 }
 }
 }

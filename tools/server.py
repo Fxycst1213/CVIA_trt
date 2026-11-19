@@ -150,7 +150,8 @@ def receive_frame(sock, mode, stop=None):
 class LatestFrames:
     """One raw slot and one rendered snapshot, irrespective of viewer speed."""
 
-    def __init__(self):
+    def __init__(self, keypoints_only=False):
+        self.keypoints_only = keypoints_only
         self.condition = threading.Condition()
         self.frame = None
         self.sequence = 0
@@ -200,6 +201,7 @@ class LatestFrames:
             frame = self.rendered_frame
             age = (time.monotonic() - frame.arrived) * 1000 if frame else None
             return {"connected": self.connected, "received": self.received,
+                    "keypoints_only": self.keypoints_only,
                     "rendered": self.rendered, "skipped": self.replaced,
                     "receive_fps": round(self.receive_fps, 1) if self.connected else 0,
                     "age_ms": round(age) if age is not None else None,
@@ -281,7 +283,8 @@ def projection_calibration(calibration, width, height):
     # 固定使用文件顶部的左目 K、DIST，忽略 TCP 传来的标定参数。
     return scale_camera_matrix(K, SRC_W, SRC_H, width, height), DIST
 
-def draw_result_image(image, points, pose, pnp_valid=None, pnp_rvec=(), pnp_tvec=(), calibration=None):
+def draw_result_image(image, points, pose, pnp_valid=None, pnp_rvec=(), pnp_tvec=(), calibration=None,
+                      keypoints_only=False):
     h, w = image.shape[:2]
     if points and points[-1] > 0:
         cv2.rectangle(image, (int(points[-5]), int(points[-4])),
@@ -289,22 +292,28 @@ def draw_result_image(image, points, pose, pnp_valid=None, pnp_rvec=(), pnp_tvec
         for i in range(NUM_KEYPOINTS):
             x, y, confidence = points[i * 3:i * 3 + 3]
             if confidence >= 0.5 and 0 <= x < w and 0 <= y < h:
-                point = (int(x), int(y))
-                cv2.circle(image, point, 4, (0, 255, 0), -1)
-                cv2.putText(image, str(i + 1), (point[0] + 5, point[1] - 4),
+                point = (round(x), round(y))
+                cv2.circle(image, (round(x * 16), round(y * 16)), 4 * 16, (0, 255, 0), -1,
+                           lineType=cv2.LINE_AA, shift=4)
+                label = f"{i}: {confidence:.2f}" if keypoints_only else str(i + 1)
+                cv2.putText(image, label, (point[0] + 5, point[1] - 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
-        camera, distortion = projection_calibration(calibration, w, h)
-        position = get_pixel_location(*(pnp_tvec if pnp_valid else pose[3:]), camera, distortion)
-        if 0 <= position[0] < w and 0 <= position[1] < h:
-            cv2.circle(image, position, 6, (0, 0, 255), -1)
-        if pnp_valid:
-            cv2.drawFrameAxes(image, camera, distortion, np.asarray(pnp_rvec, dtype=np.float64),
-                              np.asarray(pnp_tvec, dtype=np.float64), 200, 2)
-    lines = ["Filtered XYZ mm: " + "  ".join(f"{v:.1f}" for v in pose[3:]),
-             "Predicted XYZ mm: " + "  ".join(f"{v:.1f}" for v in pose[:3])]
+        if not keypoints_only:
+            camera, distortion = projection_calibration(calibration, w, h)
+            position = get_pixel_location(*(pnp_tvec if pnp_valid else pose[3:]), camera, distortion)
+            if 0 <= position[0] < w and 0 <= position[1] < h:
+                cv2.circle(image, position, 6, (0, 0, 255), -1)
+            if pnp_valid:
+                cv2.drawFrameAxes(image, camera, distortion, np.asarray(pnp_rvec, dtype=np.float64),
+                                  np.asarray(pnp_tvec, dtype=np.float64), 200, 2)
+    if keypoints_only:
+        lines = [f"2D keypoints 0..{NUM_KEYPOINTS - 1} | YOLO confidence >= 0.50"]
+    else:
+        lines = ["Filtered XYZ mm: " + "  ".join(f"{v:.1f}" for v in pose[3:]),
+                 "Predicted XYZ mm: " + "  ".join(f"{v:.1f}" for v in pose[:3])]
     if points and points[-1] <= 0:
         lines.append("No target detected")
-    if pnp_valid is not None:
+    if not keypoints_only and pnp_valid is not None:
         lines.append("PnP OK" if pnp_valid else "PnP invalid: no fresh 6D pose")
     if calibration:
         lines.append("Camera: " + calibration["eye"].upper())
@@ -325,8 +334,9 @@ table{border-collapse:collapse;width:100%;max-width:1000px;margin:20px 0;font-va
 th,td{padding:12px;border-bottom:1px solid #3a4554;text-align:right}
 th:first-child{text-align:left}thead{color:#adb8c6}.coordinates{overflow-x:auto}
 #coordinate-state{color:#f5cb80}td{min-width:85px}
-</style><h2>位姿解算实时预览</h2>
-<p>绿点及编号：检测关键点；红点：输出位置投影。位置单位为毫米。</p>
+</style><h2 id="page-title">位姿解算实时预览</h2>
+<p id="point-description">绿点及编号：检测关键点；红点：输出位置投影。位置单位为毫米。</p>
+<section id="pose-panel">
 <div class="coordinates"><table aria-label="相机与机械臂基底坐标">
 <thead><tr><th scope="col">坐标系 / 数据</th><th scope="col">X (mm)</th><th scope="col">Y (mm)</th><th scope="col">Z (mm)</th></tr></thead>
 <tbody>
@@ -336,6 +346,7 @@ th:first-child{text-align:left}thead{color:#adb8c6}.coordinates{overflow-x:auto}
 </tbody></table></div>
 <p>基底坐标由同帧的滤波/补偿位置乘以工程中的外参矩阵得到。</p>
 <p id="coordinate-state" role="status">等待坐标数据…</p>
+</section>
 <img id="image" alt="等待图像连接…"><pre id="status">等待数据…</pre>
 <script>
 const image=document.getElementById('image'), status=document.getElementById('status');
@@ -346,6 +357,15 @@ function showXYZ(prefix,values){
   });
 }
 function showCoordinates(s,live){
+  if(s.keypoints_only!==undefined){
+    document.getElementById('pose-panel').hidden=s.keypoints_only;
+    document.title=document.getElementById('page-title').textContent=s.keypoints_only?
+      '2D 关键点实时预览':'位姿解算实时预览';
+    document.getElementById('point-description').textContent=s.keypoints_only?
+      '绿点：2D 关键点；编号从 0 开始，后面为 YOLO 检测置信度，不是精修精度；显示阈值为 0.50。':
+      '绿点及编号：检测关键点；红点：输出位置投影。位置单位为毫米。';
+  }
+  if(s.keypoints_only) return;
   showXYZ('camera',live?s.camera_xyz_mm:null);
   showXYZ('filtered',live && s.robot_base_valid!==false?s.filtered_xyz_mm:null);
   showXYZ('base',live?s.robot_base_xyz_mm:null);
@@ -379,7 +399,7 @@ async function updateStatus(){
       '\\n接收帧率: '+s.receive_fps+' FPS  已接收: '+s.received+'  已绘制: '+s.rendered+
       '\\n画面距本机收到该帧: '+(s.age_ms===null?'—':s.age_ms+' ms')+
       '\\n源时间戳: '+s.timestamp+
-      '\\n预测位置 XYZ (mm): '+JSON.stringify(s.predicted_xyz_mm);
+      (s.keypoints_only?'':'\\n预测位置 XYZ (mm): '+JSON.stringify(s.predicted_xyz_mm));
   } catch(error) { status.textContent='预览服务未连接'; showCoordinates({},false); }
   setTimeout(updateStatus,200);
 }
@@ -430,6 +450,8 @@ def main():
     parser.add_argument("--web-host", default="127.0.0.1")
     parser.add_argument("--web-port", type=int, default=8080, help="0 disables browser preview")
     parser.add_argument("--no-display", action="store_true", help="Do not open an OpenCV window")
+    parser.add_argument("--2d-only", dest="keypoints_only", action="store_true",
+                        help="Show received 2D keypoints without pose overlays; use trt --2d-only")
     parser.add_argument("--render-fps", type=float, default=20)
     parser.add_argument("--video-width", type=int, default=0, help="RTSP maximum width; 0 preserves source resolution")
     parser.add_argument("--web-width", type=int, default=1280, help="Browser snapshot maximum width; 0 preserves source resolution")
@@ -441,12 +463,14 @@ def main():
     parser.add_argument("--pose-target", help="Ground station IPv4 for UDP JSON telemetry")
     parser.add_argument("--pose-port", type=int, default=9000)
     args = parser.parse_args()
+    if args.keypoints_only and args.pose_target:
+        parser.error("--2d-only does not send pose telemetry")
     if not 0 < args.render_fps <= 120 or not 1 <= args.port <= 65535 or not 0 <= args.web_port <= 65535:
         parser.error("Invalid port or render FPS")
     if not 0 <= args.video_width <= 8192 or not 0 <= args.web_width <= 8192:
         parser.error("Invalid output width")
     display = not args.no_display and (os.name == "nt" or bool(os.environ.get("DISPLAY")))
-    frames, stop = LatestFrames(), threading.Event()
+    frames, stop = LatestFrames(keypoints_only=args.keypoints_only), threading.Event()
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     http = None
     csv_file = None
@@ -499,7 +523,8 @@ def main():
                             last_camera = frame.camera
                             print("[camera] " + json.dumps(last_camera), flush=True)
                         image = draw_result_image(image, frame.keypoints, frame.pose,
-                                                  frame.pnp_valid, frame.pnp_rvec, frame.pnp_tvec, frame.camera)
+                                                  frame.pnp_valid, frame.pnp_rvec, frame.pnp_tvec, frame.camera,
+                                                  keypoints_only=args.keypoints_only)
                         if publisher:
                             # The RTSP worker owns its own latest-frame slot; it never blocks reception/rendering.
                             video = image

@@ -49,7 +49,6 @@ struct tcp_params//TCP 通信参数
     int SOCKETSEND_SIZE = 0;
     int jpeg_width = 0;  // 0: original size; keypoints follow the JPEG dimensions.
     int jpeg_quality = 50;
-    int max_fps = 30;
     int send_timeout_ms = 250;
 };
 

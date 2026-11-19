@@ -43,10 +43,11 @@ int main(int argc, char const *argv[])
             {
                 std::cout << "Usage: ./trt [--preview] [--tcp-ip IPv4] [--tcp-port PORT]\n"
                              "             [--jpeg-width WIDTH] [--jpeg-quality 1..100]\n"
-                             "             [--stream-fps 1..120] [--extended-pose] [--calibrated-pose]\n"
-                             "             [--coordinate-frames]\n"
+                             "             [--extended-pose] [--calibrated-pose]\n"
+                             "             [--coordinate-frames] [--2d-only]\n"
                              "             [--camera-eye right|left] [--no-serial] [--verbose]\n"
                              "--preview: send a 1280px-wide preview to 127.0.0.1:1234.\n"
+                             "--2d-only: 2D keypoints; skip PnP, LSTM and serial output.\n"
                              "--coordinate-frames: include camera calibration and robot-base XYZ (IHB).\n"
                              "--jpeg-width 0: original image size. Inference always uses full size.\n";
                 return 0;
@@ -64,6 +65,12 @@ int main(int argc, char const *argv[])
             }
             if (arg == "--no-serial")
             {
+                p_params.enable_serial = false;
+                continue;
+            }
+            if (arg == "--2d-only")
+            {
+                params.keypoints_only = true;
                 p_params.enable_serial = false;
                 continue;
             }
@@ -98,15 +105,13 @@ int main(int argc, char const *argv[])
                 if (arg == "--tcp-port") p_params.port = number;
                 else if (arg == "--jpeg-width") p_params.t_params.jpeg_width = number;
                 else if (arg == "--jpeg-quality") p_params.t_params.jpeg_quality = number;
-                else if (arg == "--stream-fps") p_params.t_params.max_fps = number;
                 else throw std::invalid_argument("Unknown option: " + arg);
             }
         }
         if (p_params.port < 1 || p_params.port > 65535 ||
             (p_params.camera_eye != "left" && p_params.camera_eye != "right") ||
             p_params.t_params.jpeg_width < 0 || p_params.t_params.jpeg_width > 8192 ||
-            p_params.t_params.jpeg_quality < 1 || p_params.t_params.jpeg_quality > 100 ||
-            p_params.t_params.max_fps < 1 || p_params.t_params.max_fps > 120)
+            p_params.t_params.jpeg_quality < 1 || p_params.t_params.jpeg_quality > 100)
             throw std::invalid_argument("Preview option outside supported range");
         in_addr address{};
         if (inet_pton(AF_INET, p_params.ip.c_str(), &address) != 1)
@@ -117,6 +122,8 @@ int main(int argc, char const *argv[])
         std::cerr << error.what() << "; see ./trt --help\n";
         return EXIT_FAILURE;
     }
+    if (params.keypoints_only)
+        p_params.socket_mode = 0; // Image/keypoint packets do not need camera or 3D calibration.
     auto level = p_params.verbose ? logger::Level::VERB : logger::Level::WARN;
     // // 根据worker中的task类型进行推理
     prj_v8detector prj(onnxPath, level, params, p_params);

@@ -56,6 +56,7 @@ namespace model
         task_type task = POSE;
         size_t ws_size = WORKSPACESIZE;
         precision prec = FP32;
+        bool keypoints_only = false; // 2D detections without pose estimation or LSTM.
     };
 
     /* 构建一个针对trt的shared pointer. 所有的trt指针的释放都是通过ptr->destroy完成*/

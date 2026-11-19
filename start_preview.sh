@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-    printf '用法：./start_preview.sh [trt 参数，例如 --stream-fps 20]\n'
+    printf '用法：./start_preview.sh [trt 参数，例如 --jpeg-quality 70]\n'
     printf '启动网页接收与相机推理，关闭串口输出；Ctrl+C 停止本脚本启动的进程。\n'
     printf '本机浏览器：http://127.0.0.1:8080（需保持 SSH 端口转发）\n'
     exit 0

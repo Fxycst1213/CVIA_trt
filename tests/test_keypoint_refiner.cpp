@@ -2,6 +2,7 @@
 #include <opencv2/imgproc.hpp>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 
@@ -48,6 +49,135 @@ namespace
     {
         return cv::norm(cv::Point2f(point.x, point.y) - truth);
     }
+
+    cv::Mat ellipse_image(const cv::RotatedRect &ellipse)
+    {
+        // Supersampling avoids using the refiner's own fit as ground truth.
+        // The center is known before rendering, including fractional pixels.
+        constexpr int scale = 4;
+        cv::Mat high(480*scale, 640*scale, CV_8UC3, cv::Scalar(225, 225, 225));
+        cv::RotatedRect enlarged = ellipse;
+        enlarged.center = (ellipse.center + cv::Point2f(0.5f, 0.5f))*scale - cv::Point2f(0.5f, 0.5f);
+        enlarged.size.width *= scale; enlarged.size.height *= scale;
+        cv::ellipse(high, enlarged, cv::Scalar(30, 30, 30), cv::FILLED, cv::LINE_AA);
+        cv::Mat result;
+        cv::resize(high, result, cv::Size(640, 480), 0, 0, cv::INTER_AREA);
+        cv::GaussianBlur(result, result, cv::Size(3, 3), 0.6);
+        return result;
+    }
+
+    void ellipse_cases()
+    {
+        const cv::Rect2f box(10, 10, 620, 460);
+        KeypointRefiner refiner;
+        double max_error = 0;
+        for (const auto &axes : {cv::Size2f(18, 10), cv::Size2f(55, 12), cv::Size2f(80, 45)})
+            for (float angle : {0.0f, 23.0f, 67.0f, 123.0f, 171.0f})
+            {
+                const cv::RotatedRect e({310.35f, 220.65f}, axes, angle);
+                const auto image = ellipse_image(e);
+                const float phi = angle*CV_PI/180;
+                // Start inside, on the rim and outside the short-axis rim.
+                for (float offset : {0.0f, axes.height*0.5f, axes.height*0.5f+7.0f})
+                {
+                    const cv::Point2f raw = e.center + cv::Point2f(-std::sin(phi), std::cos(phi))*offset;
+                    std::vector<keypoint> points{{raw.x, raw.y, 0.93f}};
+                    refiner.refine(image, points, box, 0);
+                    if (!refiner.measurements()[0].valid)
+                        std::cerr << "Missed axes=" << axes << " angle=" << angle << " offset=" << offset << '\n';
+                    require(refiner.measurements()[0].valid, "Subpixel ellipse was missed from an inside/rim/outside YOLO seed");
+                    const float error = distance(points[0], e.center);
+                    max_error = std::max(max_error, double(error));
+                    require(error < 0.5f, "Rotated ellipse subpixel center error exceeds 0.5 px");
+                    require(points[0].conf == 0.93f, "Refinement changed network confidence");
+                }
+            }
+        std::cout << "PASS 45 rotated/subpixel/inside/rim/outside cases; max center error=" << max_error << " px\n";
+
+        const cv::RotatedRect e({310.35f, 220.65f}, {80, 48}, 0);
+        auto clean = ellipse_image(e);
+        auto glare = clean.clone();
+        cv::circle(glare, {303, 215}, 9, cv::Scalar(255, 255, 255), -1, cv::LINE_AA);
+        std::vector<keypoint> points{{e.center.x+8, e.center.y-5, 0.95f}};
+        refiner.refine(glare, points, box, 33);
+        require(refiner.measurements()[0].valid && distance(points[0], e.center) < 0.5f,
+                "Interior glare moved the ellipse center");
+
+        auto broad_glare = clean.clone();
+        cv::ellipse(broad_glare, {310, 221}, {28, 16}, 0, 0, 360, cv::Scalar::all(255), -1, cv::LINE_AA);
+        points = {{e.center.x+8, e.center.y-5, 0.95f}};
+        refiner.refine(broad_glare, points, box, 0);
+        require(refiner.measurements()[0].valid && distance(points[0], e.center) < 0.5f,
+                "Broad interior glare was rejected despite a visible dark outer rim");
+
+        auto missing_arc = clean.clone();
+        cv::rectangle(missing_arc, {336, 180}, {365, 260}, cv::Scalar(225, 225, 225), -1);
+        points = {{e.center.x+8, e.center.y-5, 0.95f}};
+        refiner.reset(); // Recovery must also work on the first, unordered photo.
+        refiner.refine(missing_arc, points, box, 0);
+        if (!refiner.measurements()[0].valid || distance(points[0], e.center) >= 0.8f)
+        {
+            const auto &m = refiner.measurements()[0];
+            std::cerr << "Missing arc valid=" << m.valid << " center=" << cv::Point2f(points[0].x, points[0].y)
+                      << " coverage=" << m.coverage << " inliers=" << m.inlier_fraction
+                      << " rms=" << m.edge_rms_px << " spread=" << m.center_spread_px << '\n';
+        }
+        require(refiner.measurements()[0].valid && distance(points[0], e.center) < 0.8f,
+                "Visible arcs did not recover an ellipse with a missing/glared rim");
+        std::cout << "PASS internal glare and a missing outer arc, without previous frames\n";
+
+        const cv::RotatedRect clipped({20.35f, 220.65f}, {70, 40}, 0);
+        points = {{24, 218, 0.95f}};
+        refiner.refine(ellipse_image(clipped), points, box, 0);
+        require(refiner.measurements()[0].valid && distance(points[0], clipped.center) < 0.8f,
+                "Image-border partial ellipse was not recovered from its visible arc");
+        std::cout << "PASS visible-arc fitting at the image boundary\n";
+
+        auto hidden = clean.clone();
+        cv::rectangle(hidden, {280, 180}, {360, 260}, cv::Scalar(225, 225, 225), -1);
+        points = {{e.center.x+8, e.center.y-5, 0.95f}};
+        const auto raw = points;
+        refiner.refine(hidden, points, box, 66);
+        require(!refiner.measurements()[0].valid && distance(points[0], {raw[0].x, raw[0].y}) == 0,
+                "Insufficient arc support produced a fabricated center");
+        points = {{e.center.x-3, e.center.y, 0.95f}, {e.center.x+3, e.center.y, 0.95f}};
+        refiner.refine(clean, points, box, 99);
+        require(refiner.stats().color_matches == 0 && refiner.stats().ambiguous_matches == 2,
+                "Two keypoint identities were assigned to the same marker");
+        std::cout << "PASS insufficient evidence and duplicate identity rejection\n";
+
+        cv::Mat competing(480, 640, CV_8UC3, cv::Scalar::all(225));
+        cv::ellipse(competing, {290, 220}, {15, 10}, 0, 0, 360, cv::Scalar::all(30), -1, cv::LINE_AA);
+        cv::ellipse(competing, {332, 220}, {15, 10}, 0, 0, 360, cv::Scalar::all(30), -1, cv::LINE_AA);
+        points = {{311, 220, 0.95f}};
+        refiner.refine(competing, points, box, 0);
+        require(!refiner.measurements()[0].valid && points[0].x == 311 && points[0].y == 220,
+                "Equally plausible neighboring markers were not treated as ambiguous");
+        std::cout << "PASS ambiguous neighboring-marker rejection\n";
+
+        points = {{std::numeric_limits<float>::quiet_NaN(), 220, 0.95f},
+                  {310, 220, std::numeric_limits<float>::infinity()}, {310, 220, 0.2f}};
+        refiner.refine(clean, points, box, 0);
+        require(points[0].conf == 0 && std::isfinite(points[0].x) && points[1].conf == 0 && points[2].conf == 0.2f,
+                "Non-finite input was not sanitized, or weak network confidence was promoted");
+        require(refiner.stats().color_matches == 0, "Invalid/low-confidence points were refined");
+        refiner.refine(cv::Mat(), points, box, 0);
+        require(refiner.measurements().size() == points.size() && refiner.stats().color_matches == 0,
+                "Invalid image kept stale measurements");
+        std::cout << "PASS invalid image, non-finite coordinates and confidence handling\n";
+
+        // Arbitrary frame order and timestamps must not change the answer.
+        points = {{e.center.x+8, e.center.y-5, 0.95f}};
+        refiner.refine(clean, points, box, 3000);
+        const auto first = points;
+        std::vector<keypoint> unrelated{{100, 100, 0.9f}};
+        refiner.refine(cv::Mat(480, 640, CV_8UC3, cv::Scalar::all(255)), unrelated, box, 8000);
+        points = {{e.center.x+8, e.center.y-5, 0.95f}};
+        refiner.refine(clean, points, box, 1);
+        require(distance(points[0], {first[0].x, first[0].y}) == 0,
+                "Result depends on frame order or timestamps");
+        std::cout << "PASS unordered-photo and timestamp independence\n";
+    }
 }
 
 int main()
@@ -55,6 +185,7 @@ int main()
     try
     {
         cv::setNumThreads(2);
+        ellipse_cases();
         std::mt19937 random(42);
         const cv::Rect2f box(20, 20, 500, 260);
         const auto truth = centers();
@@ -167,31 +298,23 @@ int main()
         std::cout << "PASS real motion: mean horizontal error=" << lag / (35*NUM_KEYPOINTS) << " px\n";
 
         refiner.reset();
-        double fallback_error = 0, signed_lag = 0;
-        int measured = 0;
         for (int t = 1; t <= 60; ++t)
         {
             auto moving_truth = centers(t * 2.0f);
             auto points = observations(moving_truth, random);
-            // Bright red provides optical-flow texture without passing the dark mask.
+            const auto raw = points;
+            // Non-marker texture must not turn an optical-flow prediction into
+            // a measured center, even after many consecutive frames.
             refiner.refine(image(moving_truth, cv::Scalar(15, 15, 210)), points,
                            cv::Rect2f(20+t*2, 20, 500, 260), t*33);
             require(refiner.stats().color_matches == 0, "Fallback test unexpectedly used dark segmentation");
-            if (t > 10)
-                for (int i = 0; i < NUM_KEYPOINTS; ++i)
-                {
-                    fallback_error += distance(points[i], moving_truth[i]);
-                    signed_lag += points[i].x - moving_truth[i].x;
-                    ++measured;
-                }
+            for (int i = 0; i < NUM_KEYPOINTS; ++i)
+                require(distance(points[i], {raw[i].x, raw[i].y}) == 0 && !refiner.measurements()[i].valid,
+                        "Unobservable marker was replaced by a predicted center");
         }
-        require(fallback_error / measured < 1.8, "Temporal filtering without color matching is too noisy");
-        require(std::abs(signed_lag / measured) < 0.75, "Temporal filtering lags real motion without color matching");
-        std::cout << "PASS motion without dark segmentation: mean error=" << fallback_error / measured
-                  << ", signed horizontal lag=" << signed_lag / measured << " px\n";
+        std::cout << "PASS unobservable markers preserve YOLO input without temporal substitutes\n";
 
         refiner.reset();
-        int rejected = 0;
         for (int t = 1; t <= 25; ++t)
         {
             auto points = observations(truth, random, 0.3f);
@@ -200,12 +323,11 @@ int main()
             refiner.refine(frame, points, box, t*33);
             if (t == 15)
             {
-                require(distance(points[0], truth[0]) < 3, "Isolated outlier was not suppressed");
-                rejected = refiner.stats().rejected_jumps;
+                require(!refiner.measurements()[0].valid && distance(points[0], truth[0]) > 30,
+                        "A distant small marker was filled from stale history");
             }
         }
-        require(rejected > 0, "Outlier rejection was not exercised");
-        std::cout << "PASS isolated 40-pixel neural-network outlier\n";
+        std::cout << "PASS out-of-search observations are not silently replaced by history\n";
 
         auto jumped_truth = centers(70);
         auto jumped = observations(jumped_truth, random, 0.1f);

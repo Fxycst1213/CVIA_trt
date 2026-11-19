@@ -191,6 +191,13 @@ namespace model
             m_result.resize(6, 0.0f);
             uart_result.resize(3,0.0f);
 
+            if (params.keypoints_only)
+            {
+                uart_result.clear();
+                LOGW("2D-only mode: PnP and LSTM are disabled.");
+                return;
+            }
+
             //  一飞院
             // _K = (cv::Mat_<double>(3, 3) << 1067.33054757922, 0.0, 949.935792304770,
             //       0.0, 1067.37400981335, 525.523361276358,
@@ -212,6 +219,8 @@ namespace model
                     -388.164682, 1116.515352, 88.559047, // 4: right wing, middle
                     -268.51011, 419.768867, 103.807179, // 5: right wing, inner
                     -337.448481, -413.907372, 150.899049, // 6: left wing, inner
+                    -519.734637, -1087.041527, 203.050124, // 7: left wing, outer
+                    340.730021, -13.814498, 47.352457,
                     -519.734637, -1087.041527, 203.050124, // 7: left wing, outer
                     340.730021, -13.814498, 47.352457); // 8: nose
 
@@ -351,7 +360,7 @@ namespace model
                 m_raw_keypoints = m_bboxes[0].keypoints;
 
             m_frame_counter++;
-            //点精修
+            // 2D 点精修：直接修改后续发送的 m_bboxes，不依赖 PnP 是否启用。
             if (!m_bboxes.empty())
                 refine_keypoints(m_bboxes[0].keypoints, timestamp);
             else
@@ -381,8 +390,9 @@ namespace model
                 uart_result.clear();
             }
             
-            LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
-                uart_result[0], uart_result[1], uart_result[2]);
+            if (uart_result.size() >= 3)
+                LOG("\t wxj: x:%.4f, y:%.4f, z:%.4f",
+                    uart_result[0], uart_result[1], uart_result[2]);
 
             m_timer->stop_cpu<timer::Timer::ms>("postprocess(CPU)");
             m_timer->show();

@@ -15,14 +15,15 @@ prj_v8detector::prj_v8detector(string onnxPath, logger::Level level, model::Para
 {
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
-    if (p_params.t_params.max_fps < 1 || p_params.t_params.max_fps > 120)
-        throw std::invalid_argument("TCP max_fps must be between 1 and 120");
+    _loop_images = params.keypoints_only;
     _worker = thread::create_worker(onnxPath, level, params);
     _timer = make_shared<timer::Timer>(logger::Level::INFO);
-    _tcp_period = std::chrono::microseconds(1000000 / p_params.t_params.max_fps);
 
-    _zed = ZEDX::GetInstance();
-    _zed->init(p_params.cameraID, p_params.resolution, 60, false, p_params.camera_eye);
+    if (!params.keypoints_only)
+    {
+        _zed = ZEDX::GetInstance();
+        _zed->init(p_params.cameraID, p_params.resolution, 60, false, p_params.camera_eye);
+    }
     // _worker->m_pose->set_camera_calibration(_zed->calibration());
 
     preprocess::init_process(p_params.H, p_params.W);
@@ -126,7 +127,8 @@ void prj_v8detector::camera()
         _resultframe.pose_result = _worker->m_pose->m_result;
         _resultframe.rs485_result = _worker->m_pose->uart_result;
         _worker->m_pose->copy_pnp_pose(_resultframe);
-        _resultframe.calibration = _zed->calibration();
+        if (_zed)
+            _resultframe.calibration = _zed->calibration();
         // 3. 独立串口线程按 10 Hz 发送最新结果。
         // _timer->start_cpu();
         // // _rs485.sendDoubleArray(_resultframe.ose_result.data());
@@ -165,21 +167,25 @@ void prj_v8detector::camera_foldimages()
     cv::glob(folder, filenames, false);
     std::sort(filenames.begin(), filenames.end());
     // std::sort(filenames.rbegin(), filenames.rend());
-    int current_idx = 0;
+    if (filenames.empty())
+    {
+        LOGW("No preview images found: %s", folder.c_str());
+        return;
+    }
+    size_t current_idx = 0;
     while (_is_running && !stop_requested.load(std::memory_order_relaxed))
     {
+        usleep(200000); // 仅控制照片读取间隔（微秒）；设为 0 可取消，不影响 TCP/相机线程。
         auto now = std::chrono::system_clock::now();
-        auto mstart = std::chrono::high_resolution_clock::now();
         Resultframe _resultframe;
         _timer->init();
         _timer->start_cpu();
-        // usleep(200000);
         *(_writeframe->rgb_ptr) = cv::imread(filenames[current_idx]);
         _writeframe->timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-        current_idx++;
-        if (current_idx >= filenames.size())
+        if (_writeframe->rgb_ptr->empty())
         {
-            break;
+            LOGW("Cannot read preview image: %s", filenames[current_idx].c_str());
+            return;
         }
         _timer->stop_cpu<timer::Timer::ms>("ZED Grab frame");
         _resultframe.rgb = *(_writeframe->rgb_ptr);
@@ -192,7 +198,8 @@ void prj_v8detector::camera_foldimages()
         _resultframe.pose_result = _worker->m_pose->m_result;
         _resultframe.rs485_result = _worker->m_pose->uart_result;
         _worker->m_pose->copy_pnp_pose(_resultframe);
-        _resultframe.calibration = _zed->calibration();
+        if (_zed)
+            _resultframe.calibration = _zed->calibration();
         // _timer->start_cpu();
         // //
         // // std::vector<double> partial_result(_resultframe.pose_result.begin(), _resultframe.pose_result.begin() + 3);
@@ -228,6 +235,14 @@ void prj_v8detector::camera_foldimages()
         submit_tcp_frame(std::move(_resultframe));
         _timer->stop_cpu<timer::Timer::ms>("Load TCP");
         _timer->show();
+
+        if (++current_idx >= filenames.size())
+        {
+            if (!_loop_images)
+                break;
+            current_idx = 0;
+            LOGV("Restarting folder preview: %zu images", filenames.size());
+        }
     }
 }
 
@@ -246,7 +261,6 @@ void prj_v8detector::submit_tcp_frame(Resultframe frame)
 void prj_v8detector::tcp_loop()
 {
     using Clock = std::chrono::steady_clock;
-    auto next_send = Clock::now();
     auto last_report = Clock::now();
     uint64_t sent = 0, failed = 0;
     while (true)
@@ -258,8 +272,6 @@ void prj_v8detector::tcp_loop()
             // 等待条件：有数据 或者 停止运行
             _queue_cv.wait(lock, [this]
                            { return _has_pending_frame || !_is_running; });
-            // Pick the latest frame AFTER pacing; producers can replace it while we wait.
-            _queue_cv.wait_until(lock, next_send, [this] { return !_is_running; });
             if (!_is_running && !_has_pending_frame)
             {
                 break;
@@ -272,7 +284,6 @@ void prj_v8detector::tcp_loop()
             frame_to_send = std::move(_pending_frame);
             _has_pending_frame = false;
         }
-        next_send = Clock::now() + _tcp_period;
         try
         {
             if (_client.pack_and_send(frame_to_send))
@@ -345,7 +356,8 @@ prj_v8detector::~prj_v8detector()
     _is_running = false;
     _queue_cv.notify_all();
     _rs485_cv.notify_all();
-    _zed->close();
+    if (_zed)
+        _zed->close();
     delete _writeframe->rgb_ptr;
     delete _writeframe;
     preprocess::destroy_process();

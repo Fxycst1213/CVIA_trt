@@ -33,7 +33,7 @@ stop_supervisor() {
 }
 
 if [[ "${1:-}" == --help ]]; then
-    printf '用法：./start_groundstation.sh [本地接收电脑IPv4]\n'
+    printf '用法：./start_groundstation.sh [--2d-only] [本地接收电脑IPv4]\n'
     printf 'MediaMTX 在 Orin 上运行；视频发布到本机，由天空端/电脑读取 Orin 的 :8554/live。\n'
     printf '可选电脑 IP 仅用于 UDP 9000 位姿接收；不填写时只输出带位姿的视频。\n'
     printf '示例：./start_groundstation.sh 192.168.2.61\n'
@@ -52,14 +52,28 @@ fi
 
 foreground=false
 if [[ "${1:-}" == --run ]]; then foreground=true; shift; fi
-if (($# > 1)); then
-    printf '只需填写可选的位姿接收电脑 IP；RTSP 始终发布到 Orin 本机。\n' >&2
-    exit 1
-fi
-groundstation_ip="${1:-}"
+keypoints_only=false
+groundstation_ip=""
+for argument in "$@"; do
+    case "$argument" in
+        --2d-only) keypoints_only=true ;;
+        --*) printf '未知选项：%s；参见 --help。\n' "$argument" >&2; exit 1 ;;
+        *)
+            if [[ -n "$groundstation_ip" ]]; then
+                printf '只需填写一个可选的位姿接收电脑 IP。\n' >&2
+                exit 1
+            fi
+            groundstation_ip="$argument"
+            ;;
+    esac
+done
+if [[ "$keypoints_only" == true ]]; then groundstation_ip=""; fi
+# The first launch builds TensorRT engines and can take several minutes.
+startup_timeout=600
 camera_eye="${CVIA_CAMERA_EYE:-left}"
 rtsp_port="${CVIA_RTSP_PORT:-8554}"
-video_fps="${CVIA_VIDEO_FPS:-20}"
+# Rendering/RTSP encoding only; this does not limit inference or TCP sending.
+video_fps="${CVIA_VIDEO_FPS:-10}"
 video_width="${CVIA_VIDEO_WIDTH:-1920}"
 web_width="${CVIA_WEB_WIDTH:-1280}"
 web_enabled="${CVIA_WEB_ENABLE:-1}"
@@ -73,6 +87,10 @@ rtsp_url="rtsp://127.0.0.1:$rtsp_port/live"
 if [[ ! -x ./trt ]]; then printf '找不到 trt，请先运行 make。\n' >&2; exit 1; fi
 if ! trt_help="$(./trt --help 2>/dev/null)" || [[ "$trt_help" != *--coordinate-frames* ]]; then
     printf 'trt 需要重新编译，请运行：./start_groundstation.sh --stop && make -j2 && ./start_groundstation.sh 192.168.2.61\n' >&2
+    exit 1
+fi
+if [[ "$keypoints_only" == true && "$trt_help" != *--2d-only* ]]; then
+    printf 'trt 尚不支持仅 2D 模式，请先运行 make -j2。\n' >&2
     exit 1
 fi
 # Validate output settings before interrupting a working preview or the previous mode.
@@ -109,9 +127,12 @@ fi
 mediamtx_bin="$(realpath "$mediamtx_bin")"
 "$mediamtx_bin" --version >/dev/null
 mkdir -p "$log_dir"
-configuration="orin-local-v6-coordinates|$groundstation_ip|$rtsp_port|$video_fps|$video_width|$web_width|$web_enabled|$bitrate|$pose_port|$camera_eye|$mediamtx_bin"
+configuration="orin-local-v9-2d-keypoints|$keypoints_only|$groundstation_ip|$rtsp_port|$video_fps|$video_width|$web_width|$web_enabled|$bitrate|$pose_port|$camera_eye|$mediamtx_bin"
 
 print_endpoints() {
+    if [[ "$keypoints_only" == true ]]; then
+        printf '当前为仅 2D 模式：循环读取照片，显示发送端的关键点坐标；PnP、LSTM、串口关闭。\n'
+    fi
     python3 - "$groundstation_ip" "$rtsp_port" "$pose_port" "$web_enabled" <<'PY'
 import ipaddress
 import json
@@ -156,13 +177,16 @@ if [[ "$foreground" == false ]]; then
     nohup setsid bash "$script_path" --run "$@" >"$log_dir/launcher.log" 2>&1 </dev/null &
     supervisor_pid=$!
     printf '%s\n' "$supervisor_pid" > "$pid_file"
-    for ((attempt = 0; attempt < 180; attempt++)); do
+    for ((attempt = 0; attempt < (startup_timeout + 15) * 4; attempt++)); do
         if ! kill -0 "$supervisor_pid" 2>/dev/null; then
             cat "$log_dir/launcher.log" >&2
             printf '启动失败，请检查 %s。\n' "$log_dir" >&2
             exit 1
         fi
         [[ "$(cat "$startup_file")" == ready ]] && break
+        if ((attempt > 0 && attempt % 120 == 0)); then
+            printf '仍在初始化；首次生成 TensorRT engine 可能需要数分钟。日志：%s/trt.log\n' "$log_dir"
+        fi
         sleep 0.25
     done
     if [[ "$(cat "$startup_file")" != ready ]]; then
@@ -245,19 +269,22 @@ finally:
 PY
 pose_args=()
 if [[ -n "$groundstation_ip" ]]; then pose_args=(--pose-target "$groundstation_ip" --pose-port "$pose_port"); fi
+mode_args=()
+if [[ "$keypoints_only" == true ]]; then mode_args=(--2d-only); fi
 nice -n 10 python3 -u tools/server.py --host 127.0.0.1 --no-display --web-host 0.0.0.0 \
     --web-port "$web_port" \
-    --rtsp-url "$rtsp_url" "${pose_args[@]}" --video-fps "$video_fps" --render-fps "$video_fps" --bitrate "$bitrate" \
+    --rtsp-url "$rtsp_url" "${pose_args[@]}" "${mode_args[@]}" --video-fps "$video_fps" --render-fps "$video_fps" --bitrate "$bitrate" \
     --video-width "$video_width" --web-width "$web_width" \
     >"$log_dir/server.log" 2>&1 &
 child_pids+=("$!")
 ./trt --preview --coordinate-frames --camera-eye "$camera_eye" \
-    --stream-fps "$video_fps" --jpeg-width "$video_width" >"$log_dir/trt.log" 2>&1 &
+    --jpeg-width "$video_width" "${mode_args[@]}" >"$log_dir/trt.log" 2>&1 &
 child_pids+=("$!")
-for ((attempt = 0; attempt < 120; attempt++)); do
+for ((attempt = 0; attempt < startup_timeout * 4; attempt++)); do
     for child in "${child_pids[@]}"; do
         if ! kill -0 "$child" 2>/dev/null; then
             printf '推流进程退出，请检查 %s 中的日志。\n' "$log_dir" >&2
+            tail -n 15 "$log_dir/trt.log" "$log_dir/server.log" >&2
             exit 1
         fi
     done

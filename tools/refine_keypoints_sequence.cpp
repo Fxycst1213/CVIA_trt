@@ -1,5 +1,6 @@
 #include "keypoint_refiner.hpp"
 #include <opencv2/imgcodecs.hpp>
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iomanip>
@@ -28,7 +29,12 @@ int main(int argc, char **argv)
         output << line;
         for (int i = 0; i < model::pose::NUM_KEYPOINTS; ++i)
             output << ",ref_x" << i + 1 << ",ref_y" << i + 1 << ",ref_conf" << i + 1;
-        output << ",color_matches,flow_matches,rejected_jumps,refine_ms\n" << std::setprecision(9);
+        output << ",color_matches,flow_matches,rejected_jumps,refine_ms,ambiguous_matches,unrefined";
+        for (int i = 1; i <= model::pose::NUM_KEYPOINTS; ++i)
+            output << ",ref_valid" << i << ",ellipse_major" << i << ",ellipse_minor" << i
+                   << ",ellipse_angle" << i << ",coverage" << i << ",inlier_fraction" << i
+                   << ",edge_rms" << i << ",contrast" << i << ",center_spread" << i;
+        output << '\n' << std::setprecision(9);
         model::pose::KeypointRefiner refiner;
         int frames = 0;
         while (std::getline(input, line))
@@ -61,7 +67,15 @@ int main(int argc, char **argv)
                 output << ',' << point.x << ',' << point.y << ',' << point.conf;
             const auto &stats = refiner.stats();
             output << ',' << stats.color_matches << ',' << stats.flow_matches << ','
-                   << stats.rejected_jumps << ',' << ms << '\n';
+                   << stats.rejected_jumps << ',' << ms << ',' << stats.ambiguous_matches << ',' << stats.unrefined;
+            for (const auto &measurement : refiner.measurements())
+                output << ',' << measurement.valid
+                       << ',' << std::max(measurement.ellipse.size.width, measurement.ellipse.size.height)
+                       << ',' << std::min(measurement.ellipse.size.width, measurement.ellipse.size.height)
+                       << ',' << measurement.ellipse.angle << ',' << measurement.coverage
+                       << ',' << measurement.inlier_fraction << ',' << measurement.edge_rms_px
+                       << ',' << measurement.contrast << ',' << measurement.center_spread_px;
+            output << '\n';
             if (++frames % 250 == 0)
                 std::cout << "Refined " << frames << " frames\n" << std::flush;
         }
